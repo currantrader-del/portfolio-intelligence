@@ -20,6 +20,7 @@ export default async function TodayPage() {
         <div className="flex flex-wrap gap-3">
           <Link href="/research" className="min-h-11 px-4 inline-flex items-center rounded-lg bg-ink text-ground no-underline font-medium">Open research library</Link>
           <Link href="/decisions" className="min-h-11 px-4 inline-flex items-center rounded-lg border border-line-strong no-underline text-ink font-medium">Decision history</Link>
+          {!companies && <Link href="/import" className="min-h-11 px-4 inline-flex items-center rounded-lg border border-line-strong no-underline text-ink font-medium">Import research</Link>}
         </div>
       </section>
     </div>

@@ -43,6 +43,10 @@ Migrations live in `supabase/migrations`. Row-level security is on for every tab
 
 ## Importing preserved research
 
+The easiest way: sign in and open **/import**, choose the files (JSON, Markdown and the two zips), check the audit, then press Import. It runs under your own login, so no server keys are needed. Re-running it is safe.
+
+From the command line:
+
 ```bash
 # Dry run: prints the audit and writes the plan outside the repo
 npm run import:originals -- /path/to/originals --out /tmp/import-plan.json
