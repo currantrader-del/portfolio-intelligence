@@ -2,6 +2,8 @@ import { notFound } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import { Tag } from "@/components/Tag";
 import { EXTRACTION_LABEL, ORIGIN_LABEL } from "@/lib/research-labels";
+import { getWorkspace } from "@/lib/workspace";
+import { TodayValuation } from "@/components/TodayValuation";
 
 type Phase = { phase_number: number; title: string | null; extraction: string; body_markdown: string | null };
 type Version = {
@@ -21,6 +23,7 @@ export default async function CompanyPage({ params }: { params: Promise<{ symbol
     .maybeSingle();
   if (!company) notFound();
 
+  const ws = await getWorkspace();
   const versions = ([...(company.research_versions ?? [])] as unknown as Version[]).sort((a, b) => b.research_as_of.localeCompare(a.research_as_of));
 
   return (
@@ -32,6 +35,7 @@ export default async function CompanyPage({ params }: { params: Promise<{ symbol
           <p className="mt-2 text-sm text-alert-ink">These records disagree and none is marked current. A targeted refresh is needed before any advice.</p>
         )}
       </div>
+      <TodayValuation ws={ws} symbol={company.symbol} />
       {versions.map((v) => {
         const c = v.conclusion as Record<string, string | number | null>;
         return (

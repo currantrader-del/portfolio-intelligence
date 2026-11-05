@@ -16,13 +16,24 @@ Design: Concept B, "Decision Desk". It opens on a short brief and a ranked queue
 
 | Stage | Scope | Status |
 |---|---|---|
-| 1 | Foundation: schema, login (optional two-factor), research import with provenance | this branch |
-| 2 | Real data: Schwab sync, Acorns statements, quotes, freshness | next |
-| 3 | Portfolio engine: returns, attribution, look-through, limits | |
-| 4 | Decision engine: the "$1,250" workflow end to end, assistant with tools | |
-| 5 | Monitoring and alerts | |
-| 6 | Today brief | |
-| 7 | Research profiles and decision outcomes | |
+| 1 | Foundation: schema, login (optional two-factor), research import with provenance | done |
+| 2 | Real data: statements loaded, delayed quotes (Yahoo, Stooq fallback), freshness labels | done; Schwab API sync later |
+| 3 | Portfolio engine: weights, day attribution, policy buckets, ETF look-through, limits | done |
+| 4 | Decision engine: new-cash workflow, position review, assistant with tools | done |
+| 5 | Monitoring: alert rules evaluated on every load (price bands, big moves, limits, stale research) | done; scheduled push alerts later |
+| 6 | Today brief: written by code from computed numbers | done |
+| 7 | Decision log with outcomes since each decision | done; stored 30/90/365-day scores later |
+
+## How the pieces fit
+
+- `src/lib/market`: quotes and market hours (Layer 1).
+- `src/lib/research`: reads stored conclusions and re-prices them at today's price (Layer 2 to 3).
+- `src/lib/portfolio`, `src/lib/policy`: deterministic portfolio math and policy limits (Layer 3).
+- `src/lib/decision`: the new-cash and position-review engines. Every recorded decision saves a `model_runs` row with its inputs hash.
+- `src/lib/alerts`, `src/lib/brief.ts`: monitoring rules and the Today brief.
+- `src/app/api/ask`: the assistant. It can only cite numbers returned by its tools, and every answer is logged in `ai_judgments` with tokens and cost (Layer 4).
+
+Environment: `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY`, and `ANTHROPIC_API_KEY` (server only) for the assistant.
 
 ## Local setup
 

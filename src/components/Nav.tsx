@@ -13,7 +13,7 @@ const ITEMS = [
 export function Nav() {
   const path = usePathname();
   return (
-    <nav aria-label="Main" className="flex flex-wrap gap-0.5 flex-1">
+    <nav aria-label="Main" className="hidden md:flex flex-wrap gap-0.5 flex-1">
       {ITEMS.map((i) => {
         const active = i.href === "/" ? path === "/" : path.startsWith(i.href);
         return (

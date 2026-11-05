@@ -1,0 +1,135 @@
+/**
+ * Tools the assistant may call. Every number it can cite comes from one of these,
+ * and each result carries its source and timestamp.
+ */
+import type Anthropic from "@anthropic-ai/sdk";
+import type { SupabaseClient } from "@supabase/supabase-js";
+import type { Workspace } from "@/lib/workspace";
+import { getQuote } from "@/lib/market/quotes";
+import { newCapital } from "@/lib/decision/newCapital";
+import { expectedReturnAt, scenarioReturnsAt, zoneFor } from "@/lib/research/valuation";
+import { researchAgeDays } from "@/lib/research/records";
+import { LOOKTHROUGH_AS_OF } from "@/lib/portfolio/classify";
+
+export const TOOLS: Anthropic.Beta.BetaTool[] = [
+  {
+    name: "get_portfolio",
+    description: "Current holdings across all accounts with weights, today's move, contribution to the portfolio's move, cost basis, policy buckets and single-company exposure including ETF look-through. Use for any question about what is owned or how the portfolio is doing.",
+    input_schema: { type: "object", properties: {}, required: [], additionalProperties: false },
+    strict: true,
+  },
+  {
+    name: "get_research",
+    description: "The stored research conclusion for one company: action, classification, confidence, thesis, scenarios, price bands, completeness, age, and the same valuation re-priced at today's price.",
+    input_schema: { type: "object", properties: { symbol: { type: "string", description: "Ticker symbol" } }, required: ["symbol"], additionalProperties: false },
+    strict: true,
+  },
+  {
+    name: "get_research_phase",
+    description: "Full text of one research phase (1-6) for a company, for questions about the detailed reasoning. Text may be long; quote only what is relevant.",
+    input_schema: { type: "object", properties: { symbol: { type: "string" }, phase: { type: "integer", description: "1 to 6" } }, required: ["symbol", "phase"], additionalProperties: false },
+    strict: true,
+  },
+  {
+    name: "simulate_new_capital",
+    description: "Runs the deterministic new-cash decision engine for an amount in dollars: ranks held stocks by expected return at today's price against a broad ETF, applies policy limits, and returns options plus a recommendation.",
+    input_schema: { type: "object", properties: { amount: { type: "number", description: "Dollars of new cash" } }, required: ["amount"], additionalProperties: false },
+    strict: true,
+  },
+  {
+    name: "get_alerts",
+    description: "Current monitoring alerts ranked by severity (price bands, big moves, limits, stale or conflicting research, stale holdings).",
+    input_schema: { type: "object", properties: {}, required: [], additionalProperties: false },
+    strict: true,
+  },
+  {
+    name: "get_quote",
+    description: "Latest delayed quote for any ticker, including ones not held.",
+    input_schema: { type: "object", properties: { symbol: { type: "string" } }, required: ["symbol"], additionalProperties: false },
+    strict: true,
+  },
+];
+
+const r4 = (n: number | null | undefined) => (n === null || n === undefined ? null : Math.round(n * 10000) / 10000);
+
+export async function runTool(name: string, input: Record<string, unknown>, ws: Workspace, db: SupabaseClient): Promise<unknown> {
+  const p = ws.portfolio;
+  switch (name) {
+    case "get_portfolio":
+      return {
+        layer: "model_output",
+        computed_at: ws.now.toISOString(),
+        market_open: ws.marketOpen,
+        total_value: p.total,
+        cash: p.cash,
+        day_change_dollars: p.dayDollar,
+        day_change_pct: r4(p.dayPct),
+        holdings_as_of_oldest_statement: p.oldestHoldingsAsOf,
+        benchmarks: ws.benchmarks.map((b) => ({ ...b, dayPct: r4(b.dayPct) })),
+        accounts: p.accounts,
+        holdings: p.holdings.map((h) => ({
+          symbol: h.symbol, quantity: h.quantity, price: h.price, price_source: h.priceSource, price_as_of: h.priceAsOf, value: h.value,
+          weight: r4(h.weight), day_pct: r4(h.dayPct), contribution_pts: r4(h.contributionPts), cost_basis: h.costBasis, unrealized: h.unrealized,
+          bucket: h.bucket, accounts: h.accounts,
+        })),
+        buckets: p.buckets.map((b) => ({ bucket: b.bucket, weight: r4(b.weight), normal: b.normal, hard_max: b.hardMax, status: b.status })),
+        company_exposure: p.exposures.map((e) => ({ symbol: e.symbol, direct: r4(e.direct), via_etfs: r4(e.viaEtfs), total: r4(e.total), max: e.max, headroom_dollars: e.headroomDollars })),
+        lookthrough_weights_as_of: LOOKTHROUGH_AS_OF,
+      };
+    case "get_research": {
+      const sym = String(input.symbol ?? "").toUpperCase();
+      const r = ws.research.find((x) => x.symbol === sym);
+      if (!r) return { error: `No company record for ${sym}.` };
+      const v = r.current ?? r.latest;
+      const h = p.holdings.find((x) => x.symbol === sym);
+      const q = h ? null : await getQuote(sym);
+      const price = h?.price ?? q?.price ?? null;
+      return {
+        layer: "research_conclusion",
+        symbol: sym,
+        name: r.name,
+        watchlist_status: r.watchlistStatus,
+        conflict: r.conflict,
+        versions: r.versions,
+        is_current: !!r.current,
+        research_as_of: v?.research_as_of ?? null,
+        age_days: researchAgeDays(r, ws.now),
+        completeness: v?.completeness ?? null,
+        origin: v?.origin ?? null,
+        conclusion: v ? { action: v.parsed.action, classification: v.parsed.classification, confidence: v.parsed.confidence, thesis: v.parsed.thesis, reference_price: v.parsed.referencePrice, reference_date: v.parsed.referenceDate, scenarios: v.parsed.scenarios, weighted_value: v.parsed.weightedValue, horizon: v.parsed.horizonDate, price_bands: v.parsed.zones.map((z) => ({ band: z.label, action: z.action })), allocation: v.parsed.allocation } : null,
+        at_today_price: v && price ? {
+          layer: "model_output",
+          price, price_source: h?.priceSource ?? (q ? "quote" : null),
+          expected_annual_return: r4(expectedReturnAt(v.parsed, price, ws.now)),
+          scenario_annual_returns: scenarioReturnsAt(v.parsed, price, ws.now).map((s) => ({ name: s.name, probability: s.probability, annualized: r4(s.annualized) })),
+          band: zoneFor(v.parsed.zones, price)?.label ?? null,
+        } : null,
+      };
+    }
+    case "get_research_phase": {
+      const sym = String(input.symbol ?? "").toUpperCase();
+      const phase = Number(input.phase);
+      const r = ws.research.find((x) => x.symbol === sym);
+      const vid = (r?.current ?? r?.latest)?.id;
+      if (!vid) return { error: `No research for ${sym}.` };
+      const { data } = await db.from("research_phases").select("phase_number, title, extraction, body_markdown").eq("version_id", vid).eq("phase_number", phase).maybeSingle();
+      if (!data) return { error: `Phase ${phase} not stored for ${sym}.` };
+      const body = data.body_markdown ?? "";
+      return { layer: "research_conclusion", symbol: sym, phase, title: data.title, extraction: data.extraction, text: body.length > 24000 ? body.slice(0, 24000) + "\n[truncated]" : body };
+    }
+    case "simulate_new_capital": {
+      const amount = Number(input.amount);
+      if (!(amount > 0)) return { error: "amount must be positive" };
+      return { layer: "model_output", ...newCapital({ amount, portfolio: p, research: ws.research, policy: ws.policy, now: ws.now }) };
+    }
+    case "get_alerts":
+      return { layer: "model_output", computed_at: ws.now.toISOString(), alerts: ws.alerts };
+    case "get_quote": {
+      const sym = String(input.symbol ?? "").toUpperCase();
+      const q = ws.quotes.get(sym) ?? (await getQuote(sym));
+      return q ? { layer: "market_data", ...q } : { error: `No quote available for ${sym}.` };
+    }
+    default:
+      return { error: `Unknown tool ${name}` };
+  }
+}
