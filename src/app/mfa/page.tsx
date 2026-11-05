@@ -4,7 +4,7 @@ import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
 
-type Mode = { kind: "loading" } | { kind: "enroll"; factorId: string; qr: string; secret: string } | { kind: "verify"; factorId: string };
+type Mode = { kind: "loading" } | { kind: "verify"; factorId: string };
 
 export default function MfaPage() {
   const router = useRouter();
@@ -19,11 +19,10 @@ export default function MfaPage() {
       if (error) return setError("Could not load two-factor settings.");
       const verified = data.totp.find((f) => f.status === "verified");
       if (verified) return setMode({ kind: "verify", factorId: verified.id });
-      const enrolled = await supabase.auth.mfa.enroll({ factorType: "totp", friendlyName: "Authenticator app" });
-      if (enrolled.error) return setError("Could not start two-factor setup.");
-      setMode({ kind: "enroll", factorId: enrolled.data.id, qr: enrolled.data.totp.qr_code, secret: enrolled.data.totp.secret });
+      // No authenticator enrolled: two-factor is optional, so go straight in.
+      router.replace("/");
     })();
-  }, []);
+  }, [router]);
 
   async function onSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -39,14 +38,6 @@ export default function MfaPage() {
     <main className="min-h-screen grid place-items-center px-4">
       <form onSubmit={onSubmit} className="w-full max-w-sm bg-surface border border-line rounded-2xl p-8 flex flex-col gap-4">
         <h1 className="font-serif text-2xl font-semibold">Two-factor verification</h1>
-        {mode.kind === "enroll" && (
-          <>
-            <p className="text-sm text-muted">Scan this with an authenticator app, then enter the 6-digit code.</p>
-            {/* eslint-disable-next-line @next/next/no-img-element */}
-            <img src={mode.qr} alt="Two-factor setup QR code" className="w-48 h-48 self-center bg-white p-2 rounded" />
-            <p className="text-xs text-muted break-all">Or enter this key: <span className="font-mono">{mode.secret}</span></p>
-          </>
-        )}
         {mode.kind === "verify" && <p className="text-sm text-muted">Enter the 6-digit code from your authenticator app.</p>}
         {mode.kind === "loading" && !error && <p className="text-sm text-muted">Loading…</p>}
         <label className="flex flex-col gap-1 text-sm">

@@ -16,7 +16,7 @@ Design: Concept B, "Decision Desk". It opens on a short brief and a ranked queue
 
 | Stage | Scope | Status |
 |---|---|---|
-| 1 | Foundation: schema, two-factor login, research import with provenance | this branch |
+| 1 | Foundation: schema, login (optional two-factor), research import with provenance | this branch |
 | 2 | Real data: Schwab sync, Acorns statements, quotes, freshness | next |
 | 3 | Portfolio engine: returns, attribution, look-through, limits | |
 | 4 | Decision engine: the "$1,250" workflow end to end, assistant with tools | |
@@ -38,7 +38,7 @@ Checks: `npm test`, `npm run typecheck`, `npm run lint`, `npm run build`.
 
 Migrations live in `supabase/migrations`. Row-level security is on for every table.
 
-- Private tables require the row's owner **and** a two-factor session (`aal2`).
+- Private tables require the row's owner. Two-factor is optional: once an authenticator is enrolled, every session must verify it (`aal2`).
 - Market-data tables are read-only for signed-in users and are written only by server jobs.
 
 ## Importing preserved research

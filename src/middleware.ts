@@ -22,12 +22,14 @@ export async function middleware(request: NextRequest) {
 
   const { data: userData } = await supabase.auth.getUser();
   let aal: "aal1" | "aal2" | null = null;
+  let mfaEnrolled = false;
   if (userData.user) {
     const { data } = await supabase.auth.mfa.getAuthenticatorAssuranceLevel();
     aal = (data?.currentLevel as "aal1" | "aal2" | null) ?? null;
+    mfaEnrolled = data?.nextLevel === "aal2"; // a verified factor exists
   }
 
-  const result = gate(request.nextUrl.pathname, { signedIn: !!userData.user, aal });
+  const result = gate(request.nextUrl.pathname, { signedIn: !!userData.user, aal, mfaEnrolled });
   if (result.kind === "redirect") {
     const to = request.nextUrl.clone();
     to.pathname = result.to;

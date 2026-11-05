@@ -1,23 +1,30 @@
 import { describe, expect, it } from "vitest";
 import { gate } from "./auth-gate";
 
+const out = { signedIn: false, aal: null, mfaEnrolled: false } as const;
+const pw = { signedIn: true, aal: "aal1", mfaEnrolled: false } as const;
+const enrolledPw = { signedIn: true, aal: "aal1", mfaEnrolled: true } as const;
+const enrolledFull = { signedIn: true, aal: "aal2", mfaEnrolled: true } as const;
+
 describe("auth gate", () => {
   it("sends signed-out users to login", () => {
-    expect(gate("/", { signedIn: false, aal: null })).toEqual({ kind: "redirect", to: "/login" });
-    expect(gate("/research", { signedIn: false, aal: null })).toEqual({ kind: "redirect", to: "/login" });
+    expect(gate("/", out)).toEqual({ kind: "redirect", to: "/login" });
+    expect(gate("/research", out)).toEqual({ kind: "redirect", to: "/login" });
   });
   it("lets signed-out users see login", () => {
-    expect(gate("/login", { signedIn: false, aal: null })).toEqual({ kind: "allow" });
+    expect(gate("/login", out)).toEqual({ kind: "allow" });
   });
-  it("requires two-factor before any app page", () => {
-    expect(gate("/", { signedIn: true, aal: "aal1" })).toEqual({ kind: "redirect", to: "/mfa" });
-    expect(gate("/mfa", { signedIn: true, aal: "aal1" })).toEqual({ kind: "allow" });
+  it("allows a password session when no authenticator is enrolled", () => {
+    expect(gate("/portfolio", pw)).toEqual({ kind: "allow" });
+    expect(gate("/mfa", pw)).toEqual({ kind: "redirect", to: "/" });
   });
-  it("allows app pages with two-factor", () => {
-    expect(gate("/portfolio", { signedIn: true, aal: "aal2" })).toEqual({ kind: "allow" });
+  it("requires the code once an authenticator is enrolled", () => {
+    expect(gate("/", enrolledPw)).toEqual({ kind: "redirect", to: "/mfa" });
+    expect(gate("/mfa", enrolledPw)).toEqual({ kind: "allow" });
+    expect(gate("/portfolio", enrolledFull)).toEqual({ kind: "allow" });
   });
-  it("moves fully signed-in users off login and mfa", () => {
-    expect(gate("/login", { signedIn: true, aal: "aal2" })).toEqual({ kind: "redirect", to: "/" });
-    expect(gate("/mfa", { signedIn: true, aal: "aal2" })).toEqual({ kind: "redirect", to: "/" });
+  it("moves fully signed-in users off login", () => {
+    expect(gate("/login", pw)).toEqual({ kind: "redirect", to: "/" });
+    expect(gate("/login", enrolledFull)).toEqual({ kind: "redirect", to: "/" });
   });
 });

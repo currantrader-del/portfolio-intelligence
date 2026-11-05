@@ -18,14 +18,15 @@ export default function LoginPage() {
     const { error } = await createClient().auth.signInWithPassword({ email, password });
     setBusy(false);
     if (error) return setError("Sign-in failed. Check your email and password.");
-    router.replace("/mfa");
+    router.replace("/");
+    router.refresh();
   }
 
   return (
     <main className="min-h-screen grid place-items-center px-4">
       <form onSubmit={onSubmit} className="w-full max-w-sm bg-surface border border-line rounded-2xl p-8 flex flex-col gap-4">
         <h1 className="font-serif text-2xl font-semibold">Portfolio Intelligence</h1>
-        <p className="text-sm text-muted">Sign in. Two-factor verification follows.</p>
+        <p className="text-sm text-muted">Sign in to continue.</p>
         <label className="flex flex-col gap-1 text-sm">
           Email
           <input type="email" required autoComplete="username" value={email} onChange={(e) => setEmail(e.target.value)}
