@@ -59,7 +59,18 @@ Rules:
 - Do not explain a market move unless a desk item links the cause to the move; otherwise say the cause is not established.
 - Short-term outlook covers 1-20 trading days: trend, breadth, volatility, rotation, upcoming releases, positioning and sentiment where evidence exists. Long-term covers about 6-36 months: growth, policy, inflation, earnings, valuation, credit, investment cycles, structural themes, geopolitics. Assess them independently; they may disagree. State a stance and how strong the evidence is. Do not give probabilities or price targets, and do not imply direction can be predicted reliably.
 - Portfolio implications: refer to holdings by symbol. Use "action" none, monitor, research or review only. Never recommend buying, adding, selling or trimming, and never treat a price drop or room under a limit as a reason to buy. Holdings values are estimates unless the context says verified.
-- Plain, direct English. Short sentences. Headline: one sentence on the single most important thing today.`;
+- Plain, direct English. Short sentences. Headline: one sentence on the single most important thing today.
+
+Reply with exactly one JSON object in a \`\`\`json fenced block and nothing else. Shape (a Point is {"text": string, "refs": string[]}; a Scenario is {"summary": string, "conditions": string[], "signposts": string[]}):
+{
+  "headline": string,
+  "summary": Point[3-6],
+  "attention": Point[0-4],
+  "shortTerm": {"stance": "bullish"|"neutral"|"bearish"|"mixed", "evidence": "weak"|"moderate"|"strong", "drivers": Point[], "contrary": Point[], "wouldChange": string[]},
+  "longTerm": {"stance": same values, "evidence": same values, "base": Scenario, "bull": Scenario, "bear": Scenario, "contrary": Point[], "wouldChange": string[]},
+  "portfolio": [{"subject": symbol or theme, "text": string, "action": "none"|"monitor"|"research"|"review", "refs": string[]}],
+  "gaps": string[]
+}`;
 }
 
 export function synthesisPrompt(ctx: { now: Date; snapshot: Snapshot; desks: DeskResult[]; portfolio: PortfolioContext }) {

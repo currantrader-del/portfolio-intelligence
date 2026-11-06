@@ -1,7 +1,7 @@
 import "server-only";
 import Anthropic from "@anthropic-ai/sdk";
 import { collectSearchPages, deskPrompt, deskSystem, DESK_VERSION, DESKS, extractJson, validateDesk, type DeskKey, type DeskResult } from "./desks";
-import { SYNTHESIS_SCHEMA, SYNTHESIS_VERSION, synthesisPrompt, synthesisSystem, validateSynthesis, type PortfolioContext, type Synthesis } from "./synthesis";
+import { SYNTHESIS_VERSION, synthesisPrompt, synthesisSystem, validateSynthesis, type PortfolioContext, type Synthesis } from "./synthesis";
 import type { Snapshot } from "./snapshot";
 
 /** Desks: Sonnet with web search at low effort (fast, cited). Synthesis: Sonnet at medium effort, no tools. */
@@ -28,7 +28,9 @@ export async function runDesk(key: DeskKey, ctx: { now: Date; snapshot: Snapshot
       model: DESK_MODEL,
       max_tokens: 8000,
       system: deskSystem(),
-      tools: [{ type: "web_search_20260209", name: "web_search", max_uses: 5 }],
+      // Basic search: results arrive as plain search-result blocks the model reads directly. The dynamic-filtering
+      // version ran searches inside code and the desks reported failed searches on the preview (2026-11-06).
+      tools: [{ type: "web_search_20250305", name: "web_search", max_uses: 6 }],
       output_config: { effort: "low" },
       betas: ["server-side-fallback-2026-07-01"],
       fallbacks: "default",
@@ -46,6 +48,9 @@ export async function runDesk(key: DeskKey, ctx: { now: Date; snapshot: Snapshot
     }
     messages.push({ role: "assistant", content: res.content });
   }
+  for (const b of content as unknown as { type: string; content?: { type?: string; error_code?: string } }[]) {
+    if (b.type === "web_search_tool_result" && b.content?.type === "web_search_tool_result_error") problems.push(`A search failed (${b.content.error_code ?? "unknown error"})`);
+  }
   const pages = collectSearchPages(content);
   const text = content.filter((b): b is Anthropic.Beta.BetaTextBlock => b.type === "text").map((b) => b.text).join("");
   const v = validateDesk(extractJson(text), pages, ctx.now);
@@ -60,9 +65,11 @@ export async function runSynthesis(ctx: { now: Date; snapshot: Snapshot; desks: 
   const client = new Anthropic();
   const res = await client.beta.messages.create({
     model: SYNTH_MODEL,
-    max_tokens: 12000,
+    max_tokens: 10000,
     system: synthesisSystem(),
-    output_config: { effort: "medium", format: { type: "json_schema", schema: SYNTHESIS_SCHEMA } },
+    // No strict output schema: the API rejected this schema as too large to compile. The reply is a JSON
+    // block that validateSynthesis checks and repairs field by field.
+    output_config: { effort: "low" },
     betas: ["server-side-fallback-2026-07-01"],
     fallbacks: "default",
     messages: [{ role: "user", content: synthesisPrompt(ctx) }],

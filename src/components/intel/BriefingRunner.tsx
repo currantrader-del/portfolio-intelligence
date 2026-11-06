@@ -23,12 +23,35 @@ export function BriefingRunner({ auto, label = "Generate briefing" }: { auto: bo
   const [steps, setSteps] = useState<Step[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const started = useRef(false);
+  // When only the last step failed, it can be retried without paying for the research again.
+  const [retrySnap, setRetrySnap] = useState<string | null>(null);
   const set = (key: string, patch: Partial<Step>) => setSteps((s) => s?.map((x) => (x.key === key ? { ...x, ...patch } : x)) ?? null);
+
+  async function synthesize(snapshotId: string) {
+    set("synth", { state: "run", note: undefined });
+    try {
+      const out = await call({ action: "synthesize", snapshotId });
+      set("synth", { state: "done", note: `about $${Number(out.costUsd).toFixed(2)} for this briefing` });
+      setRetrySnap(null);
+      router.refresh();
+    } catch (e) {
+      setRetrySnap(snapshotId);
+      throw e;
+    }
+  }
+
+  async function retry() {
+    if (started.current || !retrySnap) return;
+    started.current = true;
+    setError(null);
+    try { await synthesize(retrySnap); } catch (e) { setError((e as Error).message); set("synth", { state: "fail" }); } finally { started.current = false; }
+  }
 
   async function run() {
     if (started.current) return;
     started.current = true;
     setError(null);
+    setRetrySnap(null);
     setSteps([{ key: "snap", label: "Market and macro data", state: "run" }, ...DESKS.map((d) => ({ ...d, state: "wait" as const })), { key: "synth", label: "Outlooks and portfolio implications", state: "wait" }]);
     try {
       const snap = await call({ action: "start" });
@@ -44,10 +67,7 @@ export function BriefingRunner({ auto, label = "Generate briefing" }: { auto: bo
         }
       }));
       if (results.every((r) => r.status === "rejected")) throw new Error("No research desk finished, so there is nothing to synthesize.");
-      set("synth", { state: "run" });
-      const out = await call({ action: "synthesize", snapshotId: snap.snapshotId });
-      set("synth", { state: "done", note: `about $${Number(out.costUsd).toFixed(2)} for this briefing` });
-      router.refresh();
+      await synthesize(snap.snapshotId);
     } catch (e) {
       setError((e as Error).message);
       setSteps((s) => s?.map((x) => (x.state === "run" ? { ...x, state: "fail" } : x)) ?? null);
@@ -75,7 +95,10 @@ export function BriefingRunner({ auto, label = "Generate briefing" }: { auto: bo
         </ul>
       )}
       {error && <p role="alert" className="t-sm rounded-[12px] bg-warn-bg text-warn-ink px-3 py-2">{error}</p>}
-      <button type="button" className="btn self-start" disabled={busy} onClick={() => void run()}>{busy ? "Working… about a minute" : label}</button>
+      <div className="flex flex-wrap gap-2">
+        {retrySnap && !busy && <button type="button" className="btn" onClick={() => void retry()}>Retry the outlooks only</button>}
+        <button type="button" className="btn" disabled={busy} onClick={() => void run()}>{busy ? "Working… about a minute" : label}</button>
+      </div>
     </div>
   );
 }

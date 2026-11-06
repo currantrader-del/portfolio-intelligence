@@ -179,15 +179,25 @@ async function fetchSeries(symbol: string): Promise<Series | null> {
   }
 }
 
-async function fetchFred(id: string): Promise<{ date: string; value: number }[] | null> {
+/** FRED observations. With FRED_API_KEY set it uses the official API; otherwise the public CSV download. Failures carry a reason. */
+async function fetchFred(id: string): Promise<{ obs: { date: string; value: number }[] | null; error?: string }> {
+  const start = new Date(Date.now() - 800 * 86400000).toISOString().slice(0, 10);
+  const key = process.env.FRED_API_KEY;
   try {
-    const start = new Date(Date.now() - 800 * 86400000).toISOString().slice(0, 10);
-    const res = await fetch(`https://fred.stlouisfed.org/graph/fredgraph.csv?id=${id}&cosd=${start}`, { headers: { "User-Agent": UA }, next: { revalidate: 3600 }, signal: AbortSignal.timeout(8000) });
-    if (!res.ok) return null;
-    const obs = parseFredCsv(await res.text());
-    return obs.length ? obs : null;
-  } catch {
-    return null;
+    if (key) {
+      const res = await fetch(`https://api.stlouisfed.org/fred/series/observations?series_id=${id}&observation_start=${start}&file_type=json&api_key=${encodeURIComponent(key)}`, { cache: "no-store", signal: AbortSignal.timeout(12000) });
+      if (!res.ok) return { obs: null, error: `FRED API HTTP ${res.status}` };
+      const j = (await res.json()) as { observations?: { date: string; value: string }[] };
+      const obs = (j.observations ?? []).map((o) => ({ date: o.date, value: Number(o.value) })).filter((o) => Number.isFinite(o.value));
+      return obs.length ? { obs } : { obs: null, error: "FRED API returned no observations" };
+    }
+    const res = await fetch(`https://fred.stlouisfed.org/graph/fredgraph.csv?id=${id}&cosd=${start}`, { headers: { "User-Agent": UA, Accept: "text/csv" }, cache: "no-store", signal: AbortSignal.timeout(12000) });
+    if (!res.ok) return { obs: null, error: `FRED CSV HTTP ${res.status}` };
+    const text = await res.text();
+    const obs = parseFredCsv(text);
+    return obs.length ? { obs } : { obs: null, error: `FRED CSV had no rows (starts "${text.slice(0, 40).replace(/\s+/g, " ")}")` };
+  } catch (e) {
+    return { obs: null, error: (e as Error).name === "TimeoutError" ? "FRED request timed out" : `FRED request failed: ${(e as Error).message.slice(0, 80)}` };
   }
 }
 
@@ -196,9 +206,12 @@ export async function takeSnapshot(now = new Date()): Promise<Snapshot> {
     Promise.all(INSTRUMENTS.map(async (i) => [i.symbol, await fetchSeries(i.symbol)] as const)),
     Promise.all(MACRO.map(async (m) => [m.id, await fetchFred(m.id)] as const)),
   ]);
-  return buildSnapshot(
+  const snap = buildSnapshot(
     new Map(series.filter((x): x is readonly [string, Series] => x[1] !== null)),
-    new Map(macro.filter((x): x is readonly [string, { date: string; value: number }[]] => x[1] !== null)),
+    new Map(macro.flatMap(([id, r]) => (r.obs ? [[id, r.obs] as const] : []))),
     now,
   );
+  const reasons = [...new Set(macro.flatMap(([, r]) => (r.error ? [r.error] : [])))];
+  if (reasons.length) snap.notes.push(`Macro data problems: ${reasons.join("; ")}.`);
+  return snap;
 }
