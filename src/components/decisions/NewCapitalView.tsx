@@ -124,7 +124,7 @@ export function NewCapitalView({ ws, amount, source, action }: { ws: Workspace; 
             <ul className="t-sm flex flex-col gap-1">
               <li className="flex justify-between gap-3"><span>ETF expected return</span><span className="num text-ink">{pctStr(r.assumptions.etfExpectedReturn)} <span className="t-xs">· {r.assumptions.etfSource}</span></span></li>
               <li className="flex justify-between gap-3"><span>Hurdle over the ETF</span><span className="num text-ink">{pctStr(r.assumptions.hurdlePoints, 0)} <span className="t-xs">· {r.assumptions.hurdleSource}</span></span></li>
-              <li className="flex justify-between gap-3"><span>Investable capital</span><span className="num text-ink">{usd(ws.portfolio.total)} <span className="t-xs">· {ws.portfolio.quality.status}</span></span></li>
+              <li className="flex justify-between gap-3"><span>Investable capital</span><span className="num text-ink">{usd(ws.portfolio.total)} <span className="t-xs">· {ws.portfolio.quality.status}, {ws.portfolio.quality.reconciliation.label.toLowerCase()}</span></span></li>
             </ul>
             {!r.assumptions.approved && <DataLabel kind="placeholder">Placeholders in use</DataLabel>}
             <Link href="/policy" className="t-sm">Set your own on the Policy page</Link>

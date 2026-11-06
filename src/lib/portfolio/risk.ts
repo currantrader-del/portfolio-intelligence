@@ -6,13 +6,15 @@
 import type { History } from "@/lib/market/history";
 import { isEtf, LOOKTHROUGH } from "@/lib/portfolio/classify";
 
-export const RISK_VERSION = "risk@1";
+export const RISK_VERSION = "risk@2";
 const TD = 252;
 
 export type Position = { symbol: string; quantity: number; value: number };
 export type Point = { date: string; value: number };
 export type HoldingRisk = { symbol: string; weight: number; vol: number | null; beta: number | null; betaQqq: number | null; betaSemis: number | null; ret: number | null; maxDrawdown: number | null; historyDays: number; partial: boolean };
-export type Scenario = { key: string; name: string; basis: string; dollars: number; pct: number; lines: { symbol: string; move: number; dollars: number }[] };
+export type Scenario = { key: string; name: string; basis: string; dollars: number; pct: number; lines: { symbol: string; move: number; dollars: number }[]; notShocked: { symbol: string; value: number }[] };
+/** How the prices behind the history were built: total return (adjusted) or price only. */
+export type PriceBasis = { adjusted: string[]; priceOnly: string[]; providers: string[]; mixed: boolean };
 export type RiskReport = {
   asOf: string | null;
   start: string | null;
@@ -24,6 +26,7 @@ export type RiskReport = {
   scenarios: Scenario[];
   missing: string[];
   partial: string[];
+  priceBasis: PriceBasis;
   codeVersion: string;
 };
 
@@ -73,6 +76,18 @@ export function worstWindow(values: number[], dates: string[], len = 21): { ret:
     if (!worst || r < worst.ret) worst = { ret: r, from: dates[i - len], to: dates[i] };
   }
   return worst;
+}
+
+/** Which symbols are total-return (adjusted closes) and which are price only, and whether they mix. */
+export function priceBasis(histories: Map<string, History>, symbols: string[]): PriceBasis {
+  const adjusted: string[] = [], priceOnly: string[] = [], providers = new Set<string>();
+  for (const s of new Set(symbols)) {
+    const h = histories.get(s);
+    if (!h) continue;
+    providers.add(h.provider);
+    (h.adjusted ? adjusted : priceOnly).push(s);
+  }
+  return { adjusted, priceOnly, providers: [...providers], mixed: adjusted.length > 0 && priceOnly.length > 0 };
 }
 
 const clampMove = (m: number) => Math.max(-0.95, Math.min(1, m));
@@ -135,19 +150,24 @@ export function buildRisk(args: { positions: Position[]; cash: number; investabl
   const hw = holdings.map((h) => h.weight).filter((x) => x > 0);
   const hhi = hw.reduce((s, x) => s + x * x, 0);
 
-  const scenario = (key: string, name: string, basis: string, moveOf: (h: HoldingRisk) => number): Scenario => {
-    const lines = holdings.map((h) => {
+  // A holding without a measured beta is not shocked with an assumed one; it is listed instead.
+  const scenario = (key: string, name: string, basis: string, moveOf: (h: HoldingRisk) => number | null): Scenario => {
+    const notShocked: { symbol: string; value: number }[] = [];
+    const lines = holdings.flatMap((h) => {
       const p = positions.find((x) => x.symbol === h.symbol)!;
-      const move = clampMove(moveOf(h));
-      return { symbol: h.symbol, move, dollars: p.value * move };
+      const m = moveOf(h);
+      if (m === null) { notShocked.push({ symbol: h.symbol, value: p.value }); return []; }
+      const move = clampMove(m);
+      return [{ symbol: h.symbol, move, dollars: p.value * move }];
     }).filter((l) => Math.abs(l.dollars) >= 0.5).sort((a, b) => a.dollars - b.dollars);
     const dollars = lines.reduce((s, l) => s + l.dollars, 0);
-    return { key, name, basis, dollars, pct: investable ? dollars / investable : 0, lines };
+    const gap = notShocked.length ? ` Not included (no measured beta): ${notShocked.map((x) => x.symbol).join(", ")}.` : "";
+    return { key, name, basis: basis + gap, dollars, pct: investable ? dollars / investable : 0, lines, notShocked };
   };
   const scenarios: Scenario[] = [
-    scenario("spy20", "S&P 500 falls 20%", "Each holding moves by its 1-year beta to the S&P 500 (SPY). Holdings without enough history are assumed to move with the market.", (h) => (h.beta ?? 1) * -0.2),
-    scenario("qqq30", "Nasdaq 100 falls 30%", "Each holding moves by its 1-year beta to the Nasdaq 100 (QQQ).", (h) => (h.betaQqq ?? 1) * -0.3),
-    scenario("semis35", "Semiconductors fall 35%", "Each holding moves by its 1-year beta to semiconductor stocks (SOXX). Beta is a rough guide for non-chip companies.", (h) => (h.betaSemis ?? 0.8) * -0.35),
+    scenario("spy20", "S&P 500 falls 20%", "Each holding moves by its measured beta to the S&P 500 (SPY) over the chosen range.", (h) => (h.beta === null ? null : h.beta * -0.2)),
+    scenario("qqq30", "Nasdaq 100 falls 30%", "Each holding moves by its measured beta to the Nasdaq 100 (QQQ) over the chosen range.", (h) => (h.betaQqq === null ? null : h.betaQqq * -0.3)),
+    scenario("semis35", "Semiconductors fall 35%", "Each holding moves by its measured beta to semiconductor stocks (SOXX). Beta is a rough guide for non-chip companies.", (h) => (h.betaSemis === null ? null : h.betaSemis * -0.35)),
   ];
   const largestStock = w.find((x) => !isEtf(x.symbol) && positions.some((p) => p.symbol === x.symbol));
   if (largestStock) {
@@ -156,7 +176,7 @@ export function buildRisk(args: { positions: Position[]; cash: number; investabl
   }
   const ww = worstWindow(vals, dates);
   if (ww) {
-    scenarios.push({ key: "worstmonth", name: "Repeat of the worst month in the past year", basis: `Today's holdings lost ${(Math.abs(ww.ret) * 100).toFixed(1)}% from ${ww.from} to ${ww.to} at the prices of that time.`, dollars: ww.ret * (vals[vals.length - 1] ?? 0), pct: investable ? (ww.ret * (vals[vals.length - 1] ?? 0)) / investable : 0, lines: [] });
+    scenarios.push({ key: "worstmonth", name: "Repeat of the worst 21 trading days in the range", basis: `Today's holdings lost ${(Math.abs(ww.ret) * 100).toFixed(1)}% from ${ww.from} to ${ww.to} at the prices of that time.${missing.length ? ` Held flat: ${missing.join(", ")}.` : ""}`, dollars: ww.ret * (vals[vals.length - 1] ?? 0), pct: investable ? (ww.ret * (vals[vals.length - 1] ?? 0)) / investable : 0, lines: [], notShocked: [] });
   }
 
   return {
@@ -180,6 +200,7 @@ export function buildRisk(args: { positions: Position[]; cash: number; investabl
     scenarios,
     missing,
     partial,
+    priceBasis: priceBasis(histories, [...positions.map((p) => p.symbol), "SPY"]),
     codeVersion: RISK_VERSION,
   };
 }

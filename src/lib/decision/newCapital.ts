@@ -231,8 +231,11 @@ export function newCapital(args: {
   const limitIssues = stockOptions.filter((o) => receiving.includes(o.symbol) && o.limitStatus !== "approved").map((o) => o.symbol);
   const conflicts = audit?.conflicts.map((c) => c.subject) ?? [];
   const gates: Gate[] = [
-    { key: "holdings", label: "Holdings are current", ok: oldest <= HOLDINGS_FRESH_DAYS && !gaps.length,
-      detail: oldest <= HOLDINGS_FRESH_DAYS ? (gaps.length ? `Statement totals do not add up for ${gaps.map((a) => a.name).join(", ")}` : "All accounts updated within a week") : `Oldest statement is ${oldest} days old. Confirm holdings or record trades since then` },
+    { key: "holdings", label: "Holdings are current", ok: oldest <= HOLDINGS_FRESH_DAYS && !gaps.length && portfolio.quality.reconciliation.complete,
+      detail: oldest > HOLDINGS_FRESH_DAYS ? `Oldest statement is ${oldest} days old. Confirm holdings or record trades since then`
+        : gaps.length ? `Statement totals do not add up for ${gaps.map((a) => a.name).join(", ")}`
+        : !portfolio.quality.reconciliation.complete ? `Not reconciled: ${portfolio.quality.reconciliation.gaps.join("; ")}`
+        : "All accounts updated within a week and reconciled" },
     { key: "cash", label: "Cash and savings are known", ok: portfolio.cashDetail.savings !== null && (source === "new" || amount <= portfolio.cashDetail.deployable),
       detail: portfolio.cashDetail.savings === null ? "Enter your savings balance so the protected reserve and deployable cash are known"
         : source === "existing" && amount > portfolio.cashDetail.deployable ? `Only $${portfolio.cashDetail.deployable.toLocaleString()} is deployable after the protected reserve` : `Deployable cash $${portfolio.cashDetail.deployable.toLocaleString()}` },

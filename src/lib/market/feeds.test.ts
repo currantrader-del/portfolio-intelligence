@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { classifyFiling } from "@/lib/market/filingClass";
 import { estimateNextEarnings, factsFromConcept, findCik, padCik, parseSubmissions, summariseFacts } from "./sec";
 import { decode, parseRss } from "./news";
 
@@ -33,7 +34,7 @@ describe("SEC parsing", () => {
   });
 
   it("estimates the next report about a quarter after the last one", () => {
-    const last = { form: "8-K", filed: "2026-08-01", reportDate: null, description: "", items: ["2.02"], isEarnings: true, url: "" };
+    const last = { form: "8-K", filed: "2026-08-01", reportDate: null, description: "", items: ["2.02"], isEarnings: true, url: "", ...classifyFiling("8-K", ["2.02"]) };
     expect(estimateNextEarnings(last, new Date("2026-08-15"))).toBe("2026-10-31");
     expect(estimateNextEarnings(last, new Date("2026-11-20"))).toBe("2027-01-30");
     expect(estimateNextEarnings(null)).toBeNull();

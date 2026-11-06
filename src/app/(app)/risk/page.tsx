@@ -40,7 +40,9 @@ export default async function RiskPage({ searchParams }: { searchParams: Promise
   const top = exps[0];
   const others = exps.slice(1, 7);
   const name = (sym: string) => ws.research.find((r) => r.symbol === sym)?.name ?? null;
-  const provider = histories.get("SPY")?.provider === "stooq" ? "Stooq" : "Yahoo";
+  const pb = risk.priceBasis;
+  const provider = pb.providers.length ? pb.providers.map((x) => (x === "stooq" ? "Stooq" : "Yahoo")).join(" and ") : "no provider";
+  const basisNote = pb.priceOnly.length === 0 ? "Adjusted closes (dividends and splits included), so returns are total return." : pb.adjusted.length === 0 ? "Unadjusted closes: price only, dividends not included." : `Mixed: total return for ${pb.adjusted.length} symbols, price only for ${pb.priceOnly.join(", ")}. Returns are not fully comparable.`;
 
   return (
     <div className="flex flex-col gap-3 lg:gap-4">
@@ -61,7 +63,7 @@ export default async function RiskPage({ searchParams }: { searchParams: Promise
               <Metric size="sm" label="Largest drop" value={<span className="loss">{pctStr(s.maxDrawdown)}</span>} note={s.drawdownFrom ? `${md(s.drawdownFrom)} – ${md(s.drawdownTo)}` : undefined} />
               <Metric size="sm" label="Beta to S&P 500" value={n2(s.beta)} note={s.beta !== null ? `moves ${s.beta.toFixed(1)}× the market` : undefined} />
             </div>
-            <p className="t-xs">Today&apos;s share counts and cash priced at each past close ({provider} daily prices). Not your actual return: it ignores past trades, deposits and when you bought.
+            <p className="t-xs">Today&apos;s share counts and cash priced at each past close ({provider} daily prices). {basisNote} Not your actual return: it ignores past trades, deposits and when you bought.
               {risk.missing.length > 0 && ` No history for ${risk.missing.join(", ")}; held flat.`}{risk.partial.length > 0 && ` Shorter history for ${risk.partial.join(", ")}.`}</p>
           </Card>
 
@@ -116,7 +118,7 @@ export default async function RiskPage({ searchParams }: { searchParams: Promise
             })}
             <div className="divider" />
             <div className="flex items-center justify-between gap-3"><span className="t-sm">Top 5 companies</span><span className="t-sm num text-ink font-semibold">{pctStr(risk.concentration.topFive, 0)} of capital</span></div>
-            <span className="t-xs">Diversified like about {risk.concentration.effectiveN.toFixed(0)} equal positions (ETF holdings included). Conflicted limits use the stricter source until you choose.</span>
+            <span className="t-xs">Top 5 includes your share of companies inside ETFs (approximate). Across holdings, the mix is like about {risk.concentration.effectiveN.toFixed(0)} equal positions, counting each ETF as one. Conflicted limits use the stricter source until you choose.</span>
           </Card>
 
           <Card flush>
@@ -145,7 +147,9 @@ export default async function RiskPage({ searchParams }: { searchParams: Promise
                 <li>History is hypothetical: today&apos;s share counts at past daily closes, with cash held flat.</li>
                 <li>Index scenarios move each holding by its beta to that index; the single-company scenario includes its approximate weight inside your index ETFs.</li>
                 <li>ETF look-through weights are approximate reference data, not live.</li>
-                <li>Prices: {provider} daily closes, adjusted where available.</li>
+                <li>Prices: {provider} daily closes. {basisNote}</li>
+                <li>Volatility is the sample standard deviation of daily returns times the square root of 252. Beta is the covariance with the index divided by the index variance, over the chosen range.</li>
+                <li>A holding with too little history (under 20 daily returns) has no beta and is left out of the index scenarios rather than given an assumed one.</li>
               </ul>
             </Disclose>
             <Disclose summary={`Recorded history${recorded.length ? ` · started ${md(recorded[0].as_of)}` : ""}`}>

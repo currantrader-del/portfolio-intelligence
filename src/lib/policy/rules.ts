@@ -81,8 +81,11 @@ export function auditRules(rows: PolicyRuleRow[]): PolicyAudit {
   }
   const subjects: SubjectAudit[] = [...groups.entries()].map(([key, rs]) => {
     const [scope, subject] = key.split("|") as [PolicyRuleRow["scope"], string];
-    const approvedRow = rs.find((r) => r.approval === "approved") ?? null;
-    const candidates = rs.filter((r) => r.approval === "unresolved" || r.approval === "proposed");
+    const approvedRows = rs.filter((r) => r.approval === "approved");
+    // Two approved rows that disagree are a conflict too: neither is treated as the approved one.
+    const approvedAgree = new Set(approvedRows.map((r) => `${n(r.hard_max)}|${n(r.value)}|${n(r.normal_low)}|${n(r.normal_high)}`)).size <= 1;
+    const approvedRow = approvedAgree ? approvedRows[0] ?? null : null;
+    const candidates = [...(approvedAgree ? [] : approvedRows.map((r) => ({ ...r, approval: "unresolved" as const }))), ...rs.filter((r) => r.approval === "unresolved" || r.approval === "proposed")];
     const history = rs.filter((r) => r.approval === "superseded");
     let status: LimitStatus = "none";
     let used: PolicyRuleRow | null = null;

@@ -6,6 +6,7 @@
 import type { Quote } from "@/lib/market/quotes";
 import type { History, Range } from "@/lib/market/history";
 import type { FilingsResult, Fundamentals, Metric } from "@/lib/market/sec";
+import { classifyFiling } from "@/lib/market/filingClass";
 import type { NewsResult } from "@/lib/market/news";
 
 export const FIXTURE = process.env.NODE_ENV !== "production" && process.env.PI_FIXTURE === "1";
@@ -55,7 +56,7 @@ export function fixtureHistory(symbol: string, range: Range): History | null {
 
 export function fixtureFilings(symbol: string): FilingsResult | { error: string } {
   if (!["ACME", "BOLT", "CRWN", "DYNA", "NEWCO"].includes(symbol)) return { error: "no SEC filer for this symbol" };
-  const f = (form: string, days: number, description: string, isEarnings = false, items: string[] = []) => ({ form, filed: ago(days), reportDate: null, description, items, isEarnings, url: "https://www.sec.gov/" });
+  const f = (form: string, days: number, description: string, isEarnings = false, items: string[] = []) => ({ form, filed: ago(days), reportDate: null, description, items, isEarnings, url: "https://www.sec.gov/", ...classifyFiling(form, items) });
   const filings = symbol === "BOLT"
     ? [f("424B5", 1, "Prospectus supplement (share offering)"), f("8-K", 9, "Results of operations", true, ["2.02"]), f("10-Q", 9, "Quarterly report")]
     : [f("8-K", 70, "Results of operations", true, ["2.02"]), f("10-Q", 69, "Quarterly report"), f("4", 20, "Insider transaction")];

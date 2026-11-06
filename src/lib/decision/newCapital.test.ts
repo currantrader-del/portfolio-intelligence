@@ -58,9 +58,23 @@ describe("new capital: evidence gates", () => {
     expect(r.options.find((o) => o.kind === "cash")!.label).toBe("Valid option");
   });
 
-  it("becomes actionable only when every gate passes", () => {
+  it("stays on wait while the portfolio is not reconciled", () => {
     const policy = policyFromRules(approvedRules);
     const p = buildPortfolio([{ ...snap, positions: snap.positions.filter((x) => x.symbol !== "BBB") }, savings], new Map(), policy, {}, [], now);
+    expect(p.quality.reconciliation.complete).toBe(false);
+    expect(p.quality.reconciliation.gaps.join(" ")).toMatch(/No transactions recorded/);
+    expect(p.quality.reconciliation.gaps.join(" ")).toMatch(/Cost basis missing for 3 positions/);
+    const r = newCapital({ amount: 400, portfolio: p, research: [research("$26")], policy, now });
+    expect(r.gates.find((g) => g.key === "holdings")).toMatchObject({ ok: false });
+    expect(r.status).toBe("wait_review");
+  });
+
+  it("becomes actionable only when every gate passes", () => {
+    const policy = policyFromRules(approvedRules);
+    const withBasis = { ...snap, positions: snap.positions.filter((x) => x.symbol !== "BBB").map((x) => ({ ...x, costBasis: x.marketValue })) };
+    const ledger = [{ accountId: "a", tradeDate: "2026-10-01", kind: "deposit" as const, symbol: null, quantity: null, price: null, amount: 500 }];
+    const p = buildPortfolio([withBasis, savings], new Map(), policy, {}, ledger, now);
+    expect(p.quality.reconciliation).toMatchObject({ complete: true, label: "Reconciled" });
     const r = newCapital({ amount: 400, portfolio: p, research: [research("$26")], policy, now });
     expect(r.gates.every((g) => g.ok)).toBe(true);
     expect(r.status).toBe("actionable");

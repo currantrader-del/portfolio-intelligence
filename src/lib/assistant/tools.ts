@@ -62,7 +62,7 @@ export const TOOLS: Anthropic.Beta.BetaTool[] = [
   },
   {
     name: "get_filings",
-    description: "Recent SEC EDGAR filings for a US-listed company: 10-K, 10-Q, 8-K (with item descriptions; item 2.02 = earnings results), offerings and proxies. Includes the last earnings filing and an ESTIMATED next report date (last + ~91 days, not a confirmed date). Not available for ETFs.",
+    description: "Recent SEC EDGAR filings for a US-listed company: 10-K, 10-Q, 8-K (with item descriptions; item 2.02 = earnings results), registrations, prospectuses and proxies, each with a category and a note on what the form alone does and does not show. Includes the last earnings filing and an ESTIMATED next report date (last + ~91 days, not a confirmed date). Not available for ETFs.",
     input_schema: { type: "object", properties: { symbol: { type: "string" } }, required: ["symbol"], additionalProperties: false },
     strict: true,
   },
@@ -80,7 +80,7 @@ export const TOOLS: Anthropic.Beta.BetaTool[] = [
   },
   {
     name: "get_events",
-    description: "Company events for held stocks from SEC filings: results just filed, estimated upcoming reports (estimates, not confirmed dates), share or debt offerings, and material 8-Ks in the last few days.",
+    description: "Company events for held stocks from SEC filings. timing=recent: documents already filed in the last week, classified by form type and 8-K item only (terms NOT reviewed; never infer dilution or financing size from the form type). timing=upcoming: estimated report dates (estimates, not confirmed).",
     input_schema: { type: "object", properties: {}, required: [], additionalProperties: false },
     strict: true,
   },
@@ -232,7 +232,7 @@ export async function runTool(name: string, input: Record<string, unknown>, ws: 
     }
     case "get_events": {
       const { alerts } = await loadEventAlerts(p.holdings.map((h) => h.symbol), ws.now);
-      return { layer: "external_data", provider: "SEC EDGAR", events: alerts.map((a) => ({ symbol: a.symbol, severity: a.severity, title: a.title, detail: a.detail })) };
+      return { layer: "external_data", provider: "SEC EDGAR", events: alerts.map((a) => ({ symbol: a.symbol, timing: a.timing, severity: a.severity, title: a.title, detail: a.detail, source: a.source })) };
     }
     case "get_pipeline": {
       const held = new Set(p.holdings.map((h) => h.symbol));

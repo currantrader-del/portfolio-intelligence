@@ -1,4 +1,6 @@
 import { FIXTURE, fixtureFilings, fixtureFundamentals } from "@/lib/dev/fixture";
+import { classifyFiling, type FilingCategory } from "./filingClass";
+export { classifyFiling };
 /**
  * Layer 1: SEC EDGAR (free, official). Filings come from the submissions API and
  * fundamentals from XBRL company concepts. Every result carries its source URL and fetch time.
@@ -15,14 +17,24 @@ export type Filing = {
   items: string[];
   isEarnings: boolean;
   url: string;
+  /** What the form type alone tells us. Never a conclusion about dilution or terms. */
+  category: FilingCategory;
+  /** What can and cannot be concluded before the document is read. */
+  note: string;
+  accession?: string;
 };
+
+export type { FilingCategory } from "./filingClass";
 
 export type FilingsResult = { cik: string; company: string; filings: Filing[]; lastEarnings: Filing | null; nextEarningsEstimate: string | null; source: string; fetchedAt: string };
 
-const FORMS = new Set(["10-K", "10-Q", "8-K", "20-F", "6-K", "40-F", "10-K/A", "10-Q/A", "DEF 14A", "S-1", "S-3", "424B5"]);
+const FORMS = new Set([
+  "10-K", "10-Q", "8-K", "8-K/A", "20-F", "6-K", "40-F", "10-K/A", "10-Q/A", "DEF 14A",
+  "S-1", "S-1/A", "S-3", "S-3/A", "S-3ASR", "F-3", "424B2", "424B3", "424B4", "424B5", "424B7", "S-8", "D",
+]);
 const ITEM_LABEL: Record<string, string> = {
   "1.01": "Material agreement", "1.02": "Agreement ended", "2.01": "Acquisition or sale completed", "2.02": "Earnings results",
-  "2.03": "New debt", "2.05": "Restructuring costs", "2.06": "Impairment", "3.02": "Unregistered share sale", "5.02": "Executive or director change",
+  "2.03": "New financial obligation", "2.05": "Restructuring costs", "2.06": "Impairment", "3.02": "Unregistered sale of equity securities", "5.02": "Executive or director change",
   "5.07": "Shareholder vote", "7.01": "Regulation FD disclosure", "8.01": "Other events", "9.01": "Exhibits",
 };
 
@@ -44,12 +56,18 @@ function describe(form: string, items: string[], primaryDesc: string): string {
     const named = items.filter((i) => i !== "9.01").map((i) => ITEM_LABEL[i] ?? `Item ${i}`);
     if (named.length) return named.join(", ");
   }
-  const base: Record<string, string> = { "10-K": "Annual report", "10-Q": "Quarterly report", "20-F": "Annual report (foreign issuer)", "6-K": "Foreign issuer report", "40-F": "Annual report (Canadian issuer)", "DEF 14A": "Proxy statement", "S-1": "Registration", "S-3": "Shelf registration", "424B5": "Prospectus (share or debt offering)" };
-  return base[form.replace("/A", "")] ? `${base[form.replace("/A", "")]}${form.endsWith("/A") ? " (amended)" : ""}` : primaryDesc || form;
+  const base: Record<string, string> = {
+    "10-K": "Annual report", "10-Q": "Quarterly report", "20-F": "Annual report (foreign issuer)", "6-K": "Foreign issuer report", "40-F": "Annual report (Canadian issuer)",
+    "DEF 14A": "Proxy statement", "S-1": "Registration statement", "S-3": "Shelf registration", "S-3ASR": "Automatic shelf registration", "F-3": "Shelf registration (foreign issuer)",
+    "424B2": "Prospectus supplement", "424B3": "Prospectus supplement", "424B4": "Final prospectus", "424B5": "Prospectus supplement", "424B7": "Resale prospectus",
+    "S-8": "Employee share plan registration", "D": "Exempt offering notice",
+  };
+  const key = form.replace("/A", "");
+  return base[key] ? `${base[key]}${form.endsWith("/A") ? " (amended)" : ""}` : primaryDesc || form;
 }
 
 /** Parses data.sec.gov/submissions/CIK##########.json into the most recent relevant filings. */
-export function parseSubmissions(body: unknown, limit = 15): { company: string; filings: Filing[] } {
+export function parseSubmissions(body: unknown, limit = 25): { company: string; filings: Filing[] } {
   const b = body as { name?: string; cik?: string; filings?: { recent?: Record<string, string[]> } };
   const r = b?.filings?.recent ?? {};
   const cik = String(Number(b?.cik ?? 0));
@@ -68,6 +86,8 @@ export function parseSubmissions(body: unknown, limit = 15): { company: string; 
       description: describe(form, items, r.primaryDocDescription?.[i] ?? ""),
       items,
       isEarnings: form.startsWith("8-K") ? items.includes("2.02") : form === "6-K" ? /result|earn|quarter/i.test(r.primaryDocDescription?.[i] ?? "") : false,
+      ...classifyFiling(form, items),
+      accession: r.accessionNumber?.[i] || undefined,
       url: acc && doc ? `https://www.sec.gov/Archives/edgar/data/${cik}/${acc}/${doc}` : `https://www.sec.gov/cgi-bin/browse-edgar?action=getcompany&CIK=${cik}`,
     });
   }

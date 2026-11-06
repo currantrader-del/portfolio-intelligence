@@ -19,12 +19,14 @@ export function parseYahooChart(symbol: string, body: unknown): Quote | null {
   const price = Number(meta.regularMarketPrice);
   if (!Number.isFinite(price) || price <= 0) return null;
   const prev = Number(meta.chartPreviousClose ?? meta.previousClose);
+  // A price without a market time has unknown age: reject it rather than stamp it "now".
   const t = Number(meta.regularMarketTime);
+  if (!Number.isFinite(t) || t <= 0) return null;
   return {
     symbol,
     price,
     prevClose: Number.isFinite(prev) && prev > 0 ? prev : null,
-    asOf: new Date((Number.isFinite(t) ? t : Date.now() / 1000) * 1000).toISOString(),
+    asOf: new Date(t * 1000).toISOString(),
     provider: "yahoo",
     delayClass: "delayed",
   };
@@ -41,10 +43,25 @@ export function parseStooqCsv(symbol: string, csv: string): Quote | null {
   if (!Number.isFinite(price) || price <= 0) return null;
   const prev = Number(get("prev"));
   const date = get("date");
-  const time = get("time") ?? "22:00:00";
-  // Stooq timestamps are CET/CEST; treat as approximate and label the quote delayed.
-  const asOf = date && /^\d{4}-\d{2}-\d{2}$/.test(date) ? new Date(`${date}T${time}+01:00`).toISOString() : new Date().toISOString();
+  const time = get("time");
+  // No date means unknown age: reject. Stooq times are Warsaw local time (CET/CEST).
+  if (!date || !/^\d{4}-\d{2}-\d{2}$/.test(date)) return null;
+  const asOf = zonedToUtc(date, time && /^\d{2}:\d{2}(:\d{2})?$/.test(time) ? time : "23:00:00", "Europe/Warsaw").toISOString();
   return { symbol, price, prevClose: Number.isFinite(prev) && prev > 0 ? prev : null, asOf, provider: "stooq", delayClass: "delayed" };
+}
+
+/** Converts a local wall-clock date and time in an IANA time zone to a UTC instant (DST aware). */
+export function zonedToUtc(date: string, time: string, tz: string): Date {
+  const [y, mo, d] = date.split("-").map(Number);
+  const [h, mi, se = 0] = time.split(":").map(Number);
+  const wall = Date.UTC(y, mo - 1, d, h, mi, se);
+  const offset = (at: number) => {
+    const p = Object.fromEntries(new Intl.DateTimeFormat("en-US", { timeZone: tz, hourCycle: "h23", year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", second: "2-digit" }).formatToParts(new Date(at)).map((x) => [x.type, x.value]));
+    return Date.UTC(+p.year, +p.month - 1, +p.day, +p.hour, +p.minute, +p.second) - at;
+  };
+  let t = wall - offset(wall);
+  t = wall - offset(t);
+  return new Date(t);
 }
 
 const UA = "Mozilla/5.0 (compatible; PortfolioIntelligence/1.0)";

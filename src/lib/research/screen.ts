@@ -98,11 +98,12 @@ export function screenCompany(args: {
   // 5. Dilution
   const fl = args.filings && !("error" in args.filings) ? args.filings : null;
   const cutoff = new Date(now.getTime() - T.offeringLookbackDays * 86400000).toISOString().slice(0, 10);
-  const offerings = (fl?.filings ?? []).filter((x) => ["S-1", "S-3", "424B5"].includes(x.form) && x.filed >= cutoff);
+  // Financing-related filings are a prompt to read them, not evidence of dilution: share count change is measured above.
+  const offerings = (fl?.filings ?? []).filter((x) => (x.category === "financing" || x.category === "registration") && x.filed >= cutoff);
   if (shares?.yoy != null) {
     const s: CheckStatus = shares.yoy <= T.dilutionPass ? "pass" : shares.yoy <= T.dilutionFail ? "watch" : "fail";
-    checks.push({ key: "dilution", label: "Share count change", status: offerings.length && s === "pass" ? "watch" : s, value: pct(shares.yoy), detail: `Over about a year to ${shares.latest?.end}${offerings.length ? `; ${offerings.length} offering filing${offerings.length > 1 ? "s" : ""} since ${cutoff}` : ""}` });
-  } else checks.push({ key: "dilution", label: "Share count change", status: offerings.length ? "watch" : "unknown", value: "—", detail: offerings.length ? `${offerings.length} offering filing(s) since ${cutoff}; share history not found` : "Share history not found" });
+    checks.push({ key: "dilution", label: "Share count change", status: offerings.length && s === "pass" ? "watch" : s, value: pct(shares.yoy), detail: `Over about a year to ${shares.latest?.end}${offerings.length ? `; ${offerings.length} financing or registration filing${offerings.length > 1 ? "s" : ""} since ${cutoff} to read (terms not reviewed)` : ""}` });
+  } else checks.push({ key: "dilution", label: "Share count change", status: offerings.length ? "watch" : "unknown", value: "—", detail: offerings.length ? `${offerings.length} financing or registration filing(s) since ${cutoff} to read (terms not reviewed); share history not found` : "Share history not found" });
 
   // 6. Valuation (price to sales)
   const rev = trailing(revenue);

@@ -73,7 +73,10 @@ export async function FilingsList({ symbol }: { symbol: string }) {
       <ul className="flex flex-col">
         {r.filings.slice(0, 10).map((f) => (
           <li key={f.url + f.filed + f.form} className="flex items-start justify-between gap-3 py-2 border-t border-line first:border-t-0">
-            <a href={f.url} target="_blank" rel="noreferrer" className="t-sm no-underline hover:text-ink min-w-0"><span className="pill pill-sm mr-2 align-middle">{f.form}</span>{f.description}</a>
+            <span className="flex flex-col min-w-0">
+              <a href={f.url} target="_blank" rel="noreferrer" className="t-sm no-underline hover:text-ink min-w-0"><span className="pill pill-sm mr-2 align-middle">{f.form}</span>{f.description}</a>
+              {(f.category === "financing" || f.category === "registration" || f.category === "resale") && <span className="t-xs">{f.note}</span>}
+            </span>
             <span className="t-xs shrink-0 flex items-center gap-1.5">{f.isEarnings && <Pill small tone="copper">Earnings</Pill>}{shortDate(f.filed).replace(/, \d{4}$/, "")}</span>
           </li>
         ))}

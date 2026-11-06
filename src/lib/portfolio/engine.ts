@@ -76,7 +76,21 @@ export type DataQuality = {
   headline: string;
   reasons: string[];
   missing: string[];
+  /** Whether the total is a reconciled investable capital figure. Incomplete unless every gap is closed. */
+  reconciliation: { complete: boolean; label: string; gaps: string[] };
 };
+
+/** Lists what stops a total from being called reconciled investable capital. Pure. */
+export function reconciliationGaps(args: { brokerAsOfs: string[]; savingsEntered: boolean; reserveApproved: boolean; ledgerRows: number; positionsWithoutBasis: number }): { complete: boolean; label: string; gaps: string[] } {
+  const gaps: string[] = [];
+  const dates = [...new Set(args.brokerAsOfs.map((d) => d.slice(0, 10)))].sort();
+  if (dates.length > 1) gaps.push(`Accounts are as of different dates (${dates.join(", ")})`);
+  if (!args.savingsEntered) gaps.push("Savings balance not entered");
+  if (!args.reserveApproved) gaps.push("Protected reserve not approved (app default used)");
+  if (args.ledgerRows === 0) gaps.push("No transactions recorded, so deposits, withdrawals and trades since each statement are unknown");
+  if (args.positionsWithoutBasis > 0) gaps.push(`Cost basis missing for ${args.positionsWithoutBasis} position${args.positionsWithoutBasis > 1 ? "s" : ""}`);
+  return { complete: gaps.length === 0, label: gaps.length === 0 ? "Reconciled" : "Incomplete", gaps };
+}
 
 export type BucketRow = { bucket: Bucket; value: number; weight: number; normal: Range; hardMax: number | null; status: "below" | "within" | "above" | "over_max" | "no_limit" };
 export type CompanyExposure = { symbol: string; direct: number; viaEtfs: number; total: number; max: number; headroomDollars: number };
@@ -266,9 +280,16 @@ export function buildPortfolio(
     reasons.push(`Holdings come from statements dated ${dates.join(" and ")}${accounts.some((a) => a.tradesAfter) ? ", plus trades you recorded since" : ""}. Trades not recorded since then are not included.`);
     reasons.push("Prices are delayed quotes applied to those quantities, so today's figures are estimates, not your broker's reported returns.");
   }
+  const reconciliation = reconciliationGaps({
+    brokerAsOfs: brokerAccounts.map((a) => a.asOf),
+    savingsEntered: savings !== null,
+    reserveApproved: policy?.audit?.protectedReserve.status === "approved",
+    ledgerRows: ledger.length,
+    positionsWithoutBasis: noBasis.length,
+  });
   const quality: DataQuality = synced
-    ? { status: "verified", headline: "Verified holdings synced from your broker today", reasons, missing }
-    : { status: "estimated", headline: "Estimated, based on last verified holdings", reasons, missing };
+    ? { status: "verified", headline: "Verified holdings synced from your broker today", reasons, missing, reconciliation }
+    : { status: "estimated", headline: "Estimated, based on last statement holdings", reasons, missing, reconciliation };
   return {
     total: round2(total),
     netWorthTracked: round2(total + Math.min(reserve, savings ?? 0)),

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { align, beta, buildRisk, maxDrawdown, worstWindow } from "./risk";
+import { align, beta, buildRisk, maxDrawdown, priceBasis, stdev, worstWindow } from "./risk";
 import { parseStooqHistory, parseYahooHistory, type History } from "@/lib/market/history";
 
 const days = (n: number) => Array.from({ length: n }, (_, i) => new Date(Date.UTC(2026, 0, 1) + i * 86400000).toISOString().slice(0, 10));
@@ -56,6 +56,37 @@ describe("risk math", () => {
     const r = buildRisk({ positions: [{ symbol: "BBB", quantity: 1, value: 100 }], cash: 0, investable: 100, histories });
     expect(r.missing).toEqual(["BBB"]);
     expect(r.series.every((p) => p.value === 100)).toBe(true);
+  });
+
+  it("does not shock a holding with an assumed beta when its beta cannot be measured", () => {
+    const spy = Array.from({ length: 40 }, (_, i) => 100 * (1 + 0.01 * Math.sin(i)));
+    const histories = new Map([["SPY", hist("SPY", spy)], ["QQQ", hist("QQQ", spy)], ["SOXX", hist("SOXX", spy)], ["AAA", hist("AAA", spy)]]);
+    const r = buildRisk({ positions: [{ symbol: "AAA", quantity: 1, value: 100 }, { symbol: "BBB", quantity: 1, value: 500 }], cash: 0, investable: 600, histories });
+    const s = r.scenarios.find((x) => x.key === "spy20")!;
+    expect(s.notShocked).toEqual([{ symbol: "BBB", value: 500 }]);
+    expect(s.lines.map((l) => l.symbol)).toEqual(["AAA"]);
+    expect(s.dollars).toBeCloseTo(100 * r.holdings[0].beta! * -0.2, 6);
+    expect(s.basis).toMatch(/Not included \(no measured beta\): BBB/);
+  });
+
+  it("flags a mix of total-return and price-only histories", () => {
+    const a = { ...hist("AAA", [1, 2, 3]), adjusted: true };
+    const b = { ...hist("BBB", [1, 2, 3]), adjusted: false, provider: "stooq" as const };
+    expect(priceBasis(new Map([["AAA", a], ["BBB", b]]), ["AAA", "BBB"])).toEqual({ adjusted: ["AAA"], priceOnly: ["BBB"], providers: ["yahoo", "stooq"], mixed: true });
+    expect(priceBasis(new Map([["AAA", a]]), ["AAA", "ZZZ"]).mixed).toBe(false);
+  });
+
+  it("matches hand-computed beta and annualised volatility", () => {
+    // Market returns alternate +1% / -1%; the stock moves exactly 1.5x the market.
+    const m = Array.from({ length: 41 }, (_, i) => (i % 2 ? 0.01 : -0.01));
+    const s = m.map((x) => 1.5 * x);
+    expect(beta(s, m)).toBeCloseTo(1.5, 10);
+    // Sample stdev of +/-1% alternating over 41 points: mean ~ -0.000244, sd ~ 0.010124
+    const mean = m.reduce((a, x) => a + x, 0) / m.length;
+    const sd = Math.sqrt(m.reduce((a, x) => a + (x - mean) ** 2, 0) / (m.length - 1));
+    expect(stdev(m)).toBeCloseTo(sd, 12);
+    expect(sd * Math.sqrt(252)).toBeCloseTo(0.1607, 3);
+    expect(stdev(m.slice(0, 19))).toBeNull(); // too short to measure
   });
 });
 

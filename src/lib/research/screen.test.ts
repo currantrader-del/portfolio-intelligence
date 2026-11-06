@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { classifyFiling } from "@/lib/market/filingClass";
 import { screenCompany } from "./screen";
 import type { Fundamentals, Metric, FilingsResult } from "@/lib/market/sec";
 
@@ -50,11 +51,14 @@ describe("screenCompany", () => {
     expect(r.toVerify[0]).toMatch(/could not be loaded/);
   });
 
-  it("treats a recent share offering as a dilution watch item", () => {
+  it("treats a recent prospectus as a filing to read, without claiming dilution", () => {
     const filings: FilingsResult = { cik: "1", company: "Alpha", lastEarnings: null, nextEarningsEstimate: "2026-11-12", source: "", fetchedAt: "",
-      filings: [{ form: "424B5", filed: "2026-10-01", reportDate: null, description: "", items: [], isEarnings: false, url: "" }] };
+      filings: [{ form: "424B5", filed: "2026-10-01", reportDate: null, description: "", items: [], isEarnings: false, url: "", ...classifyFiling("424B5", []) }] };
     const r = screenCompany({ symbol: "AAA", fundamentals: healthy, filings, price: 50, now });
-    expect(r.checks.find((c) => c.key === "dilution")?.status).toBe("watch");
+    const d = r.checks.find((c) => c.key === "dilution")!;
+    expect(d.status).toBe("watch");
+    expect(d.detail).toMatch(/terms not reviewed/);
+    expect(d.detail).not.toMatch(/dilute|offering filing/i);
     expect(r.checks.find((c) => c.key === "earnings")).toMatchObject({ status: "info" });
     expect(r.verdict).toBe("Worth researching"); // one watch item only
   });

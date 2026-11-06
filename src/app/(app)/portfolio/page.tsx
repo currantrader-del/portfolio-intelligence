@@ -58,7 +58,7 @@ export default async function PortfolioPage({ searchParams }: { searchParams: Pr
       <div className="grid grid-cols-1 gap-3 lg:gap-4 lg:grid-cols-12">
         {/* Portfolio Summary */}
         <Card className="lg:col-span-4" labelledBy="cap-h">
-          <CardHead id="cap-h" cap="Investable capital" right={<DataLabel kind={verified ? "verified" : "estimated"} />} />
+          <CardHead id="cap-h" cap={p.quality.reconciliation.complete ? "Investable capital" : "Investable capital · incomplete"} right={<DataLabel kind={verified ? "verified" : "estimated"} />} />
           <div className="flex flex-col gap-1.5">
             <span className="t-big">{usd(p.total)}</span>
             <span className="t-sm num">

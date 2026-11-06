@@ -17,6 +17,10 @@ export type Alert = {
   title: string;
   detail: string;
   href: string;
+  /** Events only: "upcoming" is a future date (estimated unless confirmed); "recent" is already filed. */
+  timing?: "upcoming" | "recent";
+  /** Events only: the filing this came from. */
+  source?: { form: string; filed: string; url: string };
 };
 
 const RANK: Record<Severity, number> = { high: 0, medium: 1, low: 2 };

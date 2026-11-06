@@ -14,11 +14,11 @@ export async function EventAlerts({ symbols, now }: { symbols: string[]; now: Da
       <h2 id="ev-h" className="text-lg font-semibold">Company events</h2>
       {alerts.sort((a, b) => order[a.severity] - order[b.severity]).map((a) => (
         <Link key={a.id} href={a.href} className="bg-surface border border-line rounded-2xl p-4 no-underline text-ink hover:border-line-strong flex flex-col gap-1">
-          <div className="flex items-center justify-between gap-3"><span className="font-semibold">{a.title}</span><Tag tone={TONE[a.severity]}>{a.severity === "low" ? "UPCOMING" : a.severity.toUpperCase()}</Tag></div>
+          <div className="flex items-center justify-between gap-3"><span className="font-semibold">{a.title}</span><Tag tone={TONE[a.severity]}>{a.timing === "upcoming" ? "EXPECTED (EST.)" : "FILED · TO REVIEW"}</Tag></div>
           <span className="text-sm text-ink-2">{a.detail}</span>
         </Link>
       ))}
-      <p className="text-xs text-muted">From SEC filings. Report dates marked expected are estimates.</p>
+      <p className="text-xs text-muted">From SEC filings. Expected dates are estimates. Filed documents are classified by form and item only; terms not reviewed.</p>
     </section>
   );
 }
