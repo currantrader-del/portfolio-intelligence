@@ -56,7 +56,7 @@ export async function POST(req: Request) {
         const messages: Anthropic.Beta.BetaMessageParam[] = history.map((m) => ({ role: m.role, content: m.content }));
         messages.push({ role: "system", content: context } as unknown as Anthropic.Beta.BetaMessageParam);
 
-        const toolLog: { name: string; input: unknown }[] = [];
+        const toolLog: { name: string; input: unknown; ok?: boolean; preview?: string }[] = [];
         let inTok = 0, outTok = 0;
         let answer = "";
         let servedBy = model.id;
@@ -90,11 +90,17 @@ export async function POST(req: Request) {
           send({ type: "status", text: uses.map((u) => STATUS[u.name] ?? u.name).join(", ") });
           const results = await Promise.all(
             uses.map(async (u) => {
-              toolLog.push({ name: u.name, input: u.input });
+              const entry: (typeof toolLog)[number] = { name: u.name, input: u.input };
+              toolLog.push(entry);
               try {
                 const out = await runTool(u.name, (u.input ?? {}) as Record<string, unknown>, ws, db);
-                return { type: "tool_result" as const, tool_use_id: u.id, content: JSON.stringify(out) };
+                const content = JSON.stringify(out);
+                entry.ok = true;
+                entry.preview = content.slice(0, 1200); // shown under "Show evidence"
+                return { type: "tool_result" as const, tool_use_id: u.id, content };
               } catch (e) {
+                entry.ok = false;
+                entry.preview = `Tool failed: ${(e as Error).message}`;
                 return { type: "tool_result" as const, tool_use_id: u.id, content: `Tool failed: ${(e as Error).message}`, is_error: true };
               }
             }),
@@ -109,7 +115,7 @@ export async function POST(req: Request) {
           .insert({ kind: "answer", model: servedBy, tool_calls: toolLog, output_markdown: answer, input_tokens: inTok, output_tokens: outTok, cost_usd: Number(cost.toFixed(5)) })
           .select("id")
           .single();
-        send({ type: "answer", text: answer, model: servedBy, tools: toolLog.map((t) => t.name), judgmentId: saved?.id ?? null, costUsd: cost });
+        send({ type: "answer", text: answer, model: servedBy, tools: toolLog.map((t) => t.name), evidence: toolLog.map((t) => ({ name: t.name, input: t.input, ok: t.ok ?? false, preview: t.preview ?? "" })), judgmentId: saved?.id ?? null, costUsd: cost });
       } catch (e) {
         const msg = e instanceof Anthropic.APIError ? `The AI service returned an error (${e.status}).` : "Something went wrong answering that.";
         send({ type: "error", text: msg });

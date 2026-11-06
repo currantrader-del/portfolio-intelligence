@@ -2,13 +2,16 @@ import { Suspense } from "react";
 import Link from "next/link";
 import { ResearchSummary } from "@/components/ResearchSummary";
 import { addToPipeline } from "../actions";
-import { FeedSkeleton, FilingsSection, FundamentalsSection, NewsSection } from "@/components/CompanyFeeds";
+import { FeedSkeleton, FilingsList, FundamentalsCard, LinesSkeleton, NewsList } from "@/components/CompanyFeeds";
 import { isEtf } from "@/lib/portfolio/classify";
 import { createClient } from "@/lib/supabase/server";
-import { Tag } from "@/components/Tag";
 import { EXTRACTION_LABEL, ORIGIN_LABEL } from "@/lib/research-labels";
 import { getWorkspace } from "@/lib/workspace";
-import { TodayValuation } from "@/components/TodayValuation";
+import { dayChangePct } from "@/lib/market/quotes";
+import { InvestmentSummary } from "@/components/TodayValuation";
+import { AskButton } from "@/components/AskPanel";
+import { pctStr, shortDate, toneOf, usd } from "@/lib/format";
+import { Card, CardHead, Chevron, DataLabel, Disclose, Pill, SourceRef } from "@/components/ui";
 
 type Phase = { phase_number: number; title: string | null; extraction: string; body_markdown: string | null };
 type Version = {
@@ -29,105 +32,130 @@ export default async function CompanyPage({ params, searchParams }: { params: Pr
   const sp = await searchParams;
   const symbol = decodeURIComponent(raw).toUpperCase().replace(/[^A-Z0-9.\-]/g, "").slice(0, 10);
   const supabase = await createClient();
-  const { data: company } = await supabase
-    .from("companies")
-    .select("symbol, name, research_versions(id, research_as_of, completeness, origin, is_current, conclusion, change_summary, source_documents(file_name, sha256), research_phases(phase_number, title, extraction, body_markdown))")
-    .eq("symbol", symbol)
-    .maybeSingle();
-  const ws = await getWorkspace();
+  const [{ data: company }, ws] = await Promise.all([
+    supabase
+      .from("companies")
+      .select("symbol, name, research_versions(id, research_as_of, completeness, origin, is_current, conclusion, change_summary, source_documents(file_name, sha256), research_phases(phase_number, title, extraction, body_markdown))")
+      .eq("symbol", symbol)
+      .maybeSingle(),
+    getWorkspace(),
+  ]);
+  const etf = isEtf(symbol);
+  const q = ws.quotes.get(symbol);
+  const h = ws.portfolio.holdings.find((x) => x.symbol === symbol);
+  const price = q?.price ?? h?.price ?? null;
+  const day = q ? dayChangePct(q) : h?.dayPct ?? null;
+
+  const feeds = (name: string | null) => (
+    <Card flush>
+      {!etf && <Disclose summary="Filings and earnings dates"><Suspense fallback={<LinesSkeleton />}><FilingsList symbol={symbol} /></Suspense></Disclose>}
+      <Disclose summary={<span>Headlines <span className="t-xs">· unverified</span></span>}><Suspense fallback={<LinesSkeleton />}><NewsList symbol={symbol} name={name} /></Suspense></Disclose>
+    </Card>
+  );
 
   if (!company) {
     return (
-      <div className="flex flex-col gap-6">
-        <div>
-          <Link href="/research" className="text-sm no-underline">← Research</Link>
-          <h1 className="font-serif text-3xl font-semibold font-mono">{symbol}</h1>
-          <p className="text-muted text-sm">Not in your research pipeline yet.</p>
-        </div>
-        <form action={addToPipeline} className="bg-surface border border-line rounded-2xl p-5 flex flex-wrap gap-2 items-end">
+      <div className="flex flex-col gap-3 lg:gap-4 max-w-3xl">
+        <Header symbol={symbol} name={null} kicker={`${symbol} · not in your research yet`} price={price} day={day} />
+        <form action={addToPipeline} className="card">
           <input type="hidden" name="symbol" value={symbol} />
-          <label className="text-sm flex flex-col gap-1 flex-1 min-w-48">Why it is interesting (optional)<input name="note" maxLength={300} className="rounded-lg border border-line-strong bg-ground px-3 min-h-10" /></label>
-          <button className="min-h-10 px-4 rounded-lg bg-ink text-ground font-medium">Add to pipeline</button>
+          <label className="field">Why it is interesting (optional)<input name="note" maxLength={300} className="input" /></label>
+          <button className="btn btn-primary self-start">Add to pipeline</button>
         </form>
-        <div className="grid gap-6 lg:grid-cols-2 items-start">
-          {!isEtf(symbol) && (
-            <>
-              <Suspense fallback={<FeedSkeleton title="Reported financials" />}><FundamentalsSection symbol={symbol} /></Suspense>
-              <Suspense fallback={<FeedSkeleton title="SEC filings and earnings" />}><FilingsSection symbol={symbol} /></Suspense>
-            </>
-          )}
-          <Suspense fallback={<FeedSkeleton title="Recent headlines" />}><NewsSection symbol={symbol} /></Suspense>
-        </div>
+        {!etf && <Suspense fallback={<FeedSkeleton title="Reported financials" />}><FundamentalsCard symbol={symbol} /></Suspense>}
+        {feeds(null)}
       </div>
     );
   }
 
   const versions = ([...(company.research_versions ?? [])] as unknown as Version[]).sort((a, b) => b.research_as_of.localeCompare(a.research_as_of));
   const record = ws.research.find((x) => x.symbol === company.symbol);
-  const held = ws.portfolio.holdings.some((h) => h.symbol === company.symbol);
-  const price = ws.quotes.get(company.symbol)?.price ?? null;
+  const held = !!h;
+  const cur = record?.current ?? record?.latest;
+  const thesis = cur?.parsed.thesis;
+  const phases = versions.reduce((n, v) => n + (v.research_phases?.length ?? 0), 0);
 
   return (
-    <div className="flex flex-col gap-6">
-      <div>
-        <Link href="/research" className="text-sm no-underline">← Research</Link>
-        <div className="font-mono text-muted text-sm">{company.symbol}</div>
-        <h1 className="font-serif text-3xl font-semibold">{company.name ?? company.symbol}</h1>
-        {versions.length > 1 && !versions.some((v) => v.is_current) && (
-          <p className="mt-2 text-sm text-alert-ink">These records disagree and none is marked current. A targeted refresh is needed before any advice.</p>
-        )}
-      </div>
-      {sp.saved && SAVED[sp.saved] && <p className="rounded-xl bg-accent-soft px-4 py-2 text-sm">{SAVED[sp.saved]}</p>}
-      {record && !isEtf(company.symbol) && (
-        <ResearchSummary r={record} held={held} price={price} now={ws.now} freshDays={ws.policy?.researchFreshnessDays ?? 120} error={sp.error ? ERRORS[sp.error] : undefined} />
+    <div className="flex flex-col gap-3 lg:gap-4">
+      <Header symbol={company.symbol} name={company.name} kicker={`${company.symbol}${cur?.parsed.classification ? ` · ${cur.parsed.classification}` : ""}`} price={price} day={day} />
+      {versions.length > 1 && !versions.some((v) => v.is_current) && (
+        <p role="alert" className="t-sm rounded-[12px] bg-warn-bg text-warn-ink px-3 py-2">These records disagree and none is marked current. A targeted refresh is needed before any advice.</p>
       )}
-      <TodayValuation ws={ws} symbol={company.symbol} />
-      <div className="grid gap-6 lg:grid-cols-2 items-start">
-        {!isEtf(company.symbol) && (
-          <>
-            <Suspense fallback={<FeedSkeleton title="Reported financials" />}><FundamentalsSection symbol={company.symbol} /></Suspense>
-            <Suspense fallback={<FeedSkeleton title="SEC filings and earnings" />}><FilingsSection symbol={company.symbol} /></Suspense>
-          </>
-        )}
-        <Suspense fallback={<FeedSkeleton title="Recent headlines" />}><NewsSection symbol={company.symbol} name={company.name} /></Suspense>
+      {sp.saved && SAVED[sp.saved] && <p role="status" className="t-sm rounded-[12px] bg-surface-2 px-3 py-2">{SAVED[sp.saved]}</p>}
+
+      <div className="grid grid-cols-1 gap-3 lg:gap-4 lg:grid-cols-12 items-start">
+        <div className="lg:col-span-7 flex flex-col gap-3 lg:gap-4 min-w-0">
+          <InvestmentSummary ws={ws} symbol={company.symbol} />
+          {thesis && (
+            <Card labelledBy="th-h" className="!gap-2">
+              <CardHead id="th-h" title="Thesis" right={cur && <SourceRef kind="Research">{shortDate(cur.research_as_of).replace(/, \d{4}$/, "")}</SourceRef>} />
+              <p className="t-sm leading-relaxed">{thesis}</p>
+            </Card>
+          )}
+          {!etf && <Suspense fallback={<FeedSkeleton title="Reported financials" />}><FundamentalsCard symbol={company.symbol} /></Suspense>}
+        </div>
+
+        <div className="lg:col-span-5 flex flex-col gap-3 lg:gap-4 min-w-0">
+          {versions.length > 0 && (
+            <Card flush>
+              <Disclose summary={`Your research · ${versions.length} record${versions.length > 1 ? "s" : ""}${phases ? `, ${phases} phases` : ""}`}>
+                {versions.map((v) => {
+                  const c = v.conclusion as Record<string, string | number | null>;
+                  return (
+                    <div key={v.id} className="flex flex-col gap-2 pb-3 border-b border-line last:border-b-0 last:pb-0">
+                      <div className="flex flex-wrap items-center gap-1.5">
+                        <span className="text-ink font-semibold mr-1">{shortDate(v.research_as_of)}</span>
+                        {v.is_current && <Pill small tone="gain" dot="solid">Current</Pill>}
+                        <Pill small tone={v.completeness === "complete" ? "neutral" : "warn"}>{v.completeness.replace("_", " ")}</Pill>
+                        <Pill small>{ORIGIN_LABEL[v.origin] ?? v.origin}</Pill>
+                      </div>
+                      <div className="grid grid-cols-2 gap-x-4 gap-y-1 t-sm">
+                        {(["action", "confidence", "classification", "reference_price"] as const).map((k) => (
+                          <div key={k} className="min-w-0"><span className="t-xs block capitalize">{k.replace("_", " ")}</span><span className="text-ink">{c[k] ?? "—"}</span></div>
+                        ))}
+                      </div>
+                      {v.change_summary && <p className="t-sm">{v.change_summary}</p>}
+                      {v.source_documents && <SourceRef kind="Source">{v.source_documents.file_name} · {v.source_documents.sha256.slice(0, 10)}…</SourceRef>}
+                      {v.research_phases?.length > 0 && (
+                        <div className="flex flex-col rounded-[12px] border border-line px-3">
+                          {[...v.research_phases].sort((a, b) => a.phase_number - b.phase_number).map((p) => (
+                            <Disclose key={p.phase_number} summary={<span className="t-sm">Phase {p.phase_number}{p.title ? ` · ${p.title}` : ""} <span className={`t-xs ${p.extraction === "verbatim" ? "" : "warn"}`}>· {EXTRACTION_LABEL[p.extraction] ?? p.extraction}</span></span>}>
+                              <pre className="whitespace-pre-wrap font-sans t-sm max-h-[420px] overflow-auto">{p.body_markdown ?? "No text preserved."}</pre>
+                            </Disclose>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
+              </Disclose>
+            </Card>
+          )}
+          {record && !etf && (
+            <ResearchSummary r={record} held={held} price={price} now={ws.now} freshDays={ws.policy?.researchFreshnessDays ?? 120} error={sp.error ? ERRORS[sp.error] : undefined} />
+          )}
+          {feeds(company.name)}
+          <div className="flex gap-2">
+            <AskButton question={`What has to be true for ${company.symbol} to reach the base case, and what would break the thesis?`} className="btn flex-1">Ask about the thesis</AskButton>
+          </div>
+        </div>
       </div>
-      {versions.length > 0 && <h2 className="font-serif text-xl font-semibold -mb-2">Your research</h2>}
-      {versions.map((v) => {
-        const c = v.conclusion as Record<string, string | number | null>;
-        return (
-          <section key={v.id} className="bg-surface border border-line rounded-2xl p-6 flex flex-col gap-4">
-            <div className="flex flex-wrap items-center gap-2">
-              <h2 className="text-lg font-semibold mr-2">Research as of {v.research_as_of}</h2>
-              <Tag tone={v.completeness === "complete" ? "accent" : "warn"}>{v.completeness.replace("_", " ")}</Tag>
-              <Tag>{ORIGIN_LABEL[v.origin] ?? v.origin}</Tag>
-              {v.is_current && <Tag tone="accent">Current</Tag>}
-            </div>
-            <dl className="grid gap-x-8 gap-y-2 sm:grid-cols-2 lg:grid-cols-4 text-sm">
-              {(["classification", "action", "confidence", "reference_price"] as const).map((k) => (
-                <div key={k}><dt className="text-muted capitalize">{k.replace("_", " ")}</dt><dd className="font-medium">{c[k] ?? "—"}</dd></div>
-              ))}
-            </dl>
-            {v.change_summary && <p className="text-sm text-ink-2">{v.change_summary}</p>}
-            {v.source_documents && (
-              <p className="text-xs text-muted">Source: {v.source_documents.file_name} · SHA-256 <span className="font-mono">{v.source_documents.sha256.slice(0, 12)}…</span></p>
-            )}
-            {v.research_phases?.length > 0 && (
-              <div className="flex flex-col gap-2">
-                <h3 className="text-sm font-semibold">Research phases</h3>
-                {[...v.research_phases].sort((a, b) => a.phase_number - b.phase_number).map((p) => (
-                  <details key={p.phase_number} className="border border-line rounded-lg">
-                    <summary className="cursor-pointer px-4 py-3 flex flex-wrap items-center gap-2 min-h-11">
-                      <span className="font-medium">Phase {p.phase_number}{p.title ? ` · ${p.title}` : ""}</span>
-                      <Tag tone={p.extraction === "verbatim" ? "accent" : "warn"}>{EXTRACTION_LABEL[p.extraction] ?? p.extraction}</Tag>
-                    </summary>
-                    <pre className="whitespace-pre-wrap font-sans text-sm text-ink-2 px-4 pb-4 max-h-[480px] overflow-auto">{p.body_markdown ?? "No text preserved."}</pre>
-                  </details>
-                ))}
-              </div>
-            )}
-          </section>
-        );
-      })}
+    </div>
+  );
+}
+
+function Header({ symbol, name, kicker, price, day }: { symbol: string; name: string | null; kicker: string; price: number | null; day: number | null }) {
+  return (
+    <div className="flex items-end justify-between gap-3 min-w-0">
+      <div className="flex flex-col gap-1 min-w-0">
+        <Link href="/research" className="max-lg:hidden inline-flex items-center gap-1 t-sm no-underline -ml-1 min-h-8"><Chevron dir="left" />Research</Link>
+        <span className="cap truncate">{kicker}</span>
+        <h1 className="h1 truncate">{name ?? symbol}</h1>
+      </div>
+      <div className="flex flex-col items-end shrink-0">
+        <span className="t-val">{price ? usd(price, 2) : "No price"}</span>
+        {day !== null ? <span className={`t-xs num ${toneOf(day)}`}>{pctStr(day, 1, true)} today</span> : <DataLabel kind="delayed" small />}
+      </div>
     </div>
   );
 }

@@ -1,40 +1,27 @@
-import { AppHeader } from "@/components/AppHeader";
-import { MobileNav } from "@/components/MobileNav";
-import { FreshnessDot } from "@/components/FreshnessDot";
-import { getWorkspace } from "@/lib/workspace";
-import { freshness, type Freshness } from "@/lib/freshness";
-import { nyTimeLabel } from "@/lib/market/hours";
-import { pctStr } from "@/lib/format";
+import { Suspense } from "react";
+import { Sidebar, TabBar, TopBar } from "@/components/shell/Shell";
+import { Status } from "@/components/shell/Status";
+import { AskPanel } from "@/components/AskPanel";
 
 export const dynamic = "force-dynamic";
 
-export default async function AppLayout({ children }: { children: React.ReactNode }) {
-  const ws = await getWorkspace();
-  const p = ws.portfolio;
-  const latestQuote = [...ws.quotes.values()].map((q) => q.asOf).sort().at(-1);
-  let state: Freshness = "missing";
-  let label = "No prices available";
-  if (latestQuote) {
-    state = freshness("quote", new Date(latestQuote), ws.now, { marketOpen: ws.marketOpen });
-    label = ws.marketOpen ? `Prices ${state === "live" ? "live" : "delayed"} ${nyTimeLabel(new Date(latestQuote))}` : `Market closed · last price ${nyTimeLabel(new Date(latestQuote))}`;
-  }
-  if (!p.holdings.length) label += " · no holdings yet";
-
-  const ticker = (
-    <div className="hidden md:flex gap-4 font-mono text-xs text-chrome-muted">
-      {ws.benchmarks.map((b) => (
-        <span key={b.symbol} title={`${b.label} (${b.symbol})`}>
-          {b.symbol} <span className={b.dayPct === null ? "" : b.dayPct >= 0 ? "text-[#6fcf97]" : "text-[#ff8a80]"}>{pctStr(b.dayPct, 1, true)}</span>
-        </span>
-      ))}
-    </div>
-  );
-
+/**
+ * The shell renders immediately: nothing here waits for data. The price status streams in,
+ * and each page shows its own loading skeleton while its data arrives.
+ */
+export default function AppLayout({ children }: { children: React.ReactNode }) {
+  const status = <Suspense fallback={null}><Status /></Suspense>;
   return (
-    <>
-      <AppHeader freshness={<FreshnessDot state={state} label={label} />} ticker={ticker} />
-      <main className="mx-auto max-w-[1280px] px-4 sm:px-8 py-7 pb-24 md:pb-7">{children}</main>
-      <MobileNav />
-    </>
+    <div className="flex min-h-dvh">
+      <Sidebar status={status} />
+      <div className="flex-1 min-w-0 flex flex-col">
+        <TopBar status={status} />
+        <main className="w-full max-w-[1200px] mx-auto px-4 lg:px-8 pt-4 lg:pt-6 pb-[calc(var(--tabbar-h)+env(safe-area-inset-bottom)+88px)] lg:pb-10">
+          {children}
+        </main>
+      </div>
+      <TabBar />
+      <AskPanel />
+    </div>
   );
 }

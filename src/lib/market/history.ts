@@ -1,3 +1,4 @@
+import { FIXTURE, fixtureHistory } from "@/lib/dev/fixture";
 /**
  * Layer 1: daily price history (free, delayed). Yahoo chart first, Stooq daily CSV as a fallback.
  * Closes are split- and dividend-adjusted where the provider gives an adjusted close.
@@ -41,6 +42,7 @@ export function parseStooqHistory(symbol: string, csv: string): History | null {
 export type Range = "3mo" | "6mo" | "1y" | "2y" | "5y";
 
 export async function getHistory(symbol: string, range: Range = "1y"): Promise<History | null> {
+  if (FIXTURE) return fixtureHistory(symbol, range);
   const sym = symbol.toUpperCase();
   try {
     const url = `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(sym)}?range=${range}&interval=1d&events=div,split`;

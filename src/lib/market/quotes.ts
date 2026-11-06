@@ -1,3 +1,4 @@
+import { FIXTURE, fixtureQuote } from "@/lib/dev/fixture";
 /**
  * Layer 1: market data. Prices come only from a provider, never from the AI layer.
  * Primary: Yahoo Finance chart endpoint (free, delayed for some exchanges). Fallback: Stooq CSV.
@@ -64,6 +65,7 @@ async function fetchStooq(symbol: string): Promise<Quote | null> {
 }
 
 export async function getQuote(symbol: string): Promise<Quote | null> {
+  if (FIXTURE) return fixtureQuote(symbol);
   try {
     const q = await fetchYahoo(symbol);
     if (q) return q;

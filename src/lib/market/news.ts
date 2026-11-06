@@ -1,3 +1,4 @@
+import { FIXTURE, fixtureNews } from "@/lib/dev/fixture";
 /**
  * Layer 1: headlines from free RSS feeds (Yahoo Finance, then Google News as a fallback).
  * Headlines are unverified third-party text: the app shows them with source and time,
@@ -64,6 +65,7 @@ async function rss(url: string): Promise<string | null> {
 }
 
 export async function getNews(symbol: string, companyName?: string | null, limit = 8): Promise<NewsResult | { error: string }> {
+  if (FIXTURE) return fixtureNews(symbol.toUpperCase());
   const sym = symbol.toUpperCase();
   const yUrl = `https://feeds.finance.yahoo.com/rss/2.0/headline?s=${encodeURIComponent(sym)}&region=US&lang=en-US`;
   const y = await rss(yUrl);

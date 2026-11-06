@@ -26,15 +26,20 @@ export type Workspace = {
 /** Latest snapshot per account, with positions. */
 export async function loadSnapshots(db: SupabaseClient): Promise<SnapshotInput[]> {
   const { data: accounts } = await db.from("accounts").select("id, name, account_role");
+  // One query per account, run together rather than one after another.
+  const latest = await Promise.all(
+    (accounts ?? []).map(async (a) => {
+      const { data: snaps } = await db
+        .from("holding_snapshots")
+        .select("id, as_of, source_kind, total_value, cash_value, positions(symbol, quantity, price, market_value, cost_basis)")
+        .eq("account_id", a.id)
+        .order("as_of", { ascending: false })
+        .limit(1);
+      return { a, s: snaps?.[0] };
+    }),
+  );
   const out: SnapshotInput[] = [];
-  for (const a of accounts ?? []) {
-    const { data: snaps } = await db
-      .from("holding_snapshots")
-      .select("id, as_of, source_kind, total_value, cash_value, positions(symbol, quantity, price, market_value, cost_basis)")
-      .eq("account_id", a.id)
-      .order("as_of", { ascending: false })
-      .limit(1);
-    const s = snaps?.[0];
+  for (const { a, s } of latest) {
     if (!s) continue;
     out.push({
       accountId: a.id,
@@ -95,7 +100,7 @@ export async function loadLedger(db: SupabaseClient): Promise<LedgerEntry[]> {
 }
 
 export async function buildWorkspace(db: SupabaseClient, now = new Date()): Promise<Workspace> {
-  const [{ data: auth }, snapshots, research, policy, ledger] = await Promise.all([db.auth.getUser(), loadSnapshots(db), loadResearch(db), loadPolicy(db), loadLedger(db)]);
+  const [{ data: auth }, snapshots, research, policy, ledger] = await Promise.all([db.auth.getClaims(), loadSnapshots(db), loadResearch(db), loadPolicy(db), loadLedger(db)]);
   const symbols = [...new Set([...snapshots.flatMap((s) => s.positions.map((p) => p.symbol.toUpperCase())), ...ledger.filter((t) => t.symbol).map((t) => t.symbol!.toUpperCase())])];
   const quotes = await getQuotes([...symbols, ...BENCHMARKS.map((b) => b.symbol)]);
   const roles: Record<string, string | null> = Object.fromEntries(Object.values(policy?.companies ?? {}).map((c) => [c.symbol, c.role]));
@@ -103,7 +108,7 @@ export async function buildWorkspace(db: SupabaseClient, now = new Date()): Prom
   const portfolio = buildPortfolio(snapshots, quotes, policy, classifications, ledger, now);
   const benchmarks = BENCHMARKS.map((b) => ({ ...b, dayPct: dayChangePct(quotes.get(b.symbol)) }));
   const alerts = evaluateAlerts({ portfolio, research, marketDayPct: benchmarks[0].dayPct, now, freshnessDays: policy?.researchFreshnessDays, policy });
-  return { now, marketOpen: isMarketOpen(now), quotes, benchmarks, portfolio, research, policy, alerts, userId: auth.user?.id ?? null, ledger };
+  return { now, marketOpen: isMarketOpen(now), quotes, benchmarks, portfolio, research, policy, alerts, userId: auth?.claims?.sub ?? null, ledger };
 }
 
 /** One workspace per request, shared by the layout and the page. */

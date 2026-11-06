@@ -49,8 +49,8 @@ export default async function BriefPage({ searchParams }: { searchParams: Promis
     <div className="flex flex-col gap-6 max-w-3xl">
       <div className="flex flex-wrap items-baseline justify-between gap-2">
         <div>
-          <Link href="/" className="text-sm no-underline">← Today</Link>
-          <h1 className="font-serif text-2xl sm:text-3xl font-semibold">{weekly ? "Weekly brief" : "Daily brief"}</h1>
+          <Link href="/" className="text-sm no-underline max-lg:hidden">← Today</Link>
+          <h1 className="h1">{weekly ? "Weekly brief" : "Daily brief"}</h1>
           <p className="text-muted text-sm">{weekly && spyMove ? `Week of ${shortDate(spyMove.from)} to ${shortDate(spyMove.to)}` : dateLabel}</p>
         </div>
         <nav className="flex gap-1.5 text-sm" aria-label="Period">
@@ -61,7 +61,7 @@ export default async function BriefPage({ searchParams }: { searchParams: Promis
 
       <section aria-label="Summary" className={card}>
         {weekly ? (
-          <p className="font-serif text-lg leading-relaxed">
+          <p className="text-[16px] leading-relaxed">
             {change
               ? `Over the week, today's holdings would have moved ${pctStr(change.pct, 1, true)} (${usd(change.dollars)}) of investable capital, against ${pctStr(spyMove?.change, 1, true)} for the S&P 500.`
               : "Weekly price history is not available right now."}
@@ -69,7 +69,7 @@ export default async function BriefPage({ searchParams }: { searchParams: Promis
             {review.length ? ` ${review.length} item${review.length > 1 ? "s" : ""} to review.` : " Nothing needs a decision."}
           </p>
         ) : (
-          <p className="font-serif text-lg leading-relaxed">{daySentences.join(" ")}</p>
+          <p className="text-[16px] leading-relaxed">{daySentences.join(" ")}</p>
         )}
         <p className="text-xs text-muted">{weekly ? "Hypothetical: today's share counts at last week's prices, so trades and deposits during the week are not reflected. " : ""}Estimated investable capital {usd(p.total)}; protected reserve excluded.</p>
         {weekly && weekAgo && recordedNow && (

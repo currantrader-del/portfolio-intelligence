@@ -20,8 +20,8 @@ export default async function ReviewPage({ params }: { params: Promise<{ symbol:
     <div className="flex flex-col gap-6">
       <div className="flex flex-wrap items-end justify-between gap-4">
         <div>
-          <Link href="/" className="text-sm no-underline">← Today</Link>
-          <h1 className="font-serif text-3xl font-semibold mt-1">Review {sym}</h1>
+          <Link href="/" className="text-sm no-underline max-lg:hidden">← Today</Link>
+          <h1 className="h1 mt-1">Review {sym}</h1>
           <div className="text-sm text-muted">
             <span className="font-mono">{usd(rv.price, 2)} <span className={toneOf(rv.dayPct)}>{pctStr(rv.dayPct, 1, true)}</span></span>
             {rv.priceSource === "statement" && " (statement price)"} · your position {pctStr(rv.weight)} of the portfolio, {usd(rv.value)}
@@ -47,7 +47,7 @@ export default async function ReviewPage({ params }: { params: Promise<{ symbol:
               <h2 id="th-h" className="font-semibold mr-1">Thesis on file</h2>
               {rv.researchAsOf ? <><Tag tone={rv.completeness === "complete" ? "accent" : "warn"}>{rv.completeness}</Tag><Tag>{shortDate(rv.researchAsOf)} · {rv.researchAge} days old</Tag></> : <Tag tone="warn">No current research</Tag>}
             </div>
-            {rv.thesis ? <p className="font-serif text-[17px] leading-relaxed">{rv.thesis}</p> : <p className="text-ink-2">Nothing stored. <Link href={`/research/${sym}`}>Open research</Link></p>}
+            {rv.thesis ? <p className="text-[16px] leading-relaxed">{rv.thesis}</p> : <p className="text-ink-2">Nothing stored. <Link href={`/research/${sym}`}>Open research</Link></p>}
             {rv.researchAction && <p className="text-sm text-muted">Research action then: {rv.researchAction} at {usd(rv.referencePrice, 2)}.</p>}
           </section>
 
@@ -71,7 +71,7 @@ export default async function ReviewPage({ params }: { params: Promise<{ symbol:
         <aside className="flex-[1_1_340px] min-w-0 flex flex-col gap-6">
           <section className="bg-chrome text-chrome-ink rounded-2xl p-6 flex flex-col gap-3">
             <h2 className="text-xs font-semibold tracking-wider text-chrome-muted">SUGGESTION · CONFIDENCE {rv.suggestion.confidence}/10</h2>
-            <div className="font-serif text-2xl font-semibold">{rv.suggestion.label}</div>
+            <div className="h1">{rv.suggestion.label}</div>
             <p className="text-[15px] text-[#d9dbde]">{rv.suggestion.reason}</p>
             <div className="text-xs text-chrome-muted">Model output from your research and limits. For a written second opinion, use Deep review.</div>
           </section>

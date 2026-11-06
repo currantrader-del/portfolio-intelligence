@@ -1,175 +1,231 @@
 import Link from "next/link";
 import { getWorkspace } from "@/lib/workspace";
-import { Tag } from "@/components/Tag";
-import { DataQuality } from "@/components/DataQuality";
 import { isEtf, LOOKTHROUGH_AS_OF } from "@/lib/portfolio/classify";
+import { coverage } from "@/lib/research/status";
+import type { Holding } from "@/lib/portfolio/engine";
 import { pctStr, shortDate, toneOf, usd } from "@/lib/format";
+import { Bar, Card, CardHead, Cap, DataLabel, Disclose, Dot, LinkRow, Metric, PageHeader, Pill, Seg, Tick } from "@/components/ui";
+import { DataQualityNote } from "@/components/cards/DataQuality";
 
 const STATUS = {
   below: { tone: "warn", label: "Below range" },
-  within: { tone: "accent", label: "Within range" },
+  within: { tone: null, label: "Within range" },
   above: { tone: "warn", label: "Above range" },
-  over_max: { tone: "alert", label: "Over maximum" },
-  no_limit: { tone: "neutral", label: "No limit set" },
+  over_max: { tone: "loss", label: "Over maximum" },
+  no_limit: { tone: null, label: "No limit set" },
 } as const;
+const SWATCH = ["#c98c68", "#8a6a55", "#b9a089", "#5c6068", "#7b8590", "#45484f", "#34373d", "#2a2c31"];
+const SORTS = { value: "Value", day: "Today", gain: "Gain" } as const;
+type SortKey = keyof typeof SORTS;
 
-const time = (iso: string) => new Date(iso).toLocaleString("en-US", { month: "short", day: "numeric", hour: "numeric", minute: "2-digit", timeZone: "America/New_York" });
+const time = (iso: string) => new Date(iso).toLocaleString("en-US", { hour: "numeric", minute: "2-digit", timeZone: "America/New_York" });
+const pts = (v: number | null) => (v === null ? "—" : `${v >= 0 ? "+" : "−"}${Math.abs(v).toFixed(2)}`);
+const STALE_DAYS = 31;
 
-export default async function PortfolioPage() {
+export default async function PortfolioPage({ searchParams }: { searchParams: Promise<{ sort?: string }> }) {
+  const sp = await searchParams;
+  const sort: SortKey = sp.sort && sp.sort in SORTS ? (sp.sort as SortKey) : "value";
   const ws = await getWorkspace();
   const p = ws.portfolio;
   if (!p.holdings.length) {
     return (
-      <section className="bg-surface border border-line rounded-2xl p-6 max-w-3xl">
-        <h1 className="font-serif text-3xl font-semibold">Portfolio</h1>
-        <p className="text-ink-2 mt-2">No holdings loaded yet.</p>
-      </section>
+      <Card className="max-w-xl">
+        <h1 className="h1">Portfolio</h1>
+        <p className="t-sm">No holdings loaded yet.</p>
+        <div><Link href="/portfolio/reconcile" className="btn">Add a statement</Link></div>
+      </Card>
     );
   }
   const c = p.cashDetail;
   const session = ws.marketOpen ? "today" : "last session";
+  const verified = p.quality.status === "verified";
   const conflicts = new Set(ws.policy?.audit?.conflicts.map((x) => x.subject) ?? []);
+  const freshDays = ws.policy?.researchFreshnessDays ?? 120;
+  const name = (s: string) => ws.research.find((r) => r.symbol === s)?.name ?? null;
+  const exposure = new Map(p.exposures.map((e) => [e.symbol, e]));
+  const sorted = [...p.holdings].sort((a, b) =>
+    sort === "day" ? Math.abs(b.dayPct ?? 0) - Math.abs(a.dayPct ?? 0) : sort === "gain" ? (b.unrealized ?? -Infinity) - (a.unrealized ?? -Infinity) : b.value - a.value);
+  const first = sorted.slice(0, 6);
+  const rest = sorted.slice(6);
+  const accounts = p.accounts.filter((a) => a.role !== "cash" && a.role !== "protected_savings");
+  const buckets = p.buckets.filter((b) => b.weight > 0.0005 || b.hardMax !== null);
+  const sortItems = (Object.keys(SORTS) as SortKey[]).map((k) => ({ key: k, label: SORTS[k], href: k === "value" ? "/portfolio" : `/portfolio?sort=${k}` }));
 
   return (
-    <div className="flex flex-col gap-5">
-      <div className="flex flex-wrap items-end justify-between gap-3">
-        <div>
-          <h1 className="font-serif text-2xl sm:text-3xl font-semibold">Portfolio</h1>
-          <p className="text-muted text-sm">Investable capital (excludes the {usd(c.protectedReserve)} protected reserve)</p>
-        </div>
-        <div className="text-right">
-          <div className="text-xs text-muted">{p.quality.status === "verified" ? "Verified value" : "Estimated value"}</div>
-          <div className="font-mono text-2xl">{usd(p.total)}</div>
-          <div className={`font-mono text-sm ${toneOf(p.dayPct)}`}>{p.dayPct === null ? "No live change" : `${pctStr(p.dayPct, 2, true)} ${session} · ${usd(p.dayDollar)}`}</div>
-          {p.sinceStatementDollar !== null && <div className={`font-mono text-xs ${toneOf(p.sinceStatementDollar)}`}>{usd(p.sinceStatementDollar)} price change since statements (est.)</div>}
-        </div>
-      </div>
+    <div className="flex flex-col gap-3 lg:gap-4">
+      <PageHeader title="Portfolio" actionsDesktopOnly actions={<Link href="/portfolio/reconcile" className="btn max-lg:btn-sm">Reconcile</Link>} />
 
-      <DataQuality p={p} />
-
-      <section aria-labelledby="acc-h" className="grid gap-2 grid-cols-2 sm:grid-cols-4">
-        <h2 id="acc-h" className="sr-only">Accounts and cash</h2>
-        {p.accounts.filter((a) => a.role !== "cash" && a.role !== "protected_savings").map((a) => (
-          <div key={a.id} className="bg-surface border border-line rounded-xl p-3">
-            <div className="font-semibold text-sm leading-tight">{a.name}</div>
-            <div className="font-mono">{usd(a.value)}</div>
-            <div className="text-xs text-muted">{a.role === "retirement" ? "Roth IRA" : "Taxable"} · stmt {shortDate(a.asOf)}{a.tradesAfter ? ` + ${a.tradesAfter} recorded` : ""}</div>
+      <div className="grid grid-cols-1 gap-3 lg:gap-4 lg:grid-cols-12">
+        {/* Portfolio Summary */}
+        <Card className="lg:col-span-4" labelledBy="cap-h">
+          <CardHead id="cap-h" cap="Investable capital" right={<DataLabel kind={verified ? "verified" : "estimated"} />} />
+          <div className="flex flex-col gap-1.5">
+            <span className="t-big">{usd(p.total)}</span>
+            <span className="t-sm num">
+              {p.dayPct === null ? "No live change" : <><span className={toneOf(p.dayPct)}>{pctStr(p.dayPct, 2, true)} · {p.dayDollar !== null && p.dayDollar >= 0 ? "+" : ""}{usd(p.dayDollar)}</span> {session}</>}
+            </span>
           </div>
-        ))}
-        <div className="bg-surface border border-line rounded-xl p-3">
-          <div className="font-semibold text-sm">Cash</div>
-          <div className="font-mono">{usd(c.deployable)} <span className="font-sans text-xs text-muted">deployable</span></div>
-          <div className="text-xs text-muted">{usd(c.brokerage)} brokerage · {c.savings === null ? <Link href="/portfolio/reconcile">savings not entered</Link> : `${usd(c.deployableSavings)} savings above reserve`}</div>
-        </div>
-      </section>
-
-      <section aria-labelledby="hold-h" className="bg-surface border border-line rounded-2xl">
-        <div className="flex items-baseline justify-between px-4 pt-4">
-          <h2 id="hold-h" className="font-semibold">Holdings</h2>
-          <span className="text-xs text-muted">{p.pricedLive} of {p.holdings.length} priced from delayed quotes</span>
-        </div>
-        {/* Phones: compact rows. Larger screens: full table. */}
-        <ul className="sm:hidden divide-y divide-line mt-2">
-          {p.holdings.map((h) => (
-            <li key={h.symbol}>
-              <details className="px-4 py-2.5">
-                <summary className="flex items-center justify-between gap-2 cursor-pointer list-none">
-                  <span><span className="font-mono font-medium">{h.symbol}</span> <span className="text-xs text-muted">{pctStr(h.weight)}</span></span>
-                  <span className="text-right font-mono text-sm">{usd(h.value)} <span className={toneOf(h.dayPct)}>{pctStr(h.dayPct, 1, true)}</span></span>
-                </summary>
-                <dl className="grid grid-cols-2 gap-x-4 gap-y-1 text-xs mt-2">
-                  <dt className="text-muted">Price</dt><dd className="font-mono">{usd(h.price, 2)} · {h.priceSource === "quote" ? `quote ${time(h.priceAsOf)} ET` : `statement ${shortDate(h.priceAsOf)}`}</dd>
-                  <dt className="text-muted">Shares</dt><dd className="font-mono">{+h.quantity.toFixed(4)}</dd>
-                  <dt className="text-muted">Contribution {session}</dt><dd className={`font-mono ${toneOf(h.contributionPts)}`}>{h.contributionPts === null ? "—" : `${h.contributionPts >= 0 ? "+" : "−"}${Math.abs(h.contributionPts).toFixed(2)} pts`}</dd>
-                  <dt className="text-muted">Unrealized</dt><dd className={`font-mono ${toneOf(h.unrealized)}`}>{h.unrealized === null ? "basis unknown" : usd(h.unrealized)}</dd>
-                  <dt className="text-muted">Bucket</dt><dd>{h.bucket}</dd>
-                  <dt className="text-muted">Accounts</dt><dd>{h.accounts.join(", ")}</dd>
-                </dl>
-                {!isEtf(h.symbol) && <Link href={`/research/${h.symbol}`} className="text-xs">Research →</Link>}
-              </details>
-            </li>
-          ))}
-        </ul>
-        <div className="hidden sm:block overflow-x-auto">
-          <table className="w-full text-sm border-collapse mt-2">
-            <thead>
-              <tr className="text-left text-muted">
-                {["Symbol", "Value", "Weight", "Price · source", "Day", "Contrib.", "Unrealized", "Bucket"].map((x) => (
-                  <th key={x} scope="col" className="px-3 py-2 font-medium">{x}</th>
-                ))}
-              </tr>
-            </thead>
-            <tbody className="font-mono">
-              {p.holdings.map((h) => (
-                <tr key={h.symbol} className="border-t border-line">
-                  <td className="px-3 py-2"><Link href={`/research/${h.symbol}`} className="font-medium">{h.symbol}</Link><div className="font-sans text-xs text-muted">{h.accounts.join(", ")}</div></td>
-                  <td className="px-3 py-2">{usd(h.value)}</td>
-                  <td className="px-3 py-2">{pctStr(h.weight)}</td>
-                  <td className="px-3 py-2">{usd(h.price, 2)}<div className="font-sans text-xs text-muted">{h.priceSource === "quote" ? `quote ${time(h.priceAsOf)} ET` : `statement ${shortDate(h.priceAsOf)}`}</div></td>
-                  <td className={`px-3 py-2 ${toneOf(h.dayPct)}`}>{pctStr(h.dayPct, 1, true)}</td>
-                  <td className={`px-3 py-2 ${toneOf(h.contributionPts)}`}>{h.contributionPts === null ? "—" : `${h.contributionPts >= 0 ? "+" : "−"}${Math.abs(h.contributionPts).toFixed(2)}`}</td>
-                  <td className={`px-3 py-2 ${toneOf(h.unrealized)}`}>{h.unrealized === null ? <span className="font-sans text-xs text-muted">basis unknown</span> : usd(h.unrealized)}</td>
-                  <td className="px-3 py-2 font-sans text-xs text-ink-2">{h.bucket}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-        <p className="text-xs text-muted px-4 py-3">Day change and contributions use each quote&apos;s previous close and today&apos;s quantities. Contribution is in percentage points of investable capital.</p>
-      </section>
-
-      <div className="grid gap-5 lg:grid-cols-2">
-        <section aria-labelledby="bk-h" className="bg-surface border border-line rounded-2xl p-4">
-          <div className="flex items-baseline justify-between gap-2">
-            <h2 id="bk-h" className="font-semibold">Allocation against your policy</h2>
-            <Link href="/policy" className="text-sm">Policy →</Link>
+          <div className="divider" />
+          <div className="grid grid-cols-2 gap-2">
+            <Metric size="sm" label="Since statements" value={p.sinceStatementDollar === null ? "—" : `${p.sinceStatementDollar >= 0 ? "+" : ""}${usd(p.sinceStatementDollar)}`} note="price change, est." tone={p.sinceStatementDollar === null ? null : p.sinceStatementDollar >= 0 ? "gain" : "loss"} />
+            <Metric size="sm" label="Protected reserve" value={usd(c.protectedReserve)} note="excluded from sizing" />
           </div>
-          <p className="text-xs text-muted mb-3">{ws.policy?.version ?? "No policy"}</p>
-          <ul className="flex flex-col gap-3">
-            {p.buckets.map((b) => {
-              const s = STATUS[b.status];
-              const scale = Math.max(b.hardMax ?? 0, b.weight, b.normal?.high ?? 0, 0.01) * 1.1;
+          <DataQualityNote p={p} />
+        </Card>
+
+        <Card className="lg:col-span-4 !gap-1 !pb-1.5" labelledBy="acc-h">
+          <div className="mb-1"><CardHead id="acc-h" title="Accounts" right={<span className="t-xs">statement date</span>} /></div>
+          <div className="list">
+            {accounts.map((a) => {
+              const stale = a.ageDays > STALE_DAYS;
               return (
-                <li key={b.bucket} className="flex flex-col gap-1">
-                  <div className="flex items-center justify-between gap-2 text-sm">
-                    <span>{b.bucket}</span>
-                    <span className="flex items-center gap-2"><span className="font-mono">{pctStr(b.weight)}</span><Tag tone={s.tone}>{s.label}</Tag></span>
+                <div key={a.id} className="li !min-h-12">
+                  <div className="flex-1 min-w-0 flex flex-col">
+                    <span className="font-semibold truncate">{a.name}</span>
+                    <span className="t-xs">{a.role === "retirement" ? "Roth IRA" : "Taxable"} · {shortDate(a.asOf)}{a.tradesAfter ? ` + ${a.tradesAfter} recorded` : ""}{stale && <span className="warn"> · stale</span>}</span>
                   </div>
-                  <div className="relative h-2.5 rounded-sm bg-ground" aria-hidden="true">
-                    {b.normal && <div className="absolute h-2.5 bg-accent-soft border border-accent/30 rounded-sm" style={{ left: `${(b.normal.low / scale) * 100}%`, width: `${((b.normal.high - b.normal.low) / scale) * 100}%` }} />}
-                    <div className="absolute top-[3px] h-1 rounded-sm bg-ink" style={{ width: `${(b.weight / scale) * 100}%` }} />
-                    {b.hardMax !== null && <div className="absolute -top-0.5 h-3.5 w-0.5 bg-alert-ink" style={{ left: `${(b.hardMax / scale) * 100}%` }} />}
-                  </div>
-                  <div className="text-xs text-muted">{b.normal ? `Normal ${pctStr(b.normal.low, 0)}–${pctStr(b.normal.high, 0)}` : "No range"}{b.hardMax !== null ? ` · max ${pctStr(b.hardMax, 0)}` : ""}</div>
+                  <span className="num font-semibold">{usd(a.value)}</span>
+                </div>
+              );
+            })}
+            <Link href="/portfolio/reconcile" className="li !min-h-12">
+              <div className="flex-1 min-w-0 flex flex-col">
+                <span className="font-semibold">Cash and savings</span>
+                <span className="t-xs">{usd(c.brokerage)} in brokerage · {c.savings === null ? "savings not entered" : `${usd(c.deployableSavings)} savings above reserve`}</span>
+              </div>
+              {c.savings === null ? <Pill tone="warn">Add</Pill> : <span className="num font-semibold">{usd(c.deployable)}</span>}
+            </Link>
+          </div>
+        </Card>
+
+        {/* Allocation */}
+        <Card className="lg:col-span-4" labelledBy="al-h">
+          <CardHead id="al-h" title="Allocation" right={<Link href="/policy" className="t-xs no-underline hover:text-ink">vs policy</Link>} />
+          <div className="flex h-2.5 rounded-full overflow-hidden gap-0.5" role="img" aria-label={buckets.map((b) => `${b.bucket} ${pctStr(b.weight, 0)}`).join(", ")}>
+            {buckets.filter((b) => b.weight > 0).map((b, i) => <span key={b.bucket} style={{ width: `${b.weight * 100}%`, background: b.status === "over_max" ? "var(--warn-ink)" : SWATCH[i % SWATCH.length] }} />)}
+          </div>
+          <ul className="flex flex-col gap-2">
+            {buckets.map((b, i) => {
+              const s = STATUS[b.status];
+              const range = b.normal ? `${pctStr(b.normal.low, 0)}–${pctStr(b.normal.high, 0)}` : null;
+              return (
+                <li key={b.bucket} className="flex items-center justify-between gap-3 t-sm">
+                  <span className="flex items-center gap-2 min-w-0"><Dot style={{ color: b.status === "over_max" ? "var(--warn-ink)" : SWATCH[i % SWATCH.length] }} /><span className="truncate">{b.bucket}</span></span>
+                  <span className={`num shrink-0 ${s.tone === "loss" ? "warn" : s.tone === "warn" ? "text-ink" : ""}`} title={s.label}>
+                    {pctStr(b.weight, 0)} <span className="t-xs">· {b.status === "over_max" && b.hardMax !== null ? `max ${pctStr(b.hardMax, 0)}` : range ?? "no range"}</span>
+                    {b.status !== "within" && b.status !== "no_limit" && <span className="sr-only"> ({s.label})</span>}
+                  </span>
                 </li>
               );
             })}
           </ul>
-        </section>
+          <span className="t-xs">{ws.policy?.version ?? "No policy loaded"}</span>
+        </Card>
 
-        <section aria-labelledby="ex-h" className="bg-surface border border-line rounded-2xl p-4">
-          <h2 id="ex-h" className="font-semibold">Single-company exposure</h2>
-          <p className="text-xs text-muted mb-3">Direct plus approximate ETF look-through (index weights {LOOKTHROUGH_AS_OF}, not live)</p>
-          <ul className="flex flex-col divide-y divide-line">
+        {/* Holdings */}
+        <Card className="lg:col-span-12 !gap-2 !pb-1.5" labelledBy="hold-h">
+          <CardHead id="hold-h" title="Holdings" right={<span className="t-xs">{p.holdings.length} positions · {p.pricedLive} on delayed quotes</span>} />
+          <div className="lg:hidden"><Seg items={sortItems} current={sort} label="Sort holdings" /></div>
+
+          {/* Phones */}
+          <div className="list lg:hidden">
+            {first.map((h) => <HoldingRow key={h.symbol} h={h} name={name(h.symbol)} />)}
+          </div>
+          {rest.length > 0 && (
+            <div className="lg:hidden border-t border-line">
+              <Disclose summary={`Show ${rest.length} more`}>
+                <div className="list -mt-2">{rest.map((h) => <HoldingRow key={h.symbol} h={h} name={name(h.symbol)} />)}</div>
+              </Disclose>
+            </div>
+          )}
+
+          {/* Desktop */}
+          <div className="max-lg:hidden overflow-x-auto -mx-1">
+            <table className="tbl">
+              <thead>
+                <tr>
+                  <th scope="col">Holding</th><th scope="col">Bucket</th><th scope="col" className="n">Shares</th><th scope="col" className="n">Price</th>
+                  <th scope="col" className="n">Value</th><th scope="col" className="n">Today</th><th scope="col" className="n">Contrib.</th><th scope="col" className="n">Weight</th>
+                  <th scope="col">Exposure vs limit</th><th scope="col" className="n">Unrealized</th><th scope="col">Research</th>
+                </tr>
+              </thead>
+              <tbody>
+                {sorted.map((h) => {
+                  const e = exposure.get(h.symbol);
+                  const cov = isEtf(h.symbol) ? null : coverage(ws.research.find((r) => r.symbol === h.symbol), h.price, ws.now, freshDays);
+                  return (
+                    <tr key={h.symbol}>
+                      <td><Link href={`/research/${h.symbol}`} className="no-underline"><strong className="text-ink">{h.symbol}</strong> <span className="t-xs">{name(h.symbol) ?? ""}</span></Link></td>
+                      <td className="whitespace-nowrap">{h.bucket.replace(" individual stocks", "").replace("/high-risk growth sleeve", "")}</td>
+                      <td className="n">{+h.quantity.toFixed(4)}</td>
+                      <td className="n" title={h.priceSource === "quote" ? `Delayed quote ${time(h.priceAsOf)} ET` : `Statement price ${shortDate(h.priceAsOf)}`}>{usd(h.price, 2)}{h.priceSource === "statement" && <span className="t-xs"> stmt</span>}</td>
+                      <td className="n text-ink">{usd(h.value)}</td>
+                      <td className={`n ${toneOf(h.dayPct)}`}>{pctStr(h.dayPct, 1, true)}</td>
+                      <td className={`n ${toneOf(h.contributionPts)}`}>{pts(h.contributionPts)}</td>
+                      <td className="n">{pctStr(h.weight)}</td>
+                      <td>
+                        {e && !isEtf(h.symbol) ? (
+                          <div className="flex items-center gap-2 min-w-40">
+                            <div className="w-24"><Bar thin value={e.total} max={e.max} /></div>
+                            <span className="t-xs num whitespace-nowrap">{(e.total * 100).toFixed(1)} / {(e.max * 100).toFixed(0)}{conflicts.has(h.symbol) && <span className="warn"> · conflict</span>}</span>
+                          </div>
+                        ) : <span className="t-xs">—</span>}
+                      </td>
+                      <td className={`n ${toneOf(h.unrealized)}`}>{h.unrealized === null ? <span className="t-xs">basis unknown</span> : usd(h.unrealized)}</td>
+                      <td>{cov ? <Pill small tone={cov.tone} dot={cov.dot} title={cov.detail}>{cov.label}</Pill> : <span className="t-xs">ETF</span>}</td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+          <p className="t-xs py-2">Prices are delayed quotes where available, otherwise the statement price. Contribution is in points of investable capital; day change uses each quote&apos;s previous close.</p>
+        </Card>
+
+        {/* Allocation / Exposure */}
+        <Card className="lg:col-span-12" labelledBy="ex-h">
+          <CardHead id="ex-h" title="Single-company exposure" right={<DataLabel kind="estimate" small>ETF look-through approx.</DataLabel>} />
+          <ul className="grid gap-x-8 gap-y-3 lg:grid-cols-2">
             {[...p.exposures].sort((a, b) => b.total - a.total).map((e) => {
               const lim = ws.policy?.companies[e.symbol];
+              const conflict = conflicts.has(e.symbol);
               return (
-                <li key={e.symbol} className="py-2 flex flex-col gap-0.5">
+                <li key={e.symbol} className="flex flex-col gap-1.5">
                   <div className="flex items-center justify-between gap-2">
-                    <span className="font-mono font-medium">{e.symbol}</span>
-                    <span className={`font-mono text-sm ${e.total > e.max ? "text-alert-ink" : ""}`}>{pctStr(e.total)} / {pctStr(e.max, 0)} max</span>
+                    <Link href={`/research/${e.symbol}`} className="t-sm text-ink font-semibold no-underline">{e.symbol}</Link>
+                    <span className="t-xs num">
+                      <span className="text-ink">{pctStr(e.total)}</span> · limit {pctStr(e.max, 0)}
+                      {conflict ? <span className="warn"> · conflict</span> : lim?.status === "approved" ? null : <span> · generic</span>}
+                    </span>
                   </div>
-                  <div className="flex flex-wrap items-center gap-1.5 text-xs text-muted">
-                    <span>{pctStr(e.direct)} direct · {pctStr(e.viaEtfs)} via ETFs · room {usd(e.headroomDollars)}</span>
-                    {conflicts.has(e.symbol) ? <Tag tone="alert">Limit conflict</Tag> : lim?.status === "approved" ? null : <Tag>Generic limit</Tag>}
-                  </div>
-                  {lim?.source && <div className="text-xs text-muted">Limit source: {lim.source}</div>}
+                  <Bar thin value={e.total} max={e.max} label={`${e.symbol} ${pctStr(e.total)} of a ${pctStr(e.max, 0)} limit`} />
+                  <span className="t-xs">{pctStr(e.direct)} direct · {pctStr(e.viaEtfs)} via ETFs · room {usd(e.headroomDollars)}</span>
                 </li>
               );
             })}
           </ul>
-        </section>
+          <p className="t-xs">Index weights as of {LOOKTHROUGH_AS_OF}, not live. Conflicted limits use the stricter source until you choose.</p>
+          <LinkRow href="/risk">Concentration and stress tests</LinkRow>
+        </Card>
       </div>
+      <Cap className="sr-only">End of portfolio</Cap>
     </div>
+  );
+}
+
+/** Holding Card (compact row for phones). */
+function HoldingRow({ h, name }: { h: Holding; name: string | null }) {
+  return (
+    <Link href={`/research/${h.symbol}`} className="li">
+      <Tick symbol={h.symbol} />
+      <span className="flex-1 min-w-0 flex flex-col">
+        <span className="font-semibold">{h.symbol}</span>
+        <span className="t-xs truncate">{name ?? h.bucket}</span>
+      </span>
+      <span className="flex flex-col items-end shrink-0">
+        <span className="num font-semibold">{usd(h.value)}</span>
+        <span className="t-xs num"><span className={toneOf(h.dayPct)}>{pctStr(h.dayPct, 1, true)}</span> · {pctStr(h.weight)}</span>
+      </span>
+    </Link>
   );
 }

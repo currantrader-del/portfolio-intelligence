@@ -5,14 +5,16 @@ import { getHistories, type Range } from "@/lib/market/history";
 import { buildRisk } from "@/lib/portfolio/risk";
 import { loadDaily } from "@/lib/portfolio/daily";
 import { LineChart } from "@/components/LineChart";
-import { Tag } from "@/components/Tag";
 import { pctStr, shortDate, toneOf, usd } from "@/lib/format";
+import { Bar, Card, CardHead, DataLabel, Disclose, Metric, PageHeader, Seg } from "@/components/ui";
+import { ExposureCard } from "@/components/cards/ExposureCard";
 
 const RANGES: { key: Range; label: string }[] = [
   { key: "3mo", label: "3M" }, { key: "6mo", label: "6M" }, { key: "1y", label: "1Y" }, { key: "2y", label: "2Y" },
 ];
-const card = "bg-surface border border-line rounded-2xl p-5 flex flex-col gap-3";
+const RANGE_WORD: Record<string, string> = { "3mo": "3 months", "6mo": "6 months", "1y": "1 year", "2y": "2 years" };
 const n2 = (v: number | null) => (v === null ? "—" : v.toFixed(2));
+const md = (iso: string | null | undefined) => (iso ? shortDate(iso).replace(/, \d{4}$/, "") : "");
 
 export default async function RiskPage({ searchParams }: { searchParams: Promise<{ range?: string }> }) {
   const sp = await searchParams;
@@ -33,121 +35,131 @@ export default async function RiskPage({ searchParams }: { searchParams: Promise
   });
   const s = risk.stats;
   const recorded = daily.filter((d) => d.investable > 0);
+  const conflicts = new Set(ws.policy?.audit?.conflicts.map((x) => x.subject) ?? []);
+  const exps = [...p.exposures].sort((a, b) => b.total - a.total);
+  const top = exps[0];
+  const others = exps.slice(1, 7);
+  const name = (sym: string) => ws.research.find((r) => r.symbol === sym)?.name ?? null;
+  const provider = histories.get("SPY")?.provider === "stooq" ? "Stooq" : "Yahoo";
 
   return (
-    <div className="flex flex-col gap-6">
-      <div>
-        <h1 className="font-serif text-2xl sm:text-3xl font-semibold">Risk and history</h1>
-        <p className="text-muted text-sm">How today&apos;s mix has behaved, and what a bad stretch could cost. Estimates from {histories.get("SPY")?.provider === "stooq" ? "Stooq" : "Yahoo"} daily prices, not advice.</p>
-      </div>
+    <div className="flex flex-col gap-3 lg:gap-4">
+      <PageHeader title="Risk" actions={<DataLabel kind="hypothetical">Hypothetical history</DataLabel>} />
 
-      <section aria-labelledby="hyp-h" className={card}>
-        <div className="flex flex-wrap items-center justify-between gap-2">
-          <h2 id="hyp-h" className="font-semibold">Today&apos;s holdings at past prices</h2>
-          <nav className="flex gap-1 text-sm" aria-label="Range">
-            {RANGES.map((r) => (
-              <Link key={r.key} href={`/risk?range=${r.key}`} aria-current={r.key === range ? "page" : undefined} className={`min-h-10 min-w-11 px-2 inline-flex items-center justify-center rounded-full border no-underline ${r.key === range ? "bg-ink text-ground border-ink" : "border-line-strong text-ink"}`}>{r.label}</Link>
-            ))}
-          </nav>
-        </div>
-        <p className="text-xs"><Tag tone="warn">Hypothetical</Tag> <span className="text-muted">Today&apos;s share counts and cash, priced at each past close. This is not your actual return: it ignores past trades, deposits and when you bought.</span></p>
-        <LineChart label="Hypothetical value of today's holdings versus the S&P 500" format={(v) => usd(v)}
-          series={[{ label: "Today's holdings", points: risk.series, color: "accent" }, { label: "S&P 500 (same start)", points: risk.benchmark, color: "muted", dashed: true }]} />
-        <dl className="grid grid-cols-2 sm:grid-cols-4 gap-3 text-sm">
-          <div><dt className="text-muted">Change over period</dt><dd className={`font-mono ${toneOf(s.ret)}`}>{pctStr(s.ret, 1, true)}</dd><dd className="text-xs text-muted">S&amp;P 500 {pctStr(s.benchRet, 1, true)}</dd></div>
-          <div><dt className="text-muted">Volatility (yearly)</dt><dd className="font-mono">{pctStr(s.vol)}</dd><dd className="text-xs text-muted">S&amp;P 500 {pctStr(s.benchVol)}</dd></div>
-          <div><dt className="text-muted">Largest drop</dt><dd className="font-mono text-loss">{pctStr(s.maxDrawdown)}</dd><dd className="text-xs text-muted">{s.drawdownFrom ? `${shortDate(s.drawdownFrom)} to ${shortDate(s.drawdownTo)}` : ""}</dd></div>
-          <div><dt className="text-muted">Beta to S&amp;P 500</dt><dd className="font-mono">{n2(s.beta)}</dd><dd className="text-xs text-muted">1.00 moves with the market</dd></div>
-        </dl>
-        {(risk.missing.length > 0 || risk.partial.length > 0) && (
-          <p className="text-xs text-muted">{risk.missing.length > 0 && `No price history for ${risk.missing.join(", ")}; held flat at today's value. `}{risk.partial.length > 0 && `Shorter history for ${risk.partial.join(", ")}; held at its first price before that.`}</p>
-        )}
-      </section>
+      <div className="grid grid-cols-1 gap-3 lg:gap-4 lg:grid-cols-12 items-start">
+        <div className="lg:col-span-7 flex flex-col gap-3 lg:gap-4 min-w-0">
+          <Seg label="Range" current={range} items={RANGES.map((r) => ({ key: r.key, label: r.label, href: `/risk?range=${r.key}` }))} />
 
-      <section aria-labelledby="sc-h" className={card}>
-        <div>
-          <h2 id="sc-h" className="font-semibold">What if</h2>
-          <p className="text-xs text-muted">Estimated effect on investable capital of {usd(p.total)}. The protected reserve and cash are not affected. Based on each holding&apos;s past behaviour; real moves can be larger.</p>
-        </div>
-        <ul className="flex flex-col divide-y divide-line">
-          {risk.scenarios.map((sc) => (
-            <li key={sc.key} className="py-2">
-              <details>
-                <summary className="cursor-pointer flex flex-wrap items-baseline justify-between gap-x-3 min-h-11 py-1">
-                  <span className="font-medium">{sc.name}</span>
-                  <span className="font-mono"><span className="text-loss">{usd(sc.dollars)}</span> <span className="text-muted text-sm">({pctStr(sc.pct, 1, true)})</span></span>
-                </summary>
-                <p className="text-xs text-muted mb-2">{sc.basis}</p>
-                {sc.lines.length > 0 && (
-                  <ul className="grid gap-1 text-sm font-mono sm:grid-cols-2">
-                    {sc.lines.slice(0, 12).map((l) => <li key={l.symbol} className="flex justify-between gap-2"><span>{l.symbol} {pctStr(l.move, 0, true)}</span><span className={toneOf(l.dollars)}>{usd(l.dollars)}</span></li>)}
-                  </ul>
-                )}
-              </details>
-            </li>
-          ))}
-        </ul>
-      </section>
+          {/* Chart Container */}
+          <Card labelledBy="hyp-h">
+            <CardHead id="hyp-h" cap={`Today's mix vs S&P 500 · ${RANGE_WORD[range]}`} />
+            <LineChart label="Hypothetical value of today's holdings versus the S&P 500" format={(v) => usd(v)}
+              series={[{ label: "Today's holdings", points: risk.series, color: "accent" }, { label: "S&P 500 (same start)", points: risk.benchmark, color: "muted", dashed: true }]} />
+            <div className="grid grid-cols-2 gap-3">
+              <Metric size="sm" label="Change" value={<><span className={toneOf(s.ret)}>{pctStr(s.ret, 1, true)}</span> <span className="t-xs">vs {pctStr(s.benchRet, 1, true)}</span></>} />
+              <Metric size="sm" label="Volatility, yearly" value={<>{pctStr(s.vol, 0)} <span className="t-xs">vs {pctStr(s.benchVol, 0)}</span></>} />
+              <Metric size="sm" label="Largest drop" value={<span className="loss">{pctStr(s.maxDrawdown)}</span>} note={s.drawdownFrom ? `${md(s.drawdownFrom)} – ${md(s.drawdownTo)}` : undefined} />
+              <Metric size="sm" label="Beta to S&P 500" value={n2(s.beta)} note={s.beta !== null ? `moves ${s.beta.toFixed(1)}× the market` : undefined} />
+            </div>
+            <p className="t-xs">Today&apos;s share counts and cash priced at each past close ({provider} daily prices). Not your actual return: it ignores past trades, deposits and when you bought.
+              {risk.missing.length > 0 && ` No history for ${risk.missing.join(", ")}; held flat.`}{risk.partial.length > 0 && ` Shorter history for ${risk.partial.join(", ")}.`}</p>
+          </Card>
 
-      <div className="grid gap-6 lg:grid-cols-2 items-start">
-        <section aria-labelledby="conc-h" className={card}>
-          <h2 id="conc-h" className="font-semibold">Concentration</h2>
-          <p className="text-sm">Your five largest company exposures, including what your index ETFs hold, are <span className="font-mono font-medium">{pctStr(risk.concentration.topFive)}</span> of investable capital. Across holdings you have the diversification of about <span className="font-mono font-medium">{risk.concentration.effectiveN.toFixed(1)}</span> equal-sized positions.</p>
-          <ul className="flex flex-col gap-1.5 text-sm font-mono">
-            {risk.concentration.top.map((t) => (
-              <li key={t.symbol} className="grid grid-cols-[64px_1fr_56px] items-center gap-2">
-                <Link href={`/research/${t.symbol}`} className="no-underline text-ink">{t.symbol}</Link>
-                <div className="h-2.5 rounded-sm bg-ground"><div className="h-2.5 rounded-sm bg-accent" style={{ width: `${Math.min(100, (t.weight / Math.max(0.01, risk.concentration.top[0]?.weight ?? 1)) * 100)}%` }} /></div>
-                <span className="text-right">{pctStr(t.weight)}</span>
-              </li>
-            ))}
-          </ul>
-        </section>
-
-        <section aria-labelledby="rec-h" className={card}>
-          <h2 id="rec-h" className="font-semibold">Recorded history</h2>
-          <p className="text-xs text-muted">What the app showed each day you opened it. This starts building now and becomes your real value history; rows stay labelled estimated until accounts sync automatically.</p>
-          {recorded.length >= 2 ? (
-            <LineChart label="Recorded investable capital by day" format={(v) => usd(v)} height={160} series={[{ label: "Investable capital (recorded)", points: recorded.map((d) => ({ date: d.as_of, value: d.investable })), color: "accent" }]} />
-          ) : (
-            <p className="text-sm">{recorded.length === 1 ? `First day recorded: ${shortDate(recorded[0].as_of)}, ${usd(recorded[0].investable)}.` : "Nothing recorded yet. The Today page records a row each market day it is opened."}</p>
-          )}
-          {recorded.length > 0 && <p className="text-xs text-muted">{recorded.filter((d) => d.quality === "verified").length} of {recorded.length} days verified.</p>}
-        </section>
-      </div>
-
-      <section aria-labelledby="hr-h" className={card}>
-        <h2 id="hr-h" className="font-semibold">By holding</h2>
-        <ul className="sm:hidden flex flex-col divide-y divide-line text-sm">
-          {[...risk.holdings].sort((a, b) => b.weight - a.weight).map((h) => (
-            <li key={h.symbol} className="py-2 grid grid-cols-2 gap-x-3 gap-y-0.5">
-              <Link href={`/research/${h.symbol}`} className="no-underline text-ink font-mono font-medium">{h.symbol}</Link>
-              <span className="text-right font-mono">{pctStr(h.weight)} <span className={toneOf(h.ret)}>{pctStr(h.ret, 0, true)}</span></span>
-              <span className="text-xs text-muted col-span-2">Volatility {pctStr(h.vol, 0)} · largest drop {pctStr(h.maxDrawdown, 0)} · beta {n2(h.beta)}{h.partial ? ` · ${h.historyDays} days of history` : ""}</span>
-            </li>
-          ))}
-        </ul>
-        <div className="hidden sm:block overflow-x-auto -mx-1">
-          <table className="w-full text-sm">
-            <thead className="text-xs text-muted text-left"><tr>
-              <th className="font-normal px-1 py-1">Holding</th><th className="font-normal px-1 text-right">Weight</th><th className="font-normal px-1 text-right">Change</th><th className="font-normal px-1 text-right">Volatility</th><th className="font-normal px-1 text-right">Largest drop</th><th className="font-normal px-1 text-right">Beta</th>
-            </tr></thead>
-            <tbody className="divide-y divide-line font-mono">
-              {[...risk.holdings].sort((a, b) => b.weight - a.weight).map((h) => (
-                <tr key={h.symbol}>
-                  <td className="px-1 py-1.5"><Link href={`/research/${h.symbol}`} className="no-underline text-ink">{h.symbol}</Link>{h.partial && <span className="text-xs text-muted font-sans"> · {h.historyDays}d</span>}</td>
-                  <td className="px-1 text-right">{pctStr(h.weight)}</td>
-                  <td className={`px-1 text-right ${toneOf(h.ret)}`}>{pctStr(h.ret, 0, true)}</td>
-                  <td className="px-1 text-right">{pctStr(h.vol, 0)}</td>
-                  <td className="px-1 text-right text-loss">{pctStr(h.maxDrawdown, 0)}</td>
-                  <td className="px-1 text-right">{n2(h.beta)}</td>
-                </tr>
+          {/* Risk card: stress tests */}
+          <Card className="!gap-1 !pb-2" labelledBy="sc-h">
+            <div className="mb-1.5"><CardHead id="sc-h" title="Stress tests" right={<DataLabel kind="estimate" />} /></div>
+            <div className="list">
+              {risk.scenarios.map((sc) => (
+                <details key={sc.key} className="disclose border-t border-line first:border-t-0">
+                  <summary className="!min-h-[52px]">
+                    <span className="flex flex-col min-w-0">
+                      <span className="font-semibold text-ink text-[14px]">{sc.name}</span>
+                      <span className="t-xs truncate">{sc.basis.split(".")[0]}</span>
+                    </span>
+                    <span className="flex flex-col items-end shrink-0">
+                      <span className="num font-semibold loss">{usd(sc.dollars)}</span>
+                      <span className="t-xs num">{pctStr(sc.pct, 1, true)}</span>
+                    </span>
+                  </summary>
+                  <div className="disclose-body">
+                    <p className="t-xs">{sc.basis}</p>
+                    {sc.lines.length > 0 && (
+                      <ul className="grid gap-x-6 gap-y-1 t-sm num sm:grid-cols-2">
+                        {sc.lines.slice(0, 12).map((l) => <li key={l.symbol} className="flex justify-between gap-2"><span>{l.symbol} {pctStr(l.move, 0, true)}</span><span className={toneOf(l.dollars)}>{usd(l.dollars)}</span></li>)}
+                      </ul>
+                    )}
+                  </div>
+                </details>
               ))}
-            </tbody>
-          </table>
+            </div>
+            <span className="t-xs">Effect on investable capital of {usd(p.total)}. Cash and the protected reserve are never shocked. Based on past behaviour; real moves can be larger.</span>
+          </Card>
         </div>
-        <p className="text-xs text-muted">Over the selected range{risk.start ? `, ${shortDate(risk.start)} to ${shortDate(risk.asOf)}` : ""}. Volatility is yearly; beta is against the S&amp;P 500.</p>
-      </section>
+
+        <div className="lg:col-span-5 flex flex-col gap-3 lg:gap-4 min-w-0">
+          {top && <ExposureCard e={top} name={name(top.symbol)} limit={ws.policy?.companies[top.symbol]} conflict={conflicts.has(top.symbol)} />}
+
+          {/* Allocation / exposure */}
+          <Card labelledBy="ox-h">
+            <CardHead id="ox-h" title="Other exposures" right={<span className="t-xs">of investable</span>} />
+            {others.map((e) => {
+              const c = conflicts.has(e.symbol);
+              return (
+                <div key={e.symbol} className="flex flex-col gap-1.5">
+                  <div className="flex items-center justify-between gap-3">
+                    <Link href={`/research/${e.symbol}`} className="t-sm text-ink no-underline">{e.symbol}</Link>
+                    <span className="t-xs num"><span className="text-ink">{pctStr(e.total)}</span> · limit {pctStr(e.max, 0)}{c && <span className="warn"> conflict</span>}</span>
+                  </div>
+                  <Bar thin value={e.total} max={e.max} label={`${e.symbol} ${pctStr(e.total)} of ${pctStr(e.max, 0)}`} />
+                </div>
+              );
+            })}
+            <div className="divider" />
+            <div className="flex items-center justify-between gap-3"><span className="t-sm">Top 5 companies</span><span className="t-sm num text-ink font-semibold">{pctStr(risk.concentration.topFive, 0)} of capital</span></div>
+            <span className="t-xs">Diversified like about {risk.concentration.effectiveN.toFixed(0)} equal positions (ETF holdings included). Conflicted limits use the stricter source until you choose.</span>
+          </Card>
+
+          <Card flush>
+            <Disclose summary="By holding">
+              <div className="overflow-x-auto -mx-1">
+                <table className="tbl">
+                  <thead><tr><th>Holding</th><th className="n">Weight</th><th className="n">Change</th><th className="n">Vol.</th><th className="n">Drop</th><th className="n">Beta</th></tr></thead>
+                  <tbody>
+                    {[...risk.holdings].sort((a, b) => b.weight - a.weight).map((h) => (
+                      <tr key={h.symbol}>
+                        <td><Link href={`/research/${h.symbol}`} className="no-underline text-ink">{h.symbol}</Link>{h.partial && <span className="t-xs"> · {h.historyDays}d</span>}</td>
+                        <td className="n">{pctStr(h.weight)}</td>
+                        <td className={`n ${toneOf(h.ret)}`}>{pctStr(h.ret, 0, true)}</td>
+                        <td className="n">{pctStr(h.vol, 0)}</td>
+                        <td className="n loss">{pctStr(h.maxDrawdown, 0)}</td>
+                        <td className="n">{n2(h.beta)}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+              <p className="t-xs">{risk.start ? `${shortDate(risk.start)} to ${shortDate(risk.asOf)}. ` : ""}Volatility is yearly; beta is against the S&amp;P 500.</p>
+            </Disclose>
+            <Disclose summary="Methodology and data">
+              <ul className="t-sm list-disc pl-4 flex flex-col gap-1">
+                <li>History is hypothetical: today&apos;s share counts at past daily closes, with cash held flat.</li>
+                <li>Index scenarios move each holding by its beta to that index; the single-company scenario includes its approximate weight inside your index ETFs.</li>
+                <li>ETF look-through weights are approximate reference data, not live.</li>
+                <li>Prices: {provider} daily closes, adjusted where available.</li>
+              </ul>
+            </Disclose>
+            <Disclose summary={`Recorded history${recorded.length ? ` · started ${md(recorded[0].as_of)}` : ""}`}>
+              <p className="t-xs">What the app showed each day you opened it. This is your real value history; rows stay labelled estimated until accounts sync automatically.</p>
+              {recorded.length >= 2 ? (
+                <LineChart label="Recorded investable capital by day" format={(v) => usd(v)} height={150} series={[{ label: "Investable capital (recorded)", points: recorded.map((d) => ({ date: d.as_of, value: d.investable })), color: "accent" }]} />
+              ) : (
+                <p className="t-sm">{recorded.length === 1 ? `First day recorded: ${shortDate(recorded[0].as_of)}, ${usd(recorded[0].investable)}.` : "Nothing recorded yet. Opening Today records a row each market day."}</p>
+              )}
+              {recorded.length > 0 && <p className="t-xs">{recorded.filter((d) => d.quality === "verified").length} of {recorded.length} days verified.</p>}
+            </Disclose>
+          </Card>
+        </div>
+      </div>
     </div>
   );
 }

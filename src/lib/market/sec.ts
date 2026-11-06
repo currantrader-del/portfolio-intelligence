@@ -1,3 +1,4 @@
+import { FIXTURE, fixtureFilings, fixtureFundamentals } from "@/lib/dev/fixture";
 /**
  * Layer 1: SEC EDGAR (free, official). Filings come from the submissions API and
  * fundamentals from XBRL company concepts. Every result carries its source URL and fetch time.
@@ -169,6 +170,7 @@ export async function lookupCik(symbol: string): Promise<{ cik: string; title: s
 }
 
 export async function getFilings(symbol: string, now = new Date()): Promise<FilingsResult | { error: string }> {
+  if (FIXTURE) return fixtureFilings(symbol.toUpperCase());
   const id = await lookupCik(symbol);
   if (!id) return { error: `${symbol} was not found in SEC EDGAR (it may be an ETF, a fund, or SEC could not be reached).` };
   const src = `https://data.sec.gov/submissions/CIK${id.cik}.json`;
@@ -182,6 +184,7 @@ export async function getFilings(symbol: string, now = new Date()): Promise<Fili
 export type Fundamentals = { cik: string; company: string; metrics: Metric[]; missing: string[]; source: string; fetchedAt: string };
 
 export async function getFundamentals(symbol: string): Promise<Fundamentals | { error: string }> {
+  if (FIXTURE) return fixtureFundamentals(symbol.toUpperCase());
   const id = await lookupCik(symbol);
   if (!id) return { error: `${symbol} was not found in SEC EDGAR (it may be an ETF, a fund, or SEC could not be reached).` };
   const results = await Promise.all(

@@ -55,7 +55,7 @@ export default async function PolicyPage({ searchParams }: { searchParams: Promi
   const ws = await getWorkspace();
   const audit = ws.policy?.audit;
   if (!audit) {
-    return <section className="bg-surface border border-line rounded-2xl p-6"><h1 className="font-serif text-2xl font-semibold">Policy</h1><p className="text-ink-2 mt-2">No versioned rules loaded yet.</p></section>;
+    return <section className="bg-surface border border-line rounded-2xl p-6"><h1 className="h1">Policy</h1><p className="text-ink-2 mt-2">No versioned rules loaded yet.</p></section>;
   }
   const by = (scope: string) => audit.subjects.filter((s) => s.scope === scope);
   const assumptionRows = by("assumption");
@@ -64,8 +64,8 @@ export default async function PolicyPage({ searchParams }: { searchParams: Promi
   return (
     <div className="flex flex-col gap-6">
       <div>
-        <Link href="/portfolio" className="text-sm no-underline">← Portfolio</Link>
-        <h1 className="font-serif text-2xl sm:text-3xl font-semibold mt-1">Investment policy</h1>
+        <Link href="/portfolio" className="text-sm no-underline max-lg:hidden">← Portfolio</Link>
+        <h1 className="h1 mt-1">Investment policy</h1>
         <p className="text-muted text-sm">Every limit from every version of your policy and research, with its source and status. Nothing is deleted; changes supersede.</p>
       </div>
       {sp.saved && <p className="rounded-xl bg-accent-soft px-4 py-2 text-sm">Saved. {sp.saved} now uses the rule you approved.</p>}

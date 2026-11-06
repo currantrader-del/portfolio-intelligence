@@ -21,8 +21,8 @@ export default async function ReconcilePage({ searchParams }: { searchParams: Pr
   return (
     <div className="flex flex-col gap-6">
       <div>
-        <Link href="/portfolio" className="text-sm no-underline">← Portfolio</Link>
-        <h1 className="font-serif text-2xl sm:text-3xl font-semibold mt-1">Reconcile holdings and cash</h1>
+        <Link href="/portfolio" className="text-sm no-underline max-lg:hidden">← Portfolio</Link>
+        <h1 className="h1 mt-1">Reconcile holdings and cash</h1>
         <p className="text-muted text-sm">Statements are the verified starting point. Anything after a statement date only counts if it is recorded here.</p>
       </div>
       {sp.saved && <p className="rounded-xl bg-accent-soft px-4 py-2 text-sm">Saved. Every page now uses it.</p>}
