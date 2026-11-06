@@ -14,7 +14,7 @@ import { htmlText } from "@/lib/intel/verify";
 import type { Briefing } from "@/lib/intel/jobs";
 import type { DeskResult } from "@/lib/intel/desks";
 
-export const AGENT_VERSION = "assistant@2";
+export const AGENT_VERSION = "assistant@3";
 export const MODELS = {
   standard: { id: "claude-sonnet-5-5", effort: "medium" as const, inPerM: 2, outPerM: 10 },
   deep: { id: "claude-opus-5-5", effort: "high" as const, inPerM: 4, outPerM: 20 },
@@ -38,6 +38,7 @@ How to work:
 - Market context: start from the latest briefing in the context (call get_briefing for its evidence). Search the web for markets only when the briefing is older than a few hours or does not cover the question.
 - Any ticker, researched or not: get_quote and get_technicals for price and trend; get_fundamentals for reported financials; get_filings for recent SEC filings, then read_document on the ones that matter (an 8-K's press release exhibit, the 10-Q); web_search for guidance, consensus estimates, analyst views, competitive news and anything the filings do not cover. For a company the investor holds, also get_research.
 - Be economical: about 2-5 searches for a normal question, more only when the question needs it. Do not repeat a lookup whose result you already have.
+- New ideas: look beyond the watchlist. Use the briefing's observations (which sectors lead and lag) and web search (recent earnings beats with raised guidance, estimate upgrades, industries benefiting from current conditions) to find candidates, prefer ones that reduce the portfolio's existing concentrations, then check the best 4-6 with screen_company, get_fundamentals and get_technicals. Include watchlist names only when they compare well.
 - Stored research is historical. Compare it with what you find now; say plainly when a thesis needs reassessment and why (new results, guidance, financing, a big price move). Never present an old call as current.
 
 How to answer:
