@@ -8,6 +8,7 @@ import type { Workspace } from "@/lib/workspace";
 import { getQuote } from "@/lib/market/quotes";
 import { getFilings, getFundamentals } from "@/lib/market/sec";
 import { getNews } from "@/lib/market/news";
+import { screenCompany } from "@/lib/research/screen";
 import { newCapital } from "@/lib/decision/newCapital";
 import { expectedReturnAt, repriceCheck, scenarioReturnsAt, zoneFor } from "@/lib/research/valuation";
 import { researchAgeDays } from "@/lib/research/records";
@@ -65,6 +66,18 @@ export const TOOLS: Anthropic.Beta.BetaTool[] = [
   {
     name: "get_fundamentals",
     description: "Reported financials from SEC XBRL data: revenue, operating income, net income, diluted EPS, operating cash flow, capital spending (latest quarter, same quarter last year, year-over-year change, latest fiscal year, trailing 12 months) plus cash, long-term debt and shares outstanding. Each figure has its period end and filing date.",
+    input_schema: { type: "object", properties: { symbol: { type: "string" } }, required: ["symbol"], additionalProperties: false },
+    strict: true,
+  },
+  {
+    name: "get_pipeline",
+    description: "The research pipeline: every company outside the holdings with its stage (idea, screening, researching, ready, passed), note, stored screen verdict and date, and research coverage. Use to answer what is being researched or what is ready for new money.",
+    input_schema: { type: "object", properties: {}, required: [], additionalProperties: false },
+    strict: true,
+  },
+  {
+    name: "screen_company",
+    description: "Runs the deterministic first-pass screen for any US-listed ticker from SEC data and a quote: growth, operating profit, free cash flow, debt vs cash, dilution, price to sales, next report. Returns a verdict about whether full research is worthwhile and what to verify. It is not a buy signal and does not save anything.",
     input_schema: { type: "object", properties: { symbol: { type: "string" } }, required: ["symbol"], additionalProperties: false },
     strict: true,
   },
@@ -188,6 +201,22 @@ export async function runTool(name: string, input: Record<string, unknown>, ws: 
         missing: r.missing,
         metrics: r.metrics.map((m) => ({ metric: m.label, unit: m.unit, latest_quarter: m.latestQuarter, year_ago_quarter: m.yearAgoQuarter, yoy_change: r4(m.yoy), latest_fiscal_year: m.latestAnnual, trailing_12m: m.ttm, latest: m.latest })),
       };
+    }
+    case "get_pipeline": {
+      const held = new Set(p.holdings.map((h) => h.symbol));
+      return {
+        layer: "research",
+        companies: ws.research.filter((r) => !held.has(r.symbol)).map((r) => ({
+          symbol: r.symbol, name: r.name, stage: r.pipeline.stage === "owned" ? "researching" : r.pipeline.stage, note: r.pipeline.note, stage_since: r.pipeline.stageUpdatedAt,
+          screen: r.pipeline.screen ? { verdict: r.pipeline.screen.verdict, screened_at: r.pipeline.screenedAt, to_verify: r.pipeline.screen.toVerify } : null,
+          research_as_of: (r.current ?? r.latest)?.research_as_of ?? null, research_completeness: (r.current ?? r.latest)?.completeness ?? null, conflict: r.conflict,
+        })),
+      };
+    }
+    case "screen_company": {
+      const sym = String(input.symbol ?? "").toUpperCase();
+      const [fundamentals, filings, q] = await Promise.all([getFundamentals(sym), getFilings(sym, ws.now), ws.quotes.get(sym) ? Promise.resolve(ws.quotes.get(sym)!) : getQuote(sym)]);
+      return { layer: "model_output", note: "Screening defaults, not policy. Decides whether to research, never whether to buy.", ...screenCompany({ symbol: sym, fundamentals, filings: "error" in filings ? null : filings, price: q?.price ?? null, priceAsOf: q?.asOf ?? null, now: ws.now }) };
     }
     case "get_news": {
       const sym = String(input.symbol ?? "").toUpperCase();

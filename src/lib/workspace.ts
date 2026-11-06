@@ -59,9 +59,13 @@ export async function loadSnapshots(db: SupabaseClient): Promise<SnapshotInput[]
 export async function loadResearch(db: SupabaseClient): Promise<ResearchRecord[]> {
   const { data } = await db
     .from("companies")
-    .select("symbol, name, watchlist_status, research_versions(id, research_as_of, completeness, origin, is_current, conclusion)")
+    .select("symbol, name, watchlist_status, pipeline_stage, pipeline_note, stage_updated_at, screen, screened_at, research_versions(id, research_as_of, completeness, origin, is_current, conclusion)")
     .order("symbol");
-  return (data ?? []).map((c) => toResearchRecord(c.symbol, c.name, c.watchlist_status, (c.research_versions ?? []) as VersionRow[]));
+  return (data ?? []).map((c) =>
+    toResearchRecord(c.symbol, c.name, c.watchlist_status, (c.research_versions ?? []) as VersionRow[], {
+      stage: c.pipeline_stage ?? "idea", note: c.pipeline_note ?? null, stageUpdatedAt: c.stage_updated_at ?? null, screen: c.screen ?? null, screenedAt: c.screened_at ?? null,
+    }),
+  );
 }
 
 /**

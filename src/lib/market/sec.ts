@@ -106,8 +106,11 @@ const asPeriod = (f: Fact | undefined): Period | null => (f ? { start: f.start ?
 export function summariseFacts(facts: Fact[], kind: "flow" | "instant"): Pick<Metric, "latestQuarter" | "yearAgoQuarter" | "yoy" | "latestAnnual" | "ttm" | "latest"> {
   const all = dedupe(facts.filter((f) => Number.isFinite(f.val) && f.end));
   if (kind === "instant") {
-    const latest = all.filter((f) => !f.start).at(-1) ?? all.at(-1);
-    return { latestQuarter: null, yearAgoQuarter: null, yoy: null, latestAnnual: null, ttm: null, latest: asPeriod(latest) };
+    const pts = all.filter((f) => !f.start);
+    const latest = pts.at(-1) ?? all.at(-1);
+    const prior = latest ? pts.find((x) => Math.abs(days(x.end, latest.end) - 365) <= 45) : undefined;
+    const yoy = latest && prior && prior.val !== 0 ? (latest.val - prior.val) / Math.abs(prior.val) : null;
+    return { latestQuarter: null, yearAgoQuarter: asPeriod(prior), yoy, latestAnnual: null, ttm: null, latest: asPeriod(latest) };
   }
   const quarters = all.filter((f) => f.start && days(f.start, f.end) >= 80 && days(f.start, f.end) <= 100);
   const annuals = all.filter((f) => f.start && days(f.start, f.end) >= 350 && days(f.start, f.end) <= 380);

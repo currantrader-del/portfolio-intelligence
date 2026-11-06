@@ -5,7 +5,9 @@ import { getWorkspace } from "@/lib/workspace";
 import { researchAgeDays, type ResearchRecord } from "@/lib/research/records";
 import { repriceCheck } from "@/lib/research/valuation";
 import { isEtf } from "@/lib/portfolio/classify";
-import { pctStr } from "@/lib/format";
+import { pctStr, shortDate } from "@/lib/format";
+import { STAGES, type Stage } from "@/lib/research/screen";
+import { addToPipeline } from "./actions";
 
 type Coverage = { label: string; tone: "accent" | "warn" | "alert" | "neutral"; detail: string };
 
@@ -20,17 +22,25 @@ function coverage(r: ResearchRecord | undefined, price: number | null, now: Date
     : { label: "Refresh required", tone: "warn", detail: `${kind} · ${check.reason}` };
 }
 
-export default async function ResearchPage({ searchParams }: { searchParams: Promise<{ show?: string }> }) {
+const PIPE_STAGES = STAGES.filter((s) => s.key !== "owned");
+type PipeStage = Exclude<Stage, "owned">;
+const VERDICT_TONE = { "Worth researching": "accent", Mixed: "warn", "Weak on screen": "alert", "Not enough data": "neutral" } as const;
+
+export default async function ResearchPage({ searchParams }: { searchParams: Promise<{ stage?: string }> }) {
   const sp = await searchParams;
   const ws = await getWorkspace();
   const freshDays = ws.policy?.researchFreshnessDays ?? 120;
   const owned = ws.portfolio.holdings.filter((h) => !isEtf(h.symbol)).sort((a, b) => b.value - a.value);
   const ownedSet = new Set(owned.map((h) => h.symbol));
   const pipeline = ws.research.filter((r) => !ownedSet.has(r.symbol));
-  const researched = pipeline.filter((r) => r.current || r.latest);
-  const notResearched = pipeline.filter((r) => !r.current && !r.latest);
-  const show = sp.show === "all" ? "all" : "researched";
-  const list = show === "all" ? pipeline : researched;
+  const byStage = Object.fromEntries(PIPE_STAGES.map((s) => [s.key, [] as ResearchRecord[]])) as Record<PipeStage, ResearchRecord[]>;
+  for (const r of pipeline) {
+    // A company is only "owned" while it is in the holdings; otherwise it returns to research.
+    const st: PipeStage = r.pipeline.stage === "owned" ? "researching" : (r.pipeline.stage as PipeStage);
+    (byStage[st] ?? byStage.idea).push(r);
+  }
+  const want = sp.stage as PipeStage | undefined;
+  const stage: PipeStage = want && byStage[want] ? want : (["ready", "researching", "screening", "idea"] as PipeStage[]).find((k) => byStage[k].length) ?? "idea";
 
   return (
     <div className="flex flex-col gap-5">
@@ -70,28 +80,41 @@ export default async function ResearchPage({ searchParams }: { searchParams: Pro
         </ul>
       </section>
 
-      <section aria-labelledby="pipe-h" className="flex flex-col gap-2">
+      <section aria-labelledby="pipe-h" className="flex flex-col gap-3">
         <div className="flex flex-wrap items-baseline justify-between gap-2">
-          <h2 id="pipe-h" className="font-semibold">Opportunity pipeline</h2>
-          <nav className="flex gap-1.5 text-sm" aria-label="Filter pipeline">
-            <Link href="/research" className={`min-h-9 px-3 inline-flex items-center rounded-full border no-underline ${show === "researched" ? "bg-ink text-ground border-ink" : "border-line-strong text-ink"}`}>Researched ({researched.length})</Link>
-            <Link href="/research?show=all" className={`min-h-9 px-3 inline-flex items-center rounded-full border no-underline ${show === "all" ? "bg-ink text-ground border-ink" : "border-line-strong text-ink"}`}>All ({pipeline.length})</Link>
-          </nav>
+          <h2 id="pipe-h" className="font-semibold">Research pipeline</h2>
+          <span className="text-xs text-muted">Idea → Screening → Researching → Ready for decision</span>
         </div>
-        {list.length === 0 ? (
-          <p className="text-sm text-muted bg-surface border border-line rounded-xl px-4 py-3">No researched companies outside your holdings yet. {notResearched.length} watchlist names need research, for example {notResearched.slice(0, 4).map((r) => r.symbol).join(", ")}.</p>
+        <form action={addToPipeline} className="flex flex-wrap gap-2 items-end bg-surface border border-line rounded-xl p-3">
+          <label className="text-sm flex flex-col gap-1">Ticker<input name="symbol" required maxLength={10} placeholder="e.g. MSFT" className="rounded-lg border border-line-strong bg-ground px-3 min-h-10 w-28 font-mono uppercase" /></label>
+          <label className="text-sm flex flex-col gap-1 flex-1 min-w-40">Why it is interesting (optional)<input name="note" maxLength={300} className="rounded-lg border border-line-strong bg-ground px-3 min-h-10" /></label>
+          <button className="min-h-10 px-4 rounded-lg bg-ink text-ground font-medium">Add idea</button>
+        </form>
+        <nav className="flex flex-wrap gap-1.5 text-sm" aria-label="Pipeline stage">
+          {PIPE_STAGES.map((st) => (
+            <Link key={st.key} href={`/research?stage=${st.key}`} aria-current={stage === st.key ? "page" : undefined} className={`min-h-9 px-3 inline-flex items-center rounded-full border no-underline ${stage === st.key ? "bg-ink text-ground border-ink" : "border-line-strong text-ink"}`}>{st.label} ({byStage[st.key].length})</Link>
+          ))}
+        </nav>
+        <p className="text-xs text-muted -mt-1">{PIPE_STAGES.find((x) => x.key === stage)?.hint}</p>
+        {byStage[stage].length === 0 ? (
+          <p className="text-sm text-muted bg-surface border border-line rounded-xl px-4 py-3">Nothing at this stage.</p>
         ) : (
           <ul className="bg-surface border border-line rounded-xl divide-y divide-line">
-            {list.map((r) => {
+            {byStage[stage].map((r) => {
               const v = r.current ?? r.latest;
               const c = coverage(r, null, ws.now, freshDays);
+              const sc = r.pipeline.screen;
               return (
                 <li key={r.symbol}>
-                  <Link href={`/research/${r.symbol}`} className="flex items-center justify-between gap-3 px-4 py-2.5 no-underline text-ink hover:bg-ground">
-                    <span><span className="font-mono font-medium">{r.symbol}</span>{r.name && <span className="text-ink-2 text-sm"> · {r.name}</span>}</span>
-                    <span className="flex items-center gap-1.5 shrink-0">
-                      {v && <span className="text-xs text-muted hidden sm:inline">{ORIGIN_LABEL[v.origin] ?? v.origin}</span>}
-                      <Tag tone={v ? c.tone : "neutral"}>{v ? (v.parsed.action ?? c.label) : "Watching · research needed"}</Tag>
+                  <Link href={`/research/${r.symbol}`} className="flex flex-wrap items-center justify-between gap-x-3 gap-y-1 px-4 py-2.5 no-underline text-ink hover:bg-ground">
+                    <span className="min-w-0"><span className="font-mono font-medium">{r.symbol}</span>{r.name && <span className="text-ink-2 text-sm"> · {r.name}</span>}
+                      {r.pipeline.note && <span className="block text-xs text-muted truncate">{r.pipeline.note}</span>}
+                    </span>
+                    <span className="flex flex-wrap items-center gap-1.5 shrink-0 text-xs">
+                      {sc ? <Tag tone={VERDICT_TONE[sc.verdict]}>{sc.verdict}</Tag> : <Tag>Not screened</Tag>}
+                      {sc && <span className="text-muted">{shortDate(r.pipeline.screenedAt)}</span>}
+                      {v && <Tag tone={c.tone}>{c.label}</Tag>}
+                      {v && <span className="text-muted hidden sm:inline">{ORIGIN_LABEL[v.origin] ?? v.origin}</span>}
                     </span>
                   </Link>
                 </li>
@@ -100,7 +123,7 @@ export default async function ResearchPage({ searchParams }: { searchParams: Pro
           </ul>
         )}
       </section>
-      <p className="text-xs text-muted">Prices for pipeline names load on each company page.</p>
+      <p className="text-xs text-muted">The screen checks growth, profit, cash flow, debt, dilution and price to sales from SEC data. It decides what is worth researching; it never makes a buy call.</p>
     </div>
   );
 }

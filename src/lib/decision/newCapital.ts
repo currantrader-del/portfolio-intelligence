@@ -163,7 +163,7 @@ export function newCapital(args: {
 
   const stockOptions = portfolio.exposures.map((e) => stockOption(e.symbol, true));
   const heldSet = new Set(portfolio.holdings.map((h) => h.symbol));
-  const newOptions = research.filter((r) => !heldSet.has(r.symbol) && r.current).map((r) => stockOption(r.symbol, false));
+  const newOptions = research.filter((r) => !heldSet.has(r.symbol) && r.current && r.pipeline?.stage !== "passed").map((r) => stockOption(r.symbol, false));
 
   // ETFs: every core bucket, labelled by how far it sits from its range. Underweight is a reason to look, not to buy.
   const etfOptions: Option[] = portfolio.buckets
