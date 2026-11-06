@@ -27,12 +27,14 @@ export function parseBlsSchedule(text: string, release: string): Ev[] {
 
 /** BEA schedule rows: "November 25 8:30 AM News GDP (Second Estimate) and Corporate Profits, 3rd Quarter 2026". */
 export function parseBeaSchedule(text: string, year: number, keep: RegExp): Ev[] {
-  const re = /\b(January|February|March|April|May|June|July|August|September|October|November|December)\s+(\d{1,2})\s+(\d{1,2}:\d{2}\s*[AP]M)\s+(?:News|Article)\s+(.+?)(?=\s+(?:January|February|March|April|May|June|July|August|September|October|November|December)\s+\d{1,2}\s+\d{1,2}:\d{2}|$)/g;
+  // Tolerates responsive-table cell labels ("Date/Time", "Type", "Release") between the cells.
+  const M = "January|February|March|April|May|June|July|August|September|October|November|December";
+  const re = new RegExp(`\\b(${M})\\s+(\\d{1,2})\\s+(\\d{1,2}:\\d{2}\\s*[AP]M)\\s+(?:[A-Za-z/]+\\s+){0,2}?(?:News|Article)\\s+(?:Release\\s+)?(.+?)(?=\\s+(?:[A-Za-z/]+\\s+){0,2}?(?:${M})\\s+\\d{1,2}\\s+\\d{1,2}:\\d{2}|$)`, "g");
   const out: Ev[] = [];
   for (const m of text.matchAll(re)) {
     const [line, month, day, time, title] = m;
     if (!keep.test(title)) continue;
-    out.push({ date: iso(year, MON(month), Number(day)), time: et(time), event: title.trim().slice(0, 140), type: "economic", expectation: null, why: "", symbols: [], line: line.replace(/\s+/g, " ").slice(0, 200) });
+    out.push({ date: iso(year, MON(month), Number(day)), time: et(time), event: title.replace(/\s+(Date\/Time|Type|Release)$/i, "").trim().slice(0, 140), type: "economic", expectation: null, why: "", symbols: [], line: line.replace(/\s+/g, " ").slice(0, 200) });
   }
   return out;
 }
@@ -71,6 +73,12 @@ export const BLS_RELEASES: { path: string; name: string }[] = [
 ];
 const BEA_KEEP = /GDP \(|Personal Income and Outlays|International Trade in Goods and Services/;
 
+/** A short sample of the page around the first month name, so a format change can be diagnosed from the log. */
+function sample(text: string) {
+  const i = text.search(/\b(January|February|March|April|May|June|July|August|September|October|November|December)\s+\d{1,2}\b/);
+  return text.slice(Math.max(0, i), Math.max(0, i) + 160).replace(/"/g, "'");
+}
+
 /** Every official calendar page, fetched and parsed; events from today up to `days` ahead. */
 export async function officialCalendar(now: Date, days = 30, fetchText: (url: string) => Promise<{ ok: boolean; status: number | null; ms: number; text: string; error: string | null }>): Promise<{ events: CalendarEvent[]; log: OfficialFetch[] }> {
   const today = new Intl.DateTimeFormat("en-CA", { timeZone: "America/New_York" }).format(now);
@@ -91,7 +99,7 @@ export async function officialCalendar(now: Date, days = 30, fetchText: (url: st
     const p = await fetchText(j.url);
     const found = p.ok ? j.parse(p.text) : [];
     const ahead = found.filter((e) => e.date >= today && e.date <= until);
-    log.push({ url: j.url, ok: p.ok, status: p.status, ms: p.ms, error: p.ok ? (found.length ? null : "page read, but no dates in the expected format") : p.error, events: ahead.length });
+    log.push({ url: j.url, ok: p.ok, status: p.status, ms: p.ms, error: p.ok ? (found.length ? null : `page read, but no dates in the expected format; text sample: "${sample(p.text)}"`) : p.error, events: ahead.length });
     const retrievedAt = new Date().toISOString();
     for (const e of ahead) {
       const source: Source = { url: j.url, title: j.title, publisher: j.publisher, published: null, checked: true };

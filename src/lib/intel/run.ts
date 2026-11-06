@@ -4,7 +4,7 @@ import { collectSearchPages, deskPrompt, deskSystem, DESK_VERSION, DESKS, extrac
 import { officialCalendar } from "./calendar";
 import { lookupCik } from "../market/sec";
 import { SYNTHESIS_VERSION, synthesisPrompt, synthesisSystem, validateSynthesis, type SynthesisContext, type Synthesis } from "./synthesis";
-import { checkEvent, checkItem, excerptFor, finalCheck, pageFetcher, type Support } from "./verify";
+import { checkEvent, checkItem, dateOnPage, excerptFor, finalCheck, officialFor, pageFetcher, type Support } from "./verify";
 
 /** Desks: Sonnet with web search at low effort (fast, cited). Synthesis: Sonnet at medium effort, no tools. */
 const DESK_MODEL = "claude-sonnet-5-5";
@@ -89,7 +89,14 @@ export async function runDesk(key: DeskKey, ctxIn: DeskContext): Promise<DeskRes
     const r = finalCheck(it, figureChecks[i], judged.get(i) ?? null, p?.ok ? p.text : null, retrievedAt);
     return { ...it, kind: r.kind, check: r.check };
   });
-  const searched = await Promise.all(v.calendar.map(async (ev) => { const r = await checkEvent(ev, fetchPage, ctx.names); return { ...ev, status: r.status, check: r.check }; }));
+  const searched = await Promise.all(v.calendar.map(async (ev) => {
+    const r = await checkEvent(ev, fetchPage, ctx.names);
+    if (r.status === "confirmed" || ev.type !== "earnings") return { ...ev, status: r.status, check: r.check };
+    // The cited page was not official or could not be read (company IR event pages often refuse automated readers):
+    // try the company's own pages among those the searches returned, e.g. its newsroom release.
+    const alt = await confirmFromReturnedPages(ev, [...pages.keys()], fetchPage, ctx.names ?? {});
+    return alt ?? { ...ev, status: r.status, check: r.check };
+  }));
   const calendar = official ? mergeEvents(official.events, searched) : searched;
   if (official) for (const l of official.log) requests.push({ kind: "page", ms: l.ms, detail: `official calendar ${l.url} ${l.status ?? ""} ${l.error ?? `read, ${l.events} events ahead`}`.trim(), ok: l.ok && !l.error });
   for (const l of fetchPage.log) requests.push({ kind: "page", ms: l.ms, detail: `${l.url} ${l.status ?? ""} ${l.error ?? "read"}`.trim(), ok: l.ok });
@@ -103,6 +110,20 @@ export async function runDesk(key: DeskKey, ctxIn: DeskContext): Promise<DeskRes
     items, calendar, uncertainties: v.uncertainties,
     searches: usage.searches, pagesReturned: pages.size, problems: [...problems, ...v.problems], usage,
   };
+}
+
+/** Looks for the event's date on official pages the desk's searches returned, other than the one it cited. */
+async function confirmFromReturnedPages(ev: DeskResult["calendar"][number], urls: string[], fetchPage: ReturnType<typeof pageFetcher>, names: Record<string, string>) {
+  const companies = ev.symbols.map((s) => names[s]).filter(Boolean);
+  const word = companies[0]?.toLowerCase().split(/\s+/)[0] ?? null;
+  const candidates = urls.filter((u) => u !== ev.source?.url && officialFor(ev.type, u, companies)).slice(0, 4);
+  for (const url of candidates) {
+    const p = await fetchPage(url);
+    if (!p.ok || !dateOnPage(ev.date, p.text) || (word && !p.text.toLowerCase().includes(word))) continue;
+    const source = { url, title: `${companies[0] ?? ev.symbols.join(", ")} announcement`, publisher: companies[0] ?? null, published: null, checked: true };
+    return { ...ev, status: "confirmed" as const, source, check: { official: true, dateFound: true, url, note: `date shown on the company's own page (the originally cited ${ev.source?.url ?? "page"} could not confirm it)`, retrievedAt: new Date().toISOString() } };
+  }
+  return null;
 }
 
 /** Official events win over searched ones for the same day and kind of event. */

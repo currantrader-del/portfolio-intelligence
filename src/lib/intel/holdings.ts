@@ -25,7 +25,7 @@ export function companySymbols(p: PortfolioContext): string[] {
 type Version = { id: string; research_as_of: string; completeness: string; origin: string; is_current: boolean; conclusion: Record<string, unknown> | null };
 export type ResearchState = {
   symbol: string; name: string | null;
-  current: Version | null; newer: Version[];
+  current: Version | null; newer: Version[]; versions?: number;
   filingCheck: { id: string; at: string; status: string; reason: string; document: { form: string; filed: string; periodEnd: string | null; indexUrl: string } | null; material: string[]; refreshLevel: string | null } | null;
 };
 
@@ -62,7 +62,14 @@ export function researchItems(r: ResearchState, weight: number | null, now: Date
   const held = weight != null ? `Held at ${pct(weight)} of the portfolio. ` : "";
   const cur = r.current;
   const newest = r.newer[0] ?? null;
-  if (newest) {
+  if (newest && !cur) {
+    out.push({
+      headline: `${r.symbol}: no approved research; latest version dated ${newest.research_as_of}${action(newest) ? ` (${action(newest)})` : ""}`,
+      detail: `${r.versions ?? r.newer.length} research version(s) on file, none marked approved. The latest is ${newest.completeness}, dated ${newest.research_as_of}. Its conclusions are not an approved basis for decisions until one version is approved.`,
+      kind: "verified", significance: "medium", sources: [{ ...page, published: newest.research_as_of }], portfolio: `${held}${NOT_A_SIGNAL}`, unsourced: false, period: newest.research_as_of,
+      check: { status: "primary", url: page.url, found: [], missing: [], note: "read from the stored research versions", retrievedAt: now.toISOString() },
+    });
+  } else if (newest) {
     out.push({
       headline: `${r.symbol}: research update in progress, dated ${newest.research_as_of}${action(newest) ? ` (${action(newest)})` : ""}`,
       detail: `A newer research version (${newest.completeness}, ${newest.origin.replace(/_/g, " ")}, dated ${newest.research_as_of}) exists and is not yet approved. ${reason(newest) ?? ""} ${cur ? `The approved version is dated ${cur.research_as_of}${action(cur) ? ` with the call ${action(cur)}` : ""}; it stays on file unchanged, and its conclusions should be treated as under review until the update is finished.` : "No version is approved."}`.replace(/\s+/g, " ").trim(),
@@ -106,7 +113,7 @@ export async function loadResearch(db: SupabaseClient, symbols: string[]): Promi
     const row = (checks ?? []).find((k) => (k.inputs as { symbol?: string }).symbol === c.symbol);
     const o = row?.outputs as { status: string; statusReason: string; document: NonNullable<ResearchState["filingCheck"]>["document"]; findings?: { material: boolean; text: string }[]; refresh?: { level: string } } | undefined;
     return {
-      symbol: c.symbol as string, name: (c.name as string | null) ?? null, current, newer,
+      symbol: c.symbol as string, name: (c.name as string | null) ?? null, current, newer, versions: versions.length,
       filingCheck: row && o ? { id: row.id as string, at: row.computed_at as string, status: o.status, reason: o.statusReason, document: o.document ?? null, material: (o.findings ?? []).filter((f) => f.material).map((f) => f.text), refreshLevel: o.refresh?.level ?? null } : null,
     };
   });

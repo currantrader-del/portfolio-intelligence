@@ -29,6 +29,10 @@ describe("official calendars", () => {
     expect(ev.map((e) => [e.date, e.time])).toEqual([["2026-11-25", "8:30 AM ET"], ["2026-11-25", "10:00 AM ET"]]);
     expect(ev[0].event).toMatch(/^GDP \(Second Estimate\)/);
   });
+  it("reads BEA rows when the page labels its table cells", () => {
+    const t = "Year 2026 Date/Time November 25 8:30 AM Type News Release GDP (Second Estimate) and Corporate Profits, 3rd Quarter 2026 Date/Time November 25 8:30 AM Type News Release Personal Income and Outlays, October 2026";
+    expect(parseBeaSchedule(t, 2026, /GDP \(|Personal Income and Outlays/).map((e) => e.event)).toEqual(["GDP (Second Estimate) and Corporate Profits, 3rd Quarter 2026", "Personal Income and Outlays, October 2026"]);
+  });
   it("reads FOMC minutes from the Fed's monthly calendar and decisions from the meeting list", () => {
     const m = parseFedMonth("Speeches 9:00 a.m. Governor speaks 12 2:00 p.m. FOMC Minutes Meeting of October 27-28 18", 2026, 10);
     expect(m).toHaveLength(1);
@@ -112,6 +116,10 @@ describe("holdings desk", () => {
     expect(items[0].headline).toBe("ACME: research update in progress, dated 2026-11-06 (WAIT / REVIEW)");
     expect(items[0].detail).toMatch(/approved version is dated 2026-09-10 with the call HOLD \/ NO ADD; it stays on file unchanged/);
     expect(items[1]).toMatchObject({ kind: "calculation", headline: "ACME: filing check WAIT / REVIEW against the 10-Q filed 2026-11-05" });
+  });
+  it("says plainly when no research version is approved", () => {
+    const items = researchItems({ symbol: "ACME", name: null, current: null, newer: [v("a", "2026-09-12", false, "HOLD / NO ADD")], versions: 1, filingCheck: null }, null, now);
+    expect(items[0].headline).toBe("ACME: no approved research; latest version dated 2026-09-12 (HOLD / NO ADD)");
   });
   it("flags stale research when there is no newer version", () => {
     const items = researchItems({ symbol: "ACME", name: null, current: v("a", "2026-05-01", true, "HOLD"), newer: [], filingCheck: null }, null, now);
