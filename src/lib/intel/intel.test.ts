@@ -117,7 +117,7 @@ describe("desk results", () => {
     expect(v.items).toHaveLength(2);
     expect(v.items[0]).toMatchObject({ kind: "verified", unsourced: false });
     expect(v.items[0].sources[0]).toMatchObject({ checked: true, published: "2026-11-05" });
-    expect(v.items[1]).toMatchObject({ kind: "interpretation", unsourced: true });
+    expect(v.items[1]).toMatchObject({ kind: "reported", unsourced: true });
     expect(v.problems.join(" ")).toMatch(/no source that the search returned/);
   });
   it("keeps only future dates in the calendar, and 'confirmed' only with a checked source", () => {

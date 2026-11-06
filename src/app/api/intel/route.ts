@@ -36,7 +36,7 @@ export async function POST(req: Request) {
       const [cachedMacro, plan, ws] = await Promise.all([recentMacro(db, now), planDesks(db, now, !!body.force), buildWorkspace(db)]);
       const snapshot = await takeSnapshot(now, { cachedMacro });
       if (snapshot.rows.length < 10) return Response.json({ error: `Market data could not be retrieved (${snapshot.rows.length} of the panel loaded).`, fetchLog: snapshot.fetchLog }, { status: 502 });
-      const inputs: SnapshotInputs = { at: snapshot.takenAt, provider: "yahoo+fred", holdings: ws.portfolio.holdings.map((h) => h.symbol), watch: watchlist(ws), portfolio: portfolioContext(ws), plan };
+      const inputs: SnapshotInputs = { at: snapshot.takenAt, provider: "yahoo+fred", holdings: ws.portfolio.holdings.map((h) => h.symbol), watch: watchlist(ws), portfolio: portfolioContext(ws), plan, names: Object.fromEntries(ws.research.filter((r) => r.name).map((r) => [r.symbol, r.name!])) };
       const snapshotId = await save(db, "market_snapshot", snapshot.version, inputs, snapshot);
       const started = await Promise.allSettled(plan.run.map((k) => dispatchJob(origin, { job: "desk", snapshotId, desk: k, token })));
       // A desk whose job could not start is recorded as failed, so the briefing does not wait for it.

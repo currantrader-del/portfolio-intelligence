@@ -10,25 +10,45 @@ import { createHash } from "node:crypto";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { DESKS, DESK_VERSION, type DeskKey, type DeskResult } from "./desks";
 import { costOf, runDesk, runSynthesis, SYNTHESIS_VERSION } from "./run";
-import { mergedCalendar, type PortfolioContext, type Synthesis } from "./synthesis";
+import { runHoldingsDesk } from "./holdings";
+import { mergedCalendar, type PortfolioContext, type PreviousOutlook, type Stance, type Synthesis } from "./synthesis";
+import { computeObservations, OBSERVATIONS_VERSION, type Observation } from "./observations";
 import { computeCoverage, type Coverage } from "./coverage";
 import type { Snapshot } from "./snapshot";
 
 export const JOB_PATH = "/.netlify/functions/intel-job-background";
 /** How long a desk's research is reused before it is searched again. */
-export const DESK_TTL_MIN: Record<DeskKey, number> = { world: 60, us: 60, markets: 60, events: 12 * 60 };
+export const DESK_TTL_MIN: Record<DeskKey, number> = { world: 60, us: 60, markets: 60, events: 12 * 60, holdings: 30 };
 /** How long FRED data is reused: the series are daily at most, most are monthly. */
 export const MACRO_TTL_MIN = 6 * 60;
 /** A desk with no result after this long is treated as unavailable. */
 export const DESK_DEADLINE_MIN = 8;
 
 export type Plan = { run: DeskKey[]; reuse: Partial<Record<DeskKey, { id: string; at: string }>> };
-export type SnapshotInputs = { at: string; provider: string; holdings: string[]; watch: string[]; portfolio: PortfolioContext; plan: Plan };
+export type SnapshotInputs = { at: string; provider: string; holdings: string[]; watch: string[]; portfolio: PortfolioContext; plan: Plan; names?: Record<string, string> };
 export type Briefing = {
   version: string; generatedAt: string; model: string; snapshotId: string; deskIds: string[]; missingDesks: string[];
   synthesis: Synthesis; calendar: DeskResult["calendar"]; problems: string[];
   costUsd: number; coverage?: Coverage; ms?: number; reused?: Partial<Record<DeskKey, string>>;
+  /** Added 2026-11-06 (synthesis@2). */
+  observations?: { version: string; items: Observation[]; unavailable: string[] };
+  outlookChange?: OutlookChange;
 };
+export type OutlookChange = { previousId: string | null; previousAt: string | null; shortTerm: { from: Stance | null; to: Stance }; longTerm: { from: Stance | null; to: Stance } };
+
+/** The stance change against the previous briefing; null "from" means there was none. Pure, tested. */
+export function outlookChange(prev: { id: string; at: string; synthesis: Pick<Synthesis, "shortTerm" | "longTerm"> } | null, now: Pick<Synthesis, "shortTerm" | "longTerm">): OutlookChange {
+  return {
+    previousId: prev?.id ?? null, previousAt: prev?.at ?? null,
+    shortTerm: { from: prev?.synthesis.shortTerm?.stance ?? null, to: now.shortTerm.stance },
+    longTerm: { from: prev?.synthesis.longTerm?.stance ?? null, to: now.longTerm.stance },
+  };
+}
+
+async function previousBriefing(db: SupabaseClient, before: string) {
+  const { data } = await db.from("model_runs").select("id, computed_at, outputs").eq("kind", "market_briefing").lt("computed_at", before).order("computed_at", { ascending: false }).limit(1).maybeSingle();
+  return data ? { id: data.id as string, at: data.computed_at as string, synthesis: (data.outputs as Briefing).synthesis } : null;
+}
 
 const sha = (x: unknown) => createHash("sha256").update(JSON.stringify(x)).digest("hex");
 
@@ -45,7 +65,7 @@ export async function planDesks(db: SupabaseClient, now: Date, force = false): P
     if (!force) {
       const since = new Date(now.getTime() - DESK_TTL_MIN[d.key] * 60000).toISOString();
       const { data } = await db.from("model_runs").select("id, computed_at, outputs").eq("kind", "briefing_desk").eq("outputs->>desk", d.key).eq("outputs->>version", DESK_VERSION).gte("computed_at", since).order("computed_at", { ascending: false }).limit(3);
-      const hit = (data ?? []).find((r) => { const o = r.outputs as DeskResult; return o.status === "ok" && (d.key === "events" ? o.calendar.length : o.items.length) > 0; });
+      const hit = (data ?? []).find((r) => { const o = r.outputs as DeskResult; return o.status === "ok" && (d.key === "events" ? o.calendar.length : d.key === "holdings" ? 1 : o.items.length) > 0; });
       if (hit) { plan.reuse[d.key] = { id: hit.id, at: hit.computed_at }; continue; }
     }
     plan.run.push(d.key);
@@ -79,7 +99,9 @@ export async function runDeskJob(db: SupabaseClient, snapshotId: string, key: De
   const started = Date.now();
   let result: DeskResult;
   try {
-    result = await runDesk(key, { now: new Date(), snapshot: s.snapshot, holdings: s.inputs.holdings, watch: s.inputs.watch });
+    result = key === "holdings"
+      ? await runHoldingsDesk(db, s.inputs.portfolio, new Date())
+      : await runDesk(key, { now: new Date(), snapshot: s.snapshot, holdings: s.inputs.holdings, watch: s.inputs.watch, names: s.inputs.names });
   } catch (e) {
     result = {
       version: DESK_VERSION, desk: key, title: desk.title, generatedAt: new Date().toISOString(), model: "", items: [], calendar: [], uncertainties: [],
@@ -118,7 +140,10 @@ export async function runSynthesisJob(db: SupabaseClient, snapshotId: string) {
   });
   const usable = desks.filter((d) => d.row && d.row.result.status !== "failed").map((d) => d.row!.result);
   const coverage = computeCoverage(s.snapshot, desks.map((d) => ({ key: d.key, result: d.row?.result ?? null, reusedFrom: d.reusedFrom })));
-  const out = await runSynthesis({ now: new Date(), snapshot: s.snapshot, desks: usable, portfolio: s.inputs.portfolio });
+  const { observations, unavailable } = computeObservations(s.snapshot);
+  const prev = await previousBriefing(db, new Date().toISOString());
+  const previous: PreviousOutlook = prev?.synthesis?.shortTerm ? { at: prev.at, shortTerm: prev.synthesis.shortTerm.stance, longTerm: prev.synthesis.longTerm.stance } : null;
+  const out = await runSynthesis({ now: new Date(), snapshot: s.snapshot, desks: usable, portfolio: s.inputs.portfolio, observations, unavailable, previous });
   // Cost of this run only: desks reused from earlier runs were already paid for.
   const fresh = desks.filter((d) => d.row && !d.reusedFrom).map((d) => d.row!.result.usage);
   const usage = fresh.reduce((u, x) => ({ input: u.input + x.input, output: u.output + x.output, searches: u.searches + x.searches }), out.usage);
@@ -129,6 +154,8 @@ export async function runSynthesisJob(db: SupabaseClient, snapshotId: string) {
     synthesis: out.synthesis, calendar: mergedCalendar(usable), problems: out.problems,
     costUsd: Number(costOf(usage).toFixed(4)), coverage, ms: Date.now() - t0,
     reused: Object.fromEntries(desks.filter((d) => d.reusedFrom).map((d) => [d.key, d.reusedFrom!])),
+    observations: { version: OBSERVATIONS_VERSION, items: observations, unavailable },
+    outlookChange: outlookChange(prev, out.synthesis),
   };
   if (await briefingFor(db, snapshotId)) return null; // written by a parallel job while this one ran
   return save(db, "market_briefing", SYNTHESIS_VERSION, { snapshot_id: snapshotId, desk_ids: briefing.deskIds, portfolio: s.inputs.portfolio }, briefing);

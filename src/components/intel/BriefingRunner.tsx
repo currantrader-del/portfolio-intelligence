@@ -10,6 +10,7 @@ const DESKS = [
   { key: "us", label: "US economy and policy" },
   { key: "markets", label: "Markets, sectors and catalysts" },
   { key: "events", label: "Upcoming events" },
+  { key: "holdings", label: "Holdings: filings and research" },
 ];
 const POLL_MS = 4000;
 const DEADLINE_MS = 8 * 60000; // matches DESK_DEADLINE_MIN on the server

@@ -7,8 +7,8 @@
 import type { ClaimCheck, EventCheck } from "./verify";
 import type { Snapshot } from "./snapshot";
 
-export const DESK_VERSION = "desk@2";
-export type DeskKey = "world" | "us" | "markets" | "events";
+export const DESK_VERSION = "desk@3";
+export type DeskKey = "world" | "us" | "markets" | "events" | "holdings";
 export const DESKS: { key: DeskKey; title: string; brief: string }[] = [
   {
     key: "world",
@@ -29,13 +29,22 @@ export const DESKS: { key: DeskKey; title: string; brief: string }[] = [
     // Split from the markets desk: one desk doing both ran past the hosting time limit (2026-11-06).
     key: "events",
     title: "Upcoming events",
-    brief: `Build only the calendar of scheduled catalysts for the next 15 trading days: US economic releases (with the consensus when a source states one), Federal Reserve meetings, minutes and major speeches, Treasury auctions that sources flag as important, market holidays, and earnings dates for the companies listed in the portfolio context (confirmed by the company or estimated). Each date is shown as "confirmed" only if the app can find it on an official page, so cite the official page itself: the agency's release schedule (bls.gov/schedule, bea.gov/news/schedule, census.gov economic indicators calendar, federalreserve.gov/monetarypolicy/fomccalendars.htm, treasurydirect.gov auctions), and for earnings the company's own investor-relations page or its press release on businesswire.com, globenewswire.com or prnewswire.com (search "<company> announces date of earnings release"). If only an earnings-calendar site or news article gives a date, cite it and mark the event "estimated". Return items only for a scheduling change that is itself news.`,
+    brief: `The app has already read the official BLS, BEA and Federal Reserve calendars (listed below); do not repeat those events. Your job: find confirmed earnings dates for the companies in the portfolio context (holdings first, then watchlist) within the next 15 trading days, plus any other important scheduled catalysts the official list lacks (Treasury auctions that sources flag as important, major policy deadlines). For earnings, search for the company's own announcement ("<company> to report / sets date / conference call") and cite its investor-relations or newsroom page or its release on a newswire; cite an earnings-calendar site only when nothing official exists, and mark that "estimated". Build only the calendar of scheduled catalysts for the next 15 trading days: US economic releases (with the consensus when a source states one), Federal Reserve meetings, minutes and major speeches, Treasury auctions that sources flag as important, market holidays, and earnings dates for the companies listed in the portfolio context (confirmed by the company or estimated). Each date is shown as "confirmed" only if the app can find it on an official page, so cite the official page itself: the agency's release schedule (bls.gov/schedule, bea.gov/news/schedule, census.gov economic indicators calendar, federalreserve.gov/monetarypolicy/fomccalendars.htm, treasurydirect.gov auctions), and for earnings the company's own investor-relations page or its press release on businesswire.com, globenewswire.com or prnewswire.com (search "<company> announces date of earnings release"). If only an earnings-calendar site or news article gives a date, cite it and mark the event "estimated". Return items only for a scheduling change that is itself news.`,
+  },
+  {
+    // Built by code, not searched: SEC filings, research records and filing checks (holdings.ts).
+    key: "holdings",
+    title: "Holdings: filings and research",
+    brief: "",
   },
 ];
+/** Desks that are web research (one Claude call each); the holdings desk is read by code. */
+export const SEARCH_DESKS: DeskKey[] = ["world", "us", "markets", "events"];
 
-export type Kind = "verified" | "statistical" | "interpretation" | "speculation";
+/** "verified" survives only a content check against the source; otherwise it becomes "reported". */
+export type Kind = "verified" | "reported" | "company_claim" | "statistical" | "calculation" | "interpretation" | "speculation";
 export type Source = { url: string; title: string; publisher: string | null; published: string | null; checked: boolean };
-export type Item = { headline: string; detail: string; kind: Kind; significance: "high" | "medium" | "low"; sources: Source[]; portfolio: string | null; unsourced: boolean; check?: ClaimCheck };
+export type Item = { headline: string; detail: string; kind: Kind; significance: "high" | "medium" | "low"; sources: Source[]; portfolio: string | null; unsourced: boolean; check?: ClaimCheck; period?: string | null; claimedKind?: Kind };
 export type CalendarEvent = { date: string; time: string | null; event: string; type: "economic" | "fed" | "earnings" | "policy" | "auction" | "other"; status: "confirmed" | "estimated"; expectation: string | null; why: string; symbols: string[]; source: Source | null; check?: EventCheck };
 export type DeskResult = {
   version: string; desk: DeskKey; title: string; generatedAt: string; model: string;
@@ -50,7 +59,7 @@ export type DeskResult = {
   requests?: { kind: "model" | "page"; ms: number; detail: string; ok: boolean }[];
 };
 
-const KINDS: Kind[] = ["verified", "statistical", "interpretation", "speculation"];
+const KINDS: Kind[] = ["verified", "reported", "company_claim", "statistical", "calculation", "interpretation", "speculation"];
 
 export function deskSystem() {
   return `You are a research desk for a private investor's daily market briefing. You search the web and report what happened, with sources. You do not give buy or sell advice.
@@ -59,29 +68,33 @@ Rules:
 - Use web search. Prefer primary sources (federalreserve.gov, bls.gov, bea.gov, treasury.gov, sec.gov, company releases) and established news organizations (Reuters, AP, Bloomberg, WSJ, FT, CNBC, MarketWatch). Note the publication date of every source.
 - Report only what a source you found states. Never invent a figure, a quote, an expectation or a date. If sources disagree, say so.
 - Label every item with one kind:
-  "verified" = a reported fact (an event, a decision, a data release) stated by a source;
+  "verified" = a fact (an event, a decision, a data release) that the cited page itself states; the app re-reads the page and downgrades it to "reported" if the page does not support it;
+  "company_claim" = what a company says about itself (results commentary, guidance, projections), attributed to the company;
   "statistical" = a market or data observation (a move, a level, a reading);
+  "calculation" = a figure you derived from stated numbers; show the inputs;
   "interpretation" = an explanation a source or you put forward for why something happened or matters; say whose it is;
   "speculation" = a possibility, rumor or forecast that is not established.
 - Do not explain a market move unless a source links the cause to the move. Otherwise say the cause is not established.
 - Market numbers in the snapshot below come from the app's data feed and are authoritative for levels and moves; do not restate different numbers for the same instruments.
 - Keep each item short: one headline, then two to four plain sentences.
 - Finish with ONLY a JSON object in a \`\`\`json fenced block, nothing after it, shaped like:
-{"items":[{"headline":"...","detail":"...","kind":"verified|statistical|interpretation|speculation","significance":"high|medium|low","portfolio":"why it matters to the listed holdings, or null","sources":[{"url":"https://...","title":"...","publisher":"...","published":"YYYY-MM-DD or null"}]}],
+{"items":[{"headline":"...","detail":"...","kind":"verified|company_claim|statistical|calculation|interpretation|speculation","significance":"high|medium|low","period":"the reporting period the figures cover, e.g. October 2026 or Q1 FY2027, or null","portfolio":"why it matters to the listed holdings, or null","sources":[{"url":"https://...","title":"...","publisher":"...","published":"YYYY-MM-DD or null"}]}],
  "calendar":[{"date":"YYYY-MM-DD","time":"HH:MM ET or null","event":"...","type":"economic|fed|earnings|policy|auction|other","status":"confirmed|estimated","expectation":"consensus or guidance as a source states it, or null","why":"what it could change","symbols":["IREN"],"source":{"url":"https://...","title":"...","publisher":"...","published":"YYYY-MM-DD or null"}}],
  "uncertainties":["what you could not confirm or find"]}
 Use an empty calendar list unless your brief asks for one. Every item needs at least one source URL that your searches returned.`;
 }
 
-export function deskPrompt(desk: (typeof DESKS)[number], ctx: { now: Date; snapshot: Snapshot; holdings: string[]; watch: string[] }) {
+export type DeskContext = { now: Date; snapshot: Snapshot; holdings: string[]; watch: string[]; names?: Record<string, string>; extra?: string };
+
+export function deskPrompt(desk: (typeof DESKS)[number], ctx: DeskContext) {
   const day = new Intl.DateTimeFormat("en-US", { timeZone: "America/New_York", weekday: "long", year: "numeric", month: "long", day: "numeric", hour: "numeric", minute: "2-digit" }).format(ctx.now);
   const rows = ctx.snapshot.rows.map((r) => `${r.label}: ${r.kind === "yield" ? `${r.last.toFixed(2)}%` : r.last.toFixed(2)}, day ${fmtChange(r.day, r.kind)}, 1m ${fmtChange(r.month, r.kind)} (${r.freshness}, ${r.marketTime})`).join("\n");
   return `Now: ${day} (New York).
 Desk: ${desk.title}.
 ${desk.brief}
 
-Portfolio context: holdings ${ctx.holdings.join(", ") || "none on file"}; watchlist ${ctx.watch.slice(0, 15).join(", ") || "none"}.
-
+Portfolio context: holdings ${ctx.holdings.map((h) => (ctx.names?.[h] ? `${h} (${ctx.names[h]})` : h)).join(", ") || "none on file"}; watchlist ${ctx.watch.slice(0, 15).join(", ") || "none"}.
+${ctx.extra ? `\n${ctx.extra}\n` : ""}
 App market snapshot (authoritative numbers):
 ${rows}`;
 }
@@ -148,7 +161,7 @@ export function validateDesk(raw: unknown, pages: Map<string, { title: string; p
     const sig = x.significance === "high" || x.significance === "low" ? x.significance : "medium";
     const unsourced = !sources.some((s) => s.checked);
     // A "verified" label needs a source the search actually returned.
-    items.push({ headline, detail, kind: unsourced && kind === "verified" ? "interpretation" : kind, significance: sig, sources, portfolio: str(x.portfolio, 500), unsourced });
+    items.push({ headline, detail, kind: unsourced && kind === "verified" ? "reported" : kind, claimedKind: kind, significance: sig, sources, portfolio: str(x.portfolio, 500), unsourced, period: str(x.period, 60) });
     if (unsourced) problems.push(`"${headline.slice(0, 60)}" has no source that the search returned`);
   }
   const today = new Intl.DateTimeFormat("en-CA", { timeZone: "America/New_York" }).format(now);

@@ -7,9 +7,11 @@
  */
 import type { CalendarEvent, Item, Source } from "./desks";
 
-export type CheckStatus = "matched" | "partial" | "not_found" | "unreachable" | "not_checked";
-export type ClaimCheck = { status: CheckStatus; url: string | null; found: string[]; missing: string[]; note: string };
-export type EventCheck = { official: boolean; dateFound: boolean | null; url: string | null; note: string };
+/** matched = the page supports the claim (quote found, figures found); primary = read from the official record itself (SEC). */
+export type CheckStatus = "matched" | "primary" | "partial" | "unsupported" | "not_found" | "unreachable" | "not_checked";
+export type ClaimCheck = { status: CheckStatus; url: string | null; found: string[]; missing: string[]; note: string; quote?: string | null; retrievedAt?: string | null; support?: Support | null };
+export type Support = "supported" | "partial" | "unsupported" | "insufficient";
+export type EventCheck = { official: boolean; dateFound: boolean | null; url: string | null; note: string; retrievedAt?: string };
 
 // ---------- figures ----------
 
@@ -83,14 +85,25 @@ const NEWSWIRES = /(^|\.)(businesswire|globenewswire|prnewswire|accessnewswire|a
 const AGENCIES = /(^|\.)(bls\.gov|bea\.gov|census\.gov|federalreserve\.gov|newyorkfed\.org|treasury\.gov|treasurydirect\.gov|dol\.gov|fiscal\.treasury\.gov|sca\.isr\.umich\.edu|conference-board\.org|ismworld\.org|nyse\.com|sifma\.org|opm\.gov|whitehouse\.gov|sec\.gov)$/i;
 
 /** Whether a source is official for this kind of event. Aggregators and news sites never are. */
-export function officialFor(type: CalendarEvent["type"], url: string): boolean {
+export function officialFor(type: CalendarEvent["type"], url: string, companies: string[] = []): boolean {
   let host = "", path = "";
   try { const u = new URL(url); host = u.hostname.replace(/^www\./, ""); path = u.pathname.toLowerCase(); } catch { return false; }
   if (AGGREGATORS.test(`${host}.`)) return false;
   if (type === "earnings") {
-    return NEWSWIRES.test(host) || /(^|\.)sec\.gov$/i.test(host) || /^(ir|investors?|investor-relations|investorrelations)\./i.test(host) || /\/(investors?|investor-relations|ir)(\/|$)/.test(path);
+    return NEWSWIRES.test(host) || /(^|\.)sec\.gov$/i.test(host) || /^(ir|investors?|investor-relations|investorrelations)\./i.test(host) || /\/(investors?|investor-relations|ir)(\/|$)/.test(path) || companyDomain(host, companies);
   }
   return AGENCIES.test(host);
+}
+
+/** The company's own site: its registrable domain is the company's first name word (nvidianews.nvidia.com for NVIDIA, iren.com for IREN). */
+export function companyDomain(host: string, companies: string[]): boolean {
+  const labels = host.toLowerCase().split(".");
+  if (labels.length < 2) return false;
+  const sld = labels[labels.length - 2];
+  return companies.some((name) => {
+    const word = name.toLowerCase().replace(/[^a-z0-9 ]/g, "").split(/\s+/).find((w) => w.length >= 3);
+    return !!word && (sld === word || sld === `${word}corp` || sld === `${word}inc`);
+  });
 }
 
 // ---------- page fetching ----------
@@ -98,14 +111,14 @@ export function officialFor(type: CalendarEvent["type"], url: string): boolean {
 export type PageFetch = { ok: boolean; status: number | null; ms: number; text: string; error: string | null };
 export type Fetcher = (url: string) => Promise<PageFetch>;
 
-export function pageFetcher(timeoutMs = 8000): Fetcher & { log: { url: string; status: number | null; ms: number; ok: boolean; error: string | null }[] } {
+export function pageFetcher(timeoutMs = 8000, userAgent = "Mozilla/5.0 (compatible; PortfolioIntelligence/1.0; source check)"): Fetcher & { log: { url: string; status: number | null; ms: number; ok: boolean; error: string | null }[] } {
   const cache = new Map<string, Promise<PageFetch>>();
   const log: { url: string; status: number | null; ms: number; ok: boolean; error: string | null }[] = [];
   const f = (url: string) => {
     if (!cache.has(url)) cache.set(url, (async () => {
       const t0 = Date.now();
       try {
-        const res = await fetch(url, { headers: { "User-Agent": "Mozilla/5.0 (compatible; PortfolioIntelligence/1.0; source check)", Accept: "text/html,application/xhtml+xml,text/plain" }, redirect: "follow", cache: "no-store", signal: AbortSignal.timeout(timeoutMs) });
+        const res = await fetch(url, { headers: { "User-Agent": userAgent, Accept: "text/html,application/xhtml+xml,text/plain" }, redirect: "follow", cache: "no-store", signal: AbortSignal.timeout(timeoutMs) });
         const body = res.ok ? (await res.text()).slice(0, 2_000_000) : "";
         const r = { ok: res.ok && body.length > 200, status: res.status, ms: Date.now() - t0, text: res.ok ? htmlText(body) : "", error: res.ok ? (body.length > 200 ? null : "empty page") : `HTTP ${res.status}` };
         log.push({ url, status: r.status, ms: r.ms, ok: r.ok, error: r.error });
@@ -124,7 +137,7 @@ export function pageFetcher(timeoutMs = 8000): Fetcher & { log: { url: string; s
 // ---------- checks ----------
 
 export async function checkItem(item: Item, fetchPage: Fetcher): Promise<ClaimCheck> {
-  if (item.kind !== "verified") return { status: "not_checked", url: null, found: [], missing: [], note: `${item.kind} items are not checked against pages` };
+  if (item.kind !== "verified" && item.kind !== "company_claim") return { status: "not_checked", url: null, found: [], missing: [], note: `${item.kind} items are not checked against pages` };
   const figs = claimFigures(`${item.headline}. ${item.detail}`);
   const sources = item.sources.filter((s) => s.checked).slice(0, 3);
   if (!sources.length) return { status: "not_checked", url: null, found: [], missing: figs.map((f) => f.label), note: "no source returned by the search" };
@@ -141,13 +154,61 @@ export async function checkItem(item: Item, fetchPage: Fetcher): Promise<ClaimCh
   return best!;
 }
 
-export async function checkEvent(ev: CalendarEvent, fetchPage: Fetcher): Promise<{ status: CalendarEvent["status"]; check: EventCheck }> {
+export async function checkEvent(ev: CalendarEvent, fetchPage: Fetcher, names: Record<string, string> = {}): Promise<{ status: CalendarEvent["status"]; check: EventCheck }> {
   const src: Source | null = ev.source;
   if (!src) return { status: "estimated", check: { official: false, dateFound: null, url: null, note: "no source" } };
-  const official = officialFor(ev.type, src.url);
+  const official = officialFor(ev.type, src.url, ev.symbols.map((s) => names[s]).filter(Boolean));
   if (!official) return { status: "estimated", check: { official: false, dateFound: null, url: src.url, note: ev.type === "earnings" ? "not confirmed by the company (source is not its investor-relations site or release)" : "source is not the official publisher" } };
   const p = await fetchPage(src.url);
   if (!p.ok) return { status: "estimated", check: { official, dateFound: null, url: src.url, note: `official page could not be read (${p.error})` } };
   const found = dateOnPage(ev.date, p.text);
-  return { status: found ? "confirmed" : "estimated", check: { official, dateFound: found, url: src.url, note: found ? "date shown on the official page" : "official page read, but this date is not on it" } };
+  const retrievedAt = new Date().toISOString();
+  return { status: found ? "confirmed" : "estimated", check: { official, dateFound: found, url: src.url, note: found ? "date shown on the official page" : "official page read, but this date is not on it", retrievedAt } };
+}
+
+// ---------- content support ----------
+
+const norm = (t: string) => t.toLowerCase().replace(/[\u2018\u2019]/g, "'").replace(/[\u201c\u201d]/g, '"').replace(/\s+/g, " ").trim();
+
+/** The sentences of a page most related to a claim (shared figures and words), for the content check. */
+export function excerptFor(claim: string, text: string, max = 1800): string {
+  const sentences = text.split(/(?<=[.!?])\s+/).filter((s) => s.length > 30 && s.length < 600);
+  const figs = new Set(claimFigures(claim).flatMap((f) => f.values.map((v) => Math.round(v * 1e6) / 1e6)));
+  const words = new Set(norm(claim).split(/[^a-z0-9]+/).filter((w) => w.length > 3));
+  const scored = sentences.map((s, i) => {
+    const vals = pageValues(s);
+    const f = [...vals].filter((v) => figs.has(v)).length;
+    const w = norm(s).split(/[^a-z0-9]+/).filter((x) => words.has(x)).length;
+    return { i, s, score: f * 3 + w };
+  }).filter((x) => x.score > 1).sort((a, b) => b.score - a.score);
+  const picked: typeof scored = [];
+  let len = 0;
+  for (const x of scored) { if (len + x.s.length > max) break; picked.push(x); len += x.s.length; }
+  return picked.sort((a, b) => a.i - b.i).map((x) => x.s).join(" … ");
+}
+
+/** A quote counts only if it is really on the page (after whitespace and quote-mark normalisation). */
+export function quoteOnPage(quote: string | null | undefined, text: string): boolean {
+  if (!quote || quote.trim().length < 20) return false;
+  return norm(text).includes(norm(quote).replace(/^"|"$/g, ""));
+}
+
+/** Combines the figure check and the content judgement into the final status and kind. */
+export function finalCheck(item: Item, figure: ClaimCheck, judged: { support: Support; quote: string | null } | null, pageText: string | null, retrievedAt: string): { check: ClaimCheck; kind: Item["kind"] } {
+  const base = { ...figure, retrievedAt };
+  if (figure.status === "not_checked" || figure.status === "unreachable" || pageText === null) {
+    return { check: base, kind: item.kind === "verified" ? "reported" : item.kind };
+  }
+  const quoteOk = quoteOnPage(judged?.quote, pageText);
+  const support = judged ? (judged.support === "supported" && !quoteOk ? "insufficient" : judged.support) : "insufficient";
+  const figuresOk = figure.missing.length === 0;
+  let status: CheckStatus;
+  let note: string;
+  if (support === "supported" && figuresOk) { status = "matched"; note = figure.found.length ? "the page states this; every figure appears on it" : "the page states this"; }
+  else if (support === "unsupported") { status = "unsupported"; note = "the cited page does not support this claim"; }
+  else if (support === "supported" || support === "partial") { status = "partial"; note = figure.missing.length ? `partly supported; not on the page: ${figure.missing.join(", ")}` : "the page supports only part of this claim"; }
+  else { status = figure.found.length && figuresOk ? "partial" : "not_found"; note = quoteOk ? "no supporting passage confirmed" : "no supporting passage found on the page"; }
+  const check: ClaimCheck = { ...base, status, note, quote: quoteOk ? judged!.quote : null, support };
+  const kind = status === "matched" ? item.kind : item.kind === "verified" ? "reported" : item.kind;
+  return { check, kind };
 }

@@ -21,7 +21,7 @@ export type Coverage = {
 
 const LABEL: Record<InputKey, string> = {
   market_data: "Market prices", macro_data: "US economic data (FRED)",
-  world: "World and geopolitics", us: "US economy and policy", markets: "Markets, sectors and catalysts", events: "Upcoming events",
+  world: "World and geopolitics", us: "US economy and policy", markets: "Markets, sectors and catalysts", events: "Upcoming events", holdings: "Holdings: filings and research",
 };
 /** What each outlook cannot do without. */
 export const REQUIRED: Record<"shortTerm" | "longTerm", InputKey[]> = {
@@ -45,6 +45,7 @@ export function macroDataStatus(s: Snapshot | null): InputStatus {
 export function deskStatus(key: DeskKey, d: DeskResult | null, reusedFrom: string | null): InputStatus {
   if (!d) return { key, label: LABEL[key], level: "unavailable", detail: "did not finish", reusedFrom: null };
   if (d.status === "failed") return { key, label: LABEL[key], level: "unavailable", detail: `failed: ${d.error ?? "unknown error"}`, reusedFrom: null };
+  if (key === "holdings") return { key, label: LABEL[key], level: d.problems.length ? "partial" : "complete", detail: `${d.items.length} items${d.problems.length ? `; ${d.problems.length} companies' filings unreadable` : ""}`, reusedFrom };
   const count = key === "events" ? d.calendar.length : d.items.length;
   if (!count) return { key, label: LABEL[key], level: "unavailable", detail: key === "events" ? "no sourced events found" : "no sourced items found", reusedFrom };
   const unsourced = d.items.filter((i) => i.unsourced).length;
