@@ -8,6 +8,7 @@ export const SECTIONS = [
 ] as const;
 
 export const MORE = [
+  { href: "/assistant", label: "Assistant test" },
   { href: "/markets", label: "Markets briefing" },
   { href: "/brief", label: "Daily brief" },
   { href: "/brief?period=week", label: "Weekly brief" },
