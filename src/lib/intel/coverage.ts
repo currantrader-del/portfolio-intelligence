@@ -38,7 +38,7 @@ export function marketDataStatus(s: Snapshot | null): InputStatus {
 export function macroDataStatus(s: Snapshot | null): InputStatus {
   const n = s?.macro.length ?? 0, total = MACRO.length;
   const level: Level = n >= total * 0.9 ? "complete" : n >= total * 0.5 ? "partial" : "unavailable";
-  const reused = s?.macroSource?.kind === "reused" ? s.macroSource.detail : null;
+  const reused = s?.macroSource?.kind === "reused" ? (s.macroSource.at ?? null) : null;
   return { key: "macro_data", label: LABEL.macro_data, level, detail: `${n} of ${total} series loaded`, reusedFrom: reused };
 }
 

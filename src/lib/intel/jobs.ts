@@ -130,6 +130,7 @@ export async function runSynthesisJob(db: SupabaseClient, snapshotId: string) {
     costUsd: Number(costOf(usage).toFixed(4)), coverage, ms: Date.now() - t0,
     reused: Object.fromEntries(desks.filter((d) => d.reusedFrom).map((d) => [d.key, d.reusedFrom!])),
   };
+  if (await briefingFor(db, snapshotId)) return null; // written by a parallel job while this one ran
   return save(db, "market_briefing", SYNTHESIS_VERSION, { snapshot_id: snapshotId, desk_ids: briefing.deskIds, portfolio: s.inputs.portfolio }, briefing);
 }
 

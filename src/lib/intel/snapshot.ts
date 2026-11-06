@@ -44,7 +44,7 @@ export type Snapshot = {
   macroMissing: string[];
   notes: string[];
   /** Where the macro rows came from; absent on snapshots taken before 2026-11-06 19:30Z. */
-  macroSource?: { kind: "fred-api" | "fred-csv" | "reused"; detail: string; snapshotId: string | null };
+  macroSource?: { kind: "fred-api" | "fred-csv" | "reused"; detail: string; snapshotId: string | null; at?: string | null };
   /** Every provider request: status, latency and rows, for diagnosis and the test report. */
   fetchLog?: FetchLog[];
   fetchMs?: number;
@@ -249,7 +249,7 @@ export async function takeSnapshot(now = new Date(), opts: { cachedMacro?: Cache
   const macro = new Map<string, Obs>();
   let macroSource: Snapshot["macroSource"];
   if (opts.cachedMacro && opts.cachedMacro.macro.length) {
-    macroSource = { kind: "reused", detail: `reused from the ${opts.cachedMacro.takenAt} snapshot`, snapshotId: opts.cachedMacro.snapshotId };
+    macroSource = { kind: "reused", detail: `reused from the ${opts.cachedMacro.takenAt} snapshot`, snapshotId: opts.cachedMacro.snapshotId, at: opts.cachedMacro.takenAt };
   } else {
     // One series first: if it fails, the rest are still tried (and logged) so the failure can be diagnosed.
     const first = await fetchFred(MACRO[0].id, key, true);

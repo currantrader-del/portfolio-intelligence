@@ -14,7 +14,8 @@ import type { CheckStatus } from "@/lib/intel/verify";
 export const dynamic = "force-dynamic";
 
 
-const et = (iso: string, opts: Intl.DateTimeFormatOptions) => new Intl.DateTimeFormat("en-US", { timeZone: "America/New_York", ...opts }).format(new Date(iso));
+// Never throws: an unparseable time renders as "time unknown" rather than failing the page.
+const et = (iso: string, opts: Intl.DateTimeFormatOptions) => { const d = new Date(iso); return Number.isNaN(d.getTime()) ? "time unknown" : new Intl.DateTimeFormat("en-US", { timeZone: "America/New_York", ...opts }).format(d); };
 const etDay = (d: Date) => new Intl.DateTimeFormat("en-CA", { timeZone: "America/New_York" }).format(d);
 const KIND_TONE = { verified: "gain", statistical: "info", interpretation: "neutral", speculation: "warn" } as const;
 const STANCE_TONE = { bullish: "gain", bearish: "alert", neutral: "neutral", mixed: "warn" } as const;
@@ -204,7 +205,7 @@ function CoverageCard({ cov }: { cov: Coverage }) {
           <li key={i.key} className="flex flex-wrap items-center gap-1.5">
             <Pill small tone={LEVEL_TONE[i.level as Level]}>{i.level}</Pill>
             <span className="text-ink">{i.label}</span>
-            <span className="t-xs">{i.detail}{i.reusedFrom ? ` · reused from ${i.reusedFrom.includes("T") ? et(i.reusedFrom, { hour: "numeric", minute: "2-digit" }) + " ET" : i.reusedFrom}` : ""}</span>
+            <span className="t-xs">{i.detail}{i.reusedFrom ? ` · reused from ${Number.isNaN(Date.parse(i.reusedFrom)) ? "an earlier snapshot" : `${et(i.reusedFrom, { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" })} ET`}` : ""}</span>
           </li>
         ))}
       </ul>
