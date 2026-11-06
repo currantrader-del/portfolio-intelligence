@@ -34,7 +34,9 @@ function ConflictCard({ s }: { s: SubjectAudit }) {
         <Tag tone="alert">Your choice needed</Tag>
       </div>
       <ul className="text-sm text-ink-2 list-disc pl-5">{s.differences.map((d) => <li key={d}>{d}</li>)}</ul>
-      <p className="text-sm">Until you choose, the app uses the stricter one ({p(s.used?.hard_max ?? null)} maximum) and will not size purchases above it. It did not assume the larger limit is approved.</p>
+      <p className="text-sm">{s.provisional
+        ? <>Until you approve one, the app uses the provisional {p(s.used?.hard_max ?? null)} maximum from {s.used?.source_label} as you instructed. It is not approved, so new-cash recommendations stay on wait for this company.</>
+        : <>Until you choose, the app uses the stricter one ({p(s.used?.hard_max ?? null)} maximum) and will not size purchases above it. It did not assume the larger limit is approved.</>}</p>
       <div className="grid gap-2 sm:grid-cols-2">
         {s.candidates.map((r) => (
           <form key={r.id} action={approveRule} className="border border-line rounded-xl p-3 flex flex-col gap-2">

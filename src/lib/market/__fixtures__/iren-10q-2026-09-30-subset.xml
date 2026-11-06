@@ -1,0 +1,56 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  TRANSCRIBED SUBSET, NOT THE ORIGINAL FILE.
+  Values were read from IREN Limited's Form 10-Q for the quarter ended 2026-09-30
+  (accession 0001878848-26-000066, https://www.sec.gov/Archives/edgar/data/1878848/000187884826000066/index.json,
+  main document iren-20260930.htm) and written here in XBRL instance form so the parser and the
+  filing check can be tested offline. The 10-Q presents dollars in millions, so the dollar facts carry
+  decimals="-6", as in the filing. Contexts, tags and one dimensional (segment) fact mimic the real
+  instance; the live check in the app reads the original iren-20260930_htm.xml from SEC instead.
+-->
+<xbrli:xbrl xmlns:xbrli="http://www.xbrl.org/2003/instance" xmlns:us-gaap="http://fasb.org/us-gaap/2026" xmlns:dei="http://xbrl.sec.gov/dei/2026" xmlns:xbrldi="http://xbrl.org/2006/xbrldi" xmlns:srt="http://fasb.org/srt/2026" xmlns:iren="http://iren.com/20260930">
+  <xbrli:context id="c-cover"><xbrli:entity><xbrli:identifier scheme="http://www.sec.gov/CIK">0001878848</xbrli:identifier></xbrli:entity><xbrli:period><xbrli:instant>2026-10-30</xbrli:instant></xbrli:period></xbrli:context>
+  <xbrli:context id="c-dur-doc"><xbrli:entity><xbrli:identifier scheme="http://www.sec.gov/CIK">0001878848</xbrli:identifier></xbrli:entity><xbrli:period><xbrli:startDate>2026-07-01</xbrli:startDate><xbrli:endDate>2026-09-30</xbrli:endDate></xbrli:period></xbrli:context>
+  <xbrli:context id="c-i-2026-09-30"><xbrli:entity><xbrli:identifier scheme="http://www.sec.gov/CIK">0001878848</xbrli:identifier></xbrli:entity><xbrli:period><xbrli:instant>2026-09-30</xbrli:instant></xbrli:period></xbrli:context>
+  <xbrli:context id="c-i-2026-06-30"><xbrli:entity><xbrli:identifier scheme="http://www.sec.gov/CIK">0001878848</xbrli:identifier></xbrli:entity><xbrli:period><xbrli:instant>2026-06-30</xbrli:instant></xbrli:period></xbrli:context>
+  <xbrli:context id="c-d-q1fy26"><xbrli:entity><xbrli:identifier scheme="http://www.sec.gov/CIK">0001878848</xbrli:identifier></xbrli:entity><xbrli:period><xbrli:startDate>2025-07-01</xbrli:startDate><xbrli:endDate>2025-09-30</xbrli:endDate></xbrli:period></xbrli:context>
+  <xbrli:context id="c-seg-btc"><xbrli:entity><xbrli:identifier scheme="http://www.sec.gov/CIK">0001878848</xbrli:identifier><xbrli:segment><xbrldi:explicitMember dimension="srt:ProductOrServiceAxis">iren:BitcoinMiningMember</xbrldi:explicitMember></xbrli:segment></xbrli:entity><xbrli:period><xbrli:startDate>2026-07-01</xbrli:startDate><xbrli:endDate>2026-09-30</xbrli:endDate></xbrli:period></xbrli:context>
+  <xbrli:unit id="usd"><xbrli:measure>iso4217:USD</xbrli:measure></xbrli:unit>
+  <xbrli:unit id="shares"><xbrli:measure>xbrli:shares</xbrli:measure></xbrli:unit>
+
+  <dei:DocumentType contextRef="c-dur-doc">10-Q</dei:DocumentType>
+  <dei:DocumentPeriodEndDate contextRef="c-dur-doc">2026-09-30</dei:DocumentPeriodEndDate>
+  <dei:EntityCommonStockSharesOutstanding contextRef="c-cover" unitRef="shares" decimals="INF">424357381</dei:EntityCommonStockSharesOutstanding>
+
+  <us-gaap:CommonStockSharesOutstanding contextRef="c-i-2026-09-30" unitRef="shares" decimals="INF">406929463</us-gaap:CommonStockSharesOutstanding>
+  <us-gaap:CommonStockSharesOutstanding contextRef="c-i-2026-06-30" unitRef="shares" decimals="INF">380710559</us-gaap:CommonStockSharesOutstanding>
+  <us-gaap:CashAndCashEquivalentsAtCarryingValue contextRef="c-i-2026-09-30" unitRef="usd" decimals="-6">3522000000</us-gaap:CashAndCashEquivalentsAtCarryingValue>
+  <us-gaap:CashAndCashEquivalentsAtCarryingValue contextRef="c-i-2026-06-30" unitRef="usd" decimals="-6">5896000000</us-gaap:CashAndCashEquivalentsAtCarryingValue>
+  <!-- the same fact repeated, as inline XBRL often does (cash flow statement footnote) -->
+  <us-gaap:CashAndCashEquivalentsAtCarryingValue contextRef="c-i-2026-09-30" unitRef="usd" decimals="-6">3522000000</us-gaap:CashAndCashEquivalentsAtCarryingValue>
+  <us-gaap:RestrictedCashCurrent contextRef="c-i-2026-09-30" unitRef="usd" decimals="-6">2208000000</us-gaap:RestrictedCashCurrent>
+  <us-gaap:RestrictedCashCurrent contextRef="c-i-2026-06-30" unitRef="usd" decimals="-6">1670000000</us-gaap:RestrictedCashCurrent>
+  <us-gaap:RestrictedCashNoncurrent contextRef="c-i-2026-09-30" unitRef="usd" decimals="-6">48000000</us-gaap:RestrictedCashNoncurrent>
+  <us-gaap:RestrictedCashNoncurrent contextRef="c-i-2026-06-30" unitRef="usd" decimals="-6">54000000</us-gaap:RestrictedCashNoncurrent>
+  <us-gaap:LongTermDebtCurrent contextRef="c-i-2026-09-30" unitRef="usd" decimals="-6">950000000</us-gaap:LongTermDebtCurrent>
+  <us-gaap:LongTermDebtCurrent contextRef="c-i-2026-06-30" unitRef="usd" decimals="-6">169000000</us-gaap:LongTermDebtCurrent>
+  <us-gaap:LongTermDebtNoncurrent contextRef="c-i-2026-09-30" unitRef="usd" decimals="-6">8947000000</us-gaap:LongTermDebtNoncurrent>
+  <us-gaap:LongTermDebtNoncurrent contextRef="c-i-2026-06-30" unitRef="usd" decimals="-6">7424000000</us-gaap:LongTermDebtNoncurrent>
+  <us-gaap:FinanceLeaseLiabilityCurrent contextRef="c-i-2026-09-30" unitRef="usd" decimals="-6">179000000</us-gaap:FinanceLeaseLiabilityCurrent>
+  <us-gaap:FinanceLeaseLiabilityCurrent contextRef="c-i-2026-06-30" unitRef="usd" decimals="-6">125000000</us-gaap:FinanceLeaseLiabilityCurrent>
+  <us-gaap:FinanceLeaseLiabilityNoncurrent contextRef="c-i-2026-09-30" unitRef="usd" decimals="-6">132000000</us-gaap:FinanceLeaseLiabilityNoncurrent>
+  <us-gaap:FinanceLeaseLiabilityNoncurrent contextRef="c-i-2026-06-30" unitRef="usd" decimals="-6">118000000</us-gaap:FinanceLeaseLiabilityNoncurrent>
+  <us-gaap:Assets contextRef="c-i-2026-09-30" unitRef="usd" decimals="-6">20613000000</us-gaap:Assets>
+  <us-gaap:Assets contextRef="c-i-2026-06-30" unitRef="usd" decimals="-6">15790000000</us-gaap:Assets>
+  <us-gaap:StockholdersEquity contextRef="c-i-2026-09-30" unitRef="usd" decimals="-6">5116000000</us-gaap:StockholdersEquity>
+  <us-gaap:StockholdersEquity contextRef="c-i-2026-06-30" unitRef="usd" decimals="-6">4186000000</us-gaap:StockholdersEquity>
+  <us-gaap:RevenueRemainingPerformanceObligation contextRef="c-i-2026-09-30" unitRef="usd" decimals="-6">6347000000</us-gaap:RevenueRemainingPerformanceObligation>
+
+  <us-gaap:Revenues contextRef="c-dur-doc" unitRef="usd" decimals="-6">228000000</us-gaap:Revenues>
+  <us-gaap:Revenues contextRef="c-d-q1fy26" unitRef="usd" decimals="-6">240000000</us-gaap:Revenues>
+  <us-gaap:Revenues contextRef="c-seg-btc" unitRef="usd" decimals="-6">28000000</us-gaap:Revenues>
+  <us-gaap:NetIncomeLoss contextRef="c-dur-doc" unitRef="usd" decimals="-6">-263000000</us-gaap:NetIncomeLoss>
+  <us-gaap:NetCashProvidedByUsedInOperatingActivities contextRef="c-dur-doc" unitRef="usd" decimals="-6">529000000</us-gaap:NetCashProvidedByUsedInOperatingActivities>
+  <us-gaap:AntidilutiveSecuritiesExcludedFromComputationOfEarningsPerShareAmount contextRef="c-dur-doc" unitRef="shares" decimals="INF">193995967</us-gaap:AntidilutiveSecuritiesExcludedFromComputationOfEarningsPerShareAmount>
+  <us-gaap:LiabilitiesAndStockholdersEquity contextRef="c-i-2026-09-30" unitRef="usd" decimals="-6" xsi:nil="true"></us-gaap:LiabilitiesAndStockholdersEquity>
+</xbrli:xbrl>

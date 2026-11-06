@@ -41,3 +41,25 @@ describe("policy conflicts", () => {
     expect(p.audit.protectedReserve).toMatchObject({ value: 10000, status: "none" });
   });
 });
+
+describe("provisional limit", () => {
+  it("uses the owner's provisional choice while the conflict stays open and unapproved", () => {
+    const p = policyFromRules([
+      row({ hard_max: 0.1, normal_low: 0.03, normal_high: 0.05, approval: "unresolved", source_label: "Baseline revised" }),
+      row({ hard_max: 0.07, normal_low: 0.03, normal_high: 0.05, approval: "unresolved", source_label: "Company research", source_date: "2026-09-10", approval_note: "Provisional controlling limit per owner, pending approval" }),
+    ]);
+    expect(p.companies.AAA).toMatchObject({ status: "conflict", provisional: true, hardMax: 0.07, normal: { low: 0.03, high: 0.05 } });
+    expect(p.audit.conflicts).toHaveLength(1);
+  });
+  it("follows the provisional row even when it is not the stricter one", () => {
+    const p = policyFromRules([
+      row({ hard_max: 0.05, approval: "unresolved" }),
+      row({ hard_max: 0.08, approval: "unresolved", approval_note: "Provisional per owner" }),
+    ]);
+    expect(p.companies.AAA).toMatchObject({ hardMax: 0.08, provisional: true, status: "conflict" });
+  });
+  it("is not provisional once a row is approved", () => {
+    const p = policyFromRules([row({ hard_max: 0.07 }), row({ hard_max: 0.1, approval: "unresolved", approval_note: "Provisional" })]);
+    expect(p.companies.AAA).toMatchObject({ status: "approved", provisional: false, hardMax: 0.07 });
+  });
+});

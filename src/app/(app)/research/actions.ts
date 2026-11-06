@@ -1,11 +1,15 @@
 "use server";
 
+import { createHash } from "node:crypto";
 import { redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
 import { getFilings, getFundamentals } from "@/lib/market/sec";
 import { getQuote } from "@/lib/market/quotes";
 import { isStage, screenCompany, STAGES } from "@/lib/research/screen";
+import { buildWorkspace } from "@/lib/workspace";
+import { runFilingCheck } from "@/lib/research/runFilingCheck";
+import { FILING_CHECK_VERSION } from "@/lib/research/filingCheck";
 
 const cleanSymbol = (v: FormDataEntryValue | null) => String(v ?? "").trim().toUpperCase().replace(/[^A-Z0-9.\-]/g, "").slice(0, 10);
 
@@ -74,4 +78,27 @@ export async function runScreen(formData: FormData) {
   revalidatePath("/research");
   revalidatePath(`/research/${symbol}`);
   redirect(`/research/${symbol}?saved=screen`);
+}
+
+/**
+ * Reads the newest 10-Q/10-K filed after the stored research from SEC EDGAR, compares it with that
+ * research and stores the dated result (inputs, hash and output) in model_runs. Never writes research.
+ */
+export async function checkLatestFiling(formData: FormData) {
+  const symbol = cleanSymbol(formData.get("symbol"));
+  const db = await createClient();
+  const ws = await buildWorkspace(db);
+  const record = ws.research.find((r) => r.symbol === symbol);
+  if (!record || !(record.current ?? record.latest)) redirect(`/research/${symbol}?error=nofiling`);
+  const q = ws.quotes.get(symbol);
+  const h = ws.portfolio.holdings.find((x) => x.symbol === symbol);
+  const price = q?.price ?? h?.price ?? null;
+  const priceAsOf = q?.asOf ?? h?.priceAsOf ?? null;
+  const freshDays = ws.policy?.researchFreshnessDays ?? 120;
+  const { check, basis } = await runFilingCheck({ record: record!, price, priceAsOf, now: ws.now, freshDays });
+  const inputs = { symbol, at: ws.now.toISOString(), research_version: basis.versionId, research_as_of: basis.researchAsOf, price, price_as_of: priceAsOf, price_source: q ? q.provider : h ? h.priceSource : null, fresh_days: freshDays, sources: check.sources.map((s) => s.url) };
+  const { error } = await db.from("model_runs").insert({ kind: "research_filing_check", code_version: FILING_CHECK_VERSION, inputs, inputs_sha256: createHash("sha256").update(JSON.stringify(inputs)).digest("hex"), outputs: check });
+  if (error) throw error;
+  revalidatePath(`/research/${symbol}`);
+  redirect(`/research/${symbol}?saved=filing`);
 }

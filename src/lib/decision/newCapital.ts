@@ -150,7 +150,9 @@ export function newCapital(args: {
       notes.push(ceiling < max ? `At the top of its normal range (${pct(ceiling)})` : `At or above its ${pct(max)} maximum, including ETF look-through`);
     }
     if (lim?.status === "conflict") {
-      notes.push(`Your sources disagree on its limit; using the stricter ${pct(max)} until you choose on the Policy page`);
+      notes.push(lim.provisional
+        ? `Provisional ${pct(max)} maximum (${lim.source}) controls until you approve a limit on the Policy page; normal range ${lim.normal ? `${pct(lim.normal.low)}–${pct(lim.normal.high)}` : "not set"}. Room below the maximum is not a reason to buy`
+        : `Your sources disagree on its limit; using the stricter ${pct(max)} until you choose on the Policy page`);
       toVerify.push(`${symbol}: choose which allocation limit is authoritative`);
     } else if (!lim || lim.status === "none") notes.push(`No company-specific limit; the generic ${pct(max)} maximum applies`);
 

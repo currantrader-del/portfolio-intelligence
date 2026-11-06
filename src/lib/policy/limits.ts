@@ -7,7 +7,7 @@ import type { Bucket } from "@/lib/portfolio/classify";
 export type Range = { low: number; high: number } | null;
 export type LimitStatus = "approved" | "conflict" | "proposed" | "none";
 export type BucketLimit = { bucket: Bucket; normal: Range; hardMax: number | null; status?: LimitStatus };
-export type CompanyLimit = { symbol: string; role: string | null; normal: Range; highConviction: Range; hardMax: number | null; action: string | null; researchStatus: string | null; status?: LimitStatus; source?: string };
+export type CompanyLimit = { symbol: string; role: string | null; normal: Range; highConviction: Range; hardMax: number | null; action: string | null; researchStatus: string | null; status?: LimitStatus; source?: string; provisional?: boolean };
 export type Policy = {
   version: string;
   buckets: BucketLimit[];

@@ -184,6 +184,17 @@ async function secJson(url: string, revalidate: number): Promise<unknown | null>
   }
 }
 
+/** Fetches one document from EDGAR as text, never cached (filing instances can be several MB). */
+export async function secText(url: string): Promise<{ ok: true; body: string } | { ok: false; error: string }> {
+  try {
+    const res = await fetch(url, { headers: { "User-Agent": UA }, cache: "no-store" });
+    if (!res.ok) return { ok: false, error: `HTTP ${res.status} from ${url}` };
+    return { ok: true, body: await res.text() };
+  } catch (e) {
+    return { ok: false, error: `${url} could not be reached (${e instanceof Error ? e.message : "network error"})` };
+  }
+}
+
 export async function lookupCik(symbol: string): Promise<{ cik: string; title: string } | null> {
   const body = await secJson("https://www.sec.gov/files/company_tickers.json", 7 * DAY);
   return body ? findCik(body, symbol) : null;

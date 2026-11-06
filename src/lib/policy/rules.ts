@@ -41,7 +41,12 @@ export type SubjectAudit = {
   history: PolicyRuleRow[]; // superseded rows
   approvedRow: PolicyRuleRow | null;
   differences: string[]; // plain-language differences between candidates
+  /** The owner named this candidate as the provisional controlling rule while the conflict stays open. */
+  provisional: boolean;
 };
+
+/** A candidate the owner marked provisional (approval_note starts with "Provisional"). It controls, but is not approved. */
+export const isProvisional = (r: PolicyRuleRow) => r.approval !== "approved" && /^provisional/i.test(r.approval_note ?? "");
 
 export type Assumption = { value: number; status: LimitStatus; source: string };
 
@@ -90,9 +95,10 @@ export function auditRules(rows: PolicyRuleRow[]): PolicyAudit {
     let status: LimitStatus = "none";
     let used: PolicyRuleRow | null = null;
     if (approvedRow) { status = "approved"; used = approvedRow; }
-    else if (candidates.filter((r) => r.approval === "unresolved").length > 1) { status = "conflict"; used = strictest(candidates); }
-    else if (candidates.length) { status = candidates.some((r) => r.approval === "unresolved") ? "conflict" : "proposed"; used = strictest(candidates); }
-    return { scope, subject, status, used, candidates, history, approvedRow, differences: describeDifferences(approvedRow ? [] : candidates) };
+    else if (candidates.filter((r) => r.approval === "unresolved").length > 1) { status = "conflict"; used = candidates.find(isProvisional) ?? strictest(candidates); }
+    else if (candidates.length) { status = candidates.some((r) => r.approval === "unresolved") ? "conflict" : "proposed"; used = candidates.find(isProvisional) ?? strictest(candidates); }
+    const provisional = !approvedRow && !!used && isProvisional(used);
+    return { scope, subject, status, used, candidates, history, approvedRow, differences: describeDifferences(approvedRow ? [] : candidates), provisional };
   }).sort((a, b) => a.scope.localeCompare(b.scope) || a.subject.localeCompare(b.subject));
 
   const assumption = (subject: string, fallback: number): Assumption => {
@@ -135,6 +141,7 @@ export function policyFromRules(rows: PolicyRuleRow[], version = "Versioned poli
       action: null,
       researchStatus: null,
       status: s.status,
+      provisional: s.provisional,
       source: `${u.source_label}${u.source_date ? ` (${u.source_date})` : ""}`,
     };
   }

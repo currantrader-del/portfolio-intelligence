@@ -13,7 +13,7 @@ export function ExposureCard({ e, name, limit, conflict }: { e: CompanyExposure;
   const near = !over && e.total >= e.max * 0.9;
   const approved = limit?.status === "approved";
   const pill = conflict ? { tone: "warn" as const, text: "Policy review" } : over ? { tone: "alert" as const, text: "Over limit" } : near ? { tone: "warn" as const, text: "Near limit" } : { tone: "neutral" as const, text: "Within limit" };
-  const limitNote = conflict ? "Displayed limit · needs verification" : approved ? "Approved maximum" : limit?.hardMax != null ? "Proposed limit · not approved" : "Generic limit";
+  const limitNote = limit?.provisional ? "Provisional maximum · awaiting your approval" : conflict ? "Displayed limit · needs verification" : approved ? "Approved maximum" : limit?.hardMax != null ? "Proposed limit · not approved" : "Generic limit";
   return (
     <section className="card" aria-labelledby={`exp-${e.symbol}`}>
       <div className="flex items-start justify-between gap-3">
@@ -32,6 +32,7 @@ export function ExposureCard({ e, name, limit, conflict }: { e: CompanyExposure;
         <div className="flex flex-col"><span className="t-sm num text-ink">{pctStr(e.direct)} direct</span><span className="t-xs">Shares you own</span></div>
         <div className="flex flex-col items-end text-right"><span className="t-sm num text-ink">{pctStr(e.viaEtfs)} via ETFs</span><span className="t-xs">Look-through, approx.</span></div>
       </div>
+      {limit?.normal && <span className="t-xs">Normal range {pctStr(limit.normal.low, 0)}–{pctStr(limit.normal.high, 0)}. The maximum is a ceiling, not a target.</span>}
       <LinkRow href="/policy">{conflict ? "Review limit and underlying policy" : "Review limit and sources"}</LinkRow>
     </section>
   );

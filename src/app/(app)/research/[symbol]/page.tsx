@@ -10,6 +10,7 @@ import { getWorkspace } from "@/lib/workspace";
 import { dayChangePct } from "@/lib/market/quotes";
 import { InvestmentSummary } from "@/components/TodayValuation";
 import { AskButton } from "@/components/AskPanel";
+import { FilingCheckCard, type StoredFilingCheck } from "@/components/FilingCheckCard";
 import { pctStr, shortDate, toneOf, usd } from "@/lib/format";
 import { Card, CardHead, Chevron, DataLabel, Disclose, Pill, SourceRef } from "@/components/ui";
 
@@ -24,21 +25,23 @@ type Version = {
 const ERRORS: Record<string, string> = {
   reason: "Add a short reason before passing on a company.",
   ready: "Ready for decision needs complete research marked current. Refresh or finish the research first.",
+  nofiling: "There is no stored research to check a filing against.",
 };
-const SAVED: Record<string, string> = { stage: "Stage saved.", screen: "Screen updated." };
+const SAVED: Record<string, string> = { stage: "Stage saved.", screen: "Screen updated.", filing: "SEC filing checked and the result stored." };
 
 export default async function CompanyPage({ params, searchParams }: { params: Promise<{ symbol: string }>; searchParams: Promise<{ error?: string; saved?: string }> }) {
   const { symbol: raw } = await params;
   const sp = await searchParams;
   const symbol = decodeURIComponent(raw).toUpperCase().replace(/[^A-Z0-9.\-]/g, "").slice(0, 10);
   const supabase = await createClient();
-  const [{ data: company }, ws] = await Promise.all([
+  const [{ data: company }, ws, { data: lastCheck }] = await Promise.all([
     supabase
       .from("companies")
       .select("symbol, name, research_versions(id, research_as_of, completeness, origin, is_current, conclusion, change_summary, source_documents(file_name, sha256), research_phases(phase_number, title, extraction, body_markdown))")
       .eq("symbol", symbol)
       .maybeSingle(),
     getWorkspace(),
+    supabase.from("model_runs").select("id, computed_at, code_version, inputs, outputs").eq("kind", "research_filing_check").eq("inputs->>symbol", symbol).order("computed_at", { ascending: false }).limit(1).maybeSingle(),
   ]);
   const etf = isEtf(symbol);
   const q = ws.quotes.get(symbol);
@@ -134,6 +137,7 @@ export default async function CompanyPage({ params, searchParams }: { params: Pr
           {record && !etf && (
             <ResearchSummary r={record} held={held} price={price} now={ws.now} freshDays={ws.policy?.researchFreshnessDays ?? 120} error={sp.error ? ERRORS[sp.error] : undefined} />
           )}
+          {!etf && versions.length > 0 && <FilingCheckCard symbol={company.symbol} run={(lastCheck as StoredFilingCheck | null) ?? null} />}
           {feeds(company.name)}
           <div className="flex gap-2">
             <AskButton question={`What has to be true for ${company.symbol} to reach the base case, and what would break the thesis?`} className="btn flex-1">Ask about the thesis</AskButton>
