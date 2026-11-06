@@ -4,7 +4,7 @@
  */
 import type Anthropic from "@anthropic-ai/sdk";
 import type { SupabaseClient } from "@supabase/supabase-js";
-import type { Workspace } from "@/lib/workspace";
+import type { Workspace } from "@/lib/workspace-core";
 import { getQuote } from "@/lib/market/quotes";
 import { getFilings, getFundamentals } from "@/lib/market/sec";
 import { getNews } from "@/lib/market/news";

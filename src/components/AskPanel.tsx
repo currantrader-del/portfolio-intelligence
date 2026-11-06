@@ -6,7 +6,7 @@ import { Markdown } from "./Markdown";
 import { titleOf } from "./shell/nav";
 
 type Evidence = { name: string; input: unknown; ok: boolean; preview: string };
-type Msg = { role: "user" | "assistant"; content: string; model?: string; evidence?: Evidence[]; error?: boolean };
+type Msg = { role: "user" | "assistant"; content: string; model?: string; evidence?: Evidence[]; error?: boolean; meta?: string };
 
 const SUGGESTIONS: [RegExp, string[]][] = [
   [/^\/research\/[^/]+/, ["What would change the call?", "Is the research still current?", "What are the biggest risks?"]],
@@ -24,6 +24,7 @@ const TOOL_LABEL: Record<string, string> = {
   get_portfolio: "Portfolio", get_research: "Research", get_policy: "Policy", get_quote: "Quote", simulate_new_capital: "New-cash engine",
   get_filings: "SEC filings", get_fundamentals: "SEC financials", get_news: "Headlines", get_pipeline: "Pipeline", screen_company: "Screen",
   get_risk: "Risk model", get_events: "Company events", get_decisions: "Decisions", get_alerts: "Alerts",
+  get_briefing: "Today's briefing", get_technicals: "Price trend", read_document: "Document", web_search: "Web search",
 };
 const toolLabel = (n: string) => TOOL_LABEL[n] ?? n.replace(/^get_/, "").replace(/_/g, " ");
 
@@ -102,31 +103,26 @@ export function AskPanel() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ messages: next.filter((m) => !m.error).map(({ role, content }) => ({ role, content })), page: path, symbol, deep }),
       });
-      if (!res.ok || !res.body) {
-        const j = await res.json().catch(() => ({}));
+      const j = await res.json().catch(() => ({}));
+      if (!res.ok || !j.requestId) {
         setMsgs([...next, { role: "assistant", content: j.error ?? "The assistant is unavailable right now.", error: true }]);
         return;
       }
-      const reader = res.body.getReader();
-      const dec = new TextDecoder();
-      let buf = "";
+      // The answer is researched in the background (it can take a minute or two); poll for it.
+      const t0 = Date.now();
       for (;;) {
-        const { value, done } = await reader.read();
-        if (done) break;
-        buf += dec.decode(value, { stream: true });
-        let i;
-        while ((i = buf.indexOf("\n")) >= 0) {
-          const line = buf.slice(0, i);
-          buf = buf.slice(i + 1);
-          if (!line.trim()) continue;
-          const ev = JSON.parse(line);
-          if (ev.type === "status") setBusy(ev.text);
-          if (ev.type === "answer") {
-            const evidence: Evidence[] = ev.evidence ?? (ev.tools ?? []).map((name: string) => ({ name, input: null, ok: true, preview: "" }));
-            setMsgs([...next, { role: "assistant", content: ev.text, model: String(ev.model ?? ""), evidence }]);
-          }
-          if (ev.type === "error") setMsgs([...next, { role: "assistant", content: ev.text, error: true }]);
+        await new Promise((r) => setTimeout(r, 3000));
+        const secs = Math.round((Date.now() - t0) / 1000);
+        setBusy(`Researching · ${secs}s`);
+        const st = await fetch(`/api/ask?id=${encodeURIComponent(j.requestId)}`, { cache: "no-store" }).then((r) => r.json()).catch(() => null);
+        if (st?.status === "done") {
+          const a = st.answer;
+          if (a.error) { setMsgs([...next, { role: "assistant", content: `Something went wrong answering that (${a.error}).`, error: true }]); break; }
+          const evidence: Evidence[] = (a.steps ?? []).map((x: { tool: string; input: unknown; ok: boolean; preview: string }) => ({ name: x.tool, input: x.input, ok: x.ok, preview: x.preview }));
+          setMsgs([...next, { role: "assistant", content: a.answer, model: String(a.model ?? ""), evidence, meta: `${Math.round(a.ms / 1000)}s · $${Number(a.costUsd).toFixed(2)}${a.searches ? ` · ${a.searches} web searches` : ""}` }]);
+          break;
         }
+        if (Date.now() - t0 > 10 * 60000) { setMsgs([...next, { role: "assistant", content: "This is taking longer than 10 minutes. The answer will be saved when it finishes.", error: true }]); break; }
       }
     } catch {
       setMsgs([...next, { role: "assistant", content: "Network error. Try again.", error: true }]);
@@ -179,7 +175,7 @@ export function AskPanel() {
                     <div className={`text-[15px] leading-relaxed ${m.error ? "text-warn-ink" : ""}`}><Markdown text={m.content} /></div>
                     {!m.error && (
                       <div className="flex flex-wrap gap-1.5">
-                        <span className="src"><i>{m.model?.includes("opus") ? "Deep review" : "Standard"}</i>AI judgment</span>
+                        <span className="src"><i>{m.model?.includes("opus") ? "Deep review" : "Standard"}</i>{m.meta ?? "AI judgment"}</span>
                         {[...new Set((m.evidence ?? []).map((e) => e.name))].map((n) => <span key={n} className="src"><i>{toolLabel(n)}</i></span>)}
                       </div>
                     )}
