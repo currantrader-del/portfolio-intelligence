@@ -1,10 +1,18 @@
 # Test report
 
-Commit `064508c` (plus the uncommitted report itself), run 2026-11-06 with `npx vitest run`. Reproduce with `npm ci && npx vitest run`.
+Commit `0fadd58` plus this report, run 2026-11-06 with `npx vitest run`. Reproduce with `npm ci && npx vitest run`. Type check (`npx tsc --noEmit`), lint (`npm run lint`) and `next build` also pass.
 
-**113 passed, 0 failed, 113 total** across 48 suites in 18 files.
+**135 passed, 0 failed, 135 total** in 20 files.
 
-Real-data fixture: `src/lib/market/__fixtures__/iren-submissions-2026-11-06.json`, trimmed from https://data.sec.gov/submissions/CIK0001878848.json (public SEC data). All other inputs are synthetic.
+Real-data fixtures (public SEC data only):
+- `src/lib/market/__fixtures__/iren-submissions-2026-11-06.json`, trimmed from https://data.sec.gov/submissions/CIK0001878848.json.
+- `src/lib/market/__fixtures__/iren-10q-2026-09-30-subset.xml`, a **transcribed subset** of IREN's Q1 FY27 10-Q (accession 0001878848-26-000066), written in XBRL instance form. Its header says so. The live app reads the original instance from SEC instead.
+
+All other inputs are synthetic.
+
+## Database migration staging test
+
+`supabase/tests/run-staging.sh` builds a scratch PostgreSQL 16 database with every earlier migration and runs `supabase/tests/research_append_only.test.sql`. Result: **ALL STAGING CHECKS PASSED** (log in the project files, `reliability/staging-run.log`). See `docs/migration-safety-research-append-only.md`.
 
 ## Coverage by area
 
@@ -16,7 +24,7 @@ Real-data fixture: `src/lib/market/__fixtures__/iren-submissions-2026-11-06.json
 | Freshness | 12 | 12 |
 | Import | 10 | 10 |
 | Monitoring rules | 2 | 2 |
-| Policy conflicts | 5 | 5 |
+| Policy conflicts and provisional limits | 8 | 8 |
 | Policy parsing | 2 | 2 |
 | Portfolio arithmetic | 8 | 8 |
 | Quotes and stale data | 10 | 10 |
@@ -24,15 +32,17 @@ Real-data fixture: `src/lib/market/__fixtures__/iren-submissions-2026-11-06.json
 | Research coverage | 6 | 6 |
 | Research refresh rules | 7 | 7 |
 | Risk arithmetic and history | 10 | 10 |
+| SEC filing check (acceptance) | 14 | 14 |
 | SEC/RSS parsing | 7 | 7 |
 | Scenario models | 5 | 5 |
 | Screening | 4 | 4 |
+| XBRL parsing | 5 | 5 |
 
 ## Not covered by automated tests
 
-- Live provider calls (Yahoo, Stooq, SEC) from the deployed app: the build sandbox has no outbound access.
+- Live provider calls (Yahoo, Stooq, SEC) from the deployed app: the build sandbox has no outbound access. The SEC filing check is verified live by pressing "Check latest SEC filing" on the preview and comparing the stored `model_runs` row with the 10-Q.
 - Page rendering with real account data (checked manually with synthetic fixture mode only).
-- The append-only research migration (written, not yet applied).
+- The append-only research migration on production (staging only; not applied until approved).
 
 ## Every test
 
@@ -79,11 +89,14 @@ Real-data fixture: `src/lib/market/__fixtures__/iren-submissions-2026-11-06.json
 | Import | `src/lib/import/plan.test.ts` | import plan > refuses to plan a row without its source document | passed |
 | Monitoring rules | `src/lib/alerts/rules.test.ts` | alerts > merges a big move, a band change and a limit breach on one company into one review | passed |
 | Monitoring rules | `src/lib/alerts/rules.test.ts` | alerts > treats a move in line with the market as low priority | passed |
-| Policy conflicts | `src/lib/policy/rules.test.ts` | policy conflicts > marks a lone proposed value as proposed, and assumptions without approval as not approved | passed |
-| Policy conflicts | `src/lib/policy/rules.test.ts` | policy conflicts > never labels a disputed maximum approved, and uses the stricter one | passed |
-| Policy conflicts | `src/lib/policy/rules.test.ts` | policy conflicts > never uses a superseded rule | passed |
-| Policy conflicts | `src/lib/policy/rules.test.ts` | policy conflicts > treats two approved rows that disagree as a conflict | passed |
-| Policy conflicts | `src/lib/policy/rules.test.ts` | policy conflicts > uses an approved rule over open candidates | passed |
+| Policy conflicts and provisional limits | `src/lib/policy/rules.test.ts` | policy conflicts > marks a lone proposed value as proposed, and assumptions without approval as not approved | passed |
+| Policy conflicts and provisional limits | `src/lib/policy/rules.test.ts` | policy conflicts > never labels a disputed maximum approved, and uses the stricter one | passed |
+| Policy conflicts and provisional limits | `src/lib/policy/rules.test.ts` | policy conflicts > never uses a superseded rule | passed |
+| Policy conflicts and provisional limits | `src/lib/policy/rules.test.ts` | policy conflicts > treats two approved rows that disagree as a conflict | passed |
+| Policy conflicts and provisional limits | `src/lib/policy/rules.test.ts` | policy conflicts > uses an approved rule over open candidates | passed |
+| Policy conflicts and provisional limits | `src/lib/policy/rules.test.ts` | provisional limit > follows the provisional row even when it is not the stricter one | passed |
+| Policy conflicts and provisional limits | `src/lib/policy/rules.test.ts` | provisional limit > is not provisional once a row is approved | passed |
+| Policy conflicts and provisional limits | `src/lib/policy/rules.test.ts` | provisional limit > uses the owner's provisional choice while the conflict stays open and unapproved | passed |
 | Policy parsing | `src/lib/policy/limits.test.ts` | policy parsing > parses ranges and percents in the policy's own wording | passed |
 | Policy parsing | `src/lib/policy/limits.test.ts` | policy parsing > reads bucket and company limits from the revised policy | passed |
 | Portfolio arithmetic | `src/lib/portfolio/engine.test.ts` | portfolio engine > adds ETF look-through to company exposure | passed |
@@ -135,6 +148,20 @@ Real-data fixture: `src/lib/market/__fixtures__/iren-submissions-2026-11-06.json
 | Risk arithmetic and history | `src/lib/portfolio/risk.test.ts` | risk math > flags a mix of total-return and price-only histories | passed |
 | Risk arithmetic and history | `src/lib/portfolio/risk.test.ts` | risk math > lists holdings with no history instead of inventing it | passed |
 | Risk arithmetic and history | `src/lib/portfolio/risk.test.ts` | risk math > matches hand-computed beta and annualised volatility | passed |
+| SEC filing check (acceptance) | `src/lib/research/filingCheck.test.ts` | buildFilingCheck on IREN's Q1 FY27 10-Q > cites every source it used | passed |
+| SEC filing check (acceptance) | `src/lib/research/filingCheck.test.ts` | buildFilingCheck on IREN's Q1 FY27 10-Q > compares the quarter-end balance sheet with the one the research could have known | passed |
+| SEC filing check (acceptance) | `src/lib/research/filingCheck.test.ts` | buildFilingCheck on IREN's Q1 FY27 10-Q > concludes WAIT / REVIEW, citing the refresh rules that fired | passed |
+| SEC filing check (acceptance) | `src/lib/research/filingCheck.test.ts` | buildFilingCheck on IREN's Q1 FY27 10-Q > flags dilution and the share count increase as material, with the numbers shown | passed |
+| SEC filing check (acceptance) | `src/lib/research/filingCheck.test.ts` | buildFilingCheck on IREN's Q1 FY27 10-Q > lists what it could not find instead of filling it in | passed |
+| SEC filing check (acceptance) | `src/lib/research/filingCheck.test.ts` | buildFilingCheck on IREN's Q1 FY27 10-Q > never produces a buy, a target or a valuation | passed |
+| SEC filing check (acceptance) | `src/lib/research/filingCheck.test.ts` | buildFilingCheck on IREN's Q1 FY27 10-Q > reconciles net debt exactly to the 10-Q figures ($216m to $4,430m) | passed |
+| SEC filing check (acceptance) | `src/lib/research/filingCheck.test.ts` | buildFilingCheck on IREN's Q1 FY27 10-Q > reports revenue and loss as reported facts, not as conclusions | passed |
+| SEC filing check (acceptance) | `src/lib/research/filingCheck.test.ts` | buildFilingCheck when inputs are missing > reports a missing tag as a gap and does not compute net debt from partial data | passed |
+| SEC filing check (acceptance) | `src/lib/research/filingCheck.test.ts` | buildFilingCheck when inputs are missing > says CURRENT when nothing fired, nothing is material and nothing is missing | passed |
+| SEC filing check (acceptance) | `src/lib/research/filingCheck.test.ts` | buildFilingCheck when inputs are missing > stays WAIT / REVIEW and says why when SEC could not be reached | passed |
+| SEC filing check (acceptance) | `src/lib/research/filingCheck.test.ts` | buildFilingCheck with no new report > does not invent a gap when the research already covers the newest report | passed |
+| SEC filing check (acceptance) | `src/lib/research/filingCheck.test.ts` | chooseReport and instanceFromIndex > finds the extracted XBRL instance in an EDGAR index.json, ignoring linkbases | passed |
+| SEC filing check (acceptance) | `src/lib/research/filingCheck.test.ts` | chooseReport and instanceFromIndex > picks the 10-Q filed after the research, not the 10-K the research already covered | passed |
 | SEC/RSS parsing | `src/lib/market/feeds.test.ts` | RSS parsing > decodes entities, CDATA and strips tags | passed |
 | SEC/RSS parsing | `src/lib/market/feeds.test.ts` | RSS parsing > parses items, splits Google publishers, drops unsafe links and duplicates | passed |
 | SEC/RSS parsing | `src/lib/market/feeds.test.ts` | SEC parsing > estimates the next report about a quarter after the last one | passed |
@@ -151,3 +178,8 @@ Real-data fixture: `src/lib/market/__fixtures__/iren-submissions-2026-11-06.json
 | Screening | `src/lib/research/screen.test.ts` | screenCompany > passes a healthy company to research, without any buy signal | passed |
 | Screening | `src/lib/research/screen.test.ts` | screenCompany > says there is not enough data instead of guessing | passed |
 | Screening | `src/lib/research/screen.test.ts` | screenCompany > treats a recent prospectus as a filing to read, without claiming dilution | passed |
+| XBRL parsing | `src/lib/market/xbrl.test.ts` | parseXbrlInstance > accepts repeated identical facts but refuses conflicting ones | passed |
+| XBRL parsing | `src/lib/market/xbrl.test.ts` | parseXbrlInstance > never returns a segment value as the company total | passed |
+| XBRL parsing | `src/lib/market/xbrl.test.ts` | parseXbrlInstance > reads numeric facts with their period and unit, skipping text and nil facts | passed |
+| XBRL parsing | `src/lib/market/xbrl.test.ts` | parseXbrlInstance > reads the document period | passed |
+| XBRL parsing | `src/lib/market/xbrl.test.ts` | parseXbrlInstance > respects the duration window (a quarter is not a year-to-date or annual figure) | passed |
