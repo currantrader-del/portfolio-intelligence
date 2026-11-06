@@ -7,6 +7,7 @@ const ITEMS = [
   { href: "/", label: "Today" },
   { href: "/portfolio", label: "Portfolio" },
   { href: "/research", label: "Research" },
+  { href: "/risk", label: "Risk" },
   { href: "/decisions", label: "Decisions" },
 ];
 
@@ -14,7 +15,7 @@ const ITEMS = [
 export function MobileNav() {
   const path = usePathname();
   return (
-    <nav aria-label="Main (mobile)" className="md:hidden fixed bottom-0 inset-x-0 z-40 bg-surface border-t border-line grid grid-cols-4 pb-[env(safe-area-inset-bottom)]">
+    <nav aria-label="Main (mobile)" className="md:hidden fixed bottom-0 inset-x-0 z-40 bg-surface border-t border-line grid grid-cols-5 pb-[env(safe-area-inset-bottom)]">
       {ITEMS.map((i) => {
         const active = i.href === "/" ? path === "/" : path.startsWith(i.href);
         return (

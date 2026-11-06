@@ -93,7 +93,7 @@ export function ResearchSummary({ r, held, price, now, freshDays, error }: { r: 
                 {STAGES.filter((s) => s.key !== "owned").map((s) => <option key={s.key} value={s.key}>{s.label}</option>)}
               </select>
             </label>
-            <label className="text-sm flex flex-col gap-1">Note (needed to pass)<input name="note" maxLength={500} className="rounded-lg border border-line-strong bg-ground px-3 min-h-10 w-56" /></label>
+            <label className="text-sm flex flex-col gap-1 w-full sm:w-auto">Note (needed to pass)<input name="note" maxLength={500} className="rounded-lg border border-line-strong bg-ground px-3 min-h-10 w-full sm:w-56" /></label>
             <button className="min-h-10 px-4 rounded-lg bg-ink text-ground font-medium text-sm">Save stage</button>
           </form>
         )}

@@ -92,7 +92,7 @@ export default async function ResearchPage({ searchParams }: { searchParams: Pro
         </form>
         <nav className="flex flex-wrap gap-1.5 text-sm" aria-label="Pipeline stage">
           {PIPE_STAGES.map((st) => (
-            <Link key={st.key} href={`/research?stage=${st.key}`} aria-current={stage === st.key ? "page" : undefined} className={`min-h-9 px-3 inline-flex items-center rounded-full border no-underline ${stage === st.key ? "bg-ink text-ground border-ink" : "border-line-strong text-ink"}`}>{st.label} ({byStage[st.key].length})</Link>
+            <Link key={st.key} href={`/research?stage=${st.key}`} aria-current={stage === st.key ? "page" : undefined} className={`min-h-10 px-3 inline-flex items-center rounded-full border no-underline ${stage === st.key ? "bg-ink text-ground border-ink" : "border-line-strong text-ink"}`}>{st.label} ({byStage[st.key].length})</Link>
           ))}
         </nav>
         <p className="text-xs text-muted -mt-1">{PIPE_STAGES.find((x) => x.key === stage)?.hint}</p>

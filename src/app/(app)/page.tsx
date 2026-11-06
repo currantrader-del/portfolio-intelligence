@@ -1,7 +1,10 @@
 import { Suspense } from "react";
 import Link from "next/link";
 import { FeedSkeleton, MoverHeadlines } from "@/components/CompanyFeeds";
+import { EventAlerts } from "@/components/EventAlerts";
 import { isEtf } from "@/lib/portfolio/classify";
+import { createClient } from "@/lib/supabase/server";
+import { recordDaily } from "@/lib/portfolio/daily";
 import { getWorkspace } from "@/lib/workspace";
 import { writeBrief } from "@/lib/brief";
 import { Tag } from "@/components/Tag";
@@ -14,6 +17,7 @@ const SEV_TONE = { high: "alert", medium: "warn", low: "neutral" } as const;
 export default async function TodayPage() {
   const ws = await getWorkspace();
   const p = ws.portfolio;
+  await recordDaily(await createClient(), ws);
   const spy = ws.benchmarks.find((b) => b.symbol === "SPY")?.dayPct ?? null;
   const brief = writeBrief(p, spy, ws.alerts);
   const queue = ws.alerts.filter((a) => a.severity !== "low");
@@ -39,7 +43,13 @@ export default async function TodayPage() {
 
   return (
     <div className="flex flex-col gap-6">
-      <h1 className="font-serif text-2xl sm:text-3xl font-semibold">{dateLabel}</h1>
+      <div className="flex flex-wrap items-baseline justify-between gap-2">
+        <h1 className="font-serif text-2xl sm:text-3xl font-semibold">{dateLabel}</h1>
+        <nav className="flex gap-1.5 text-sm" aria-label="Briefings">
+          <Link href="/brief" className="min-h-10 px-3 inline-flex items-center rounded-full border border-line-strong no-underline text-ink">Daily brief</Link>
+          <Link href="/brief?period=week" className="min-h-10 px-3 inline-flex items-center rounded-full border border-line-strong no-underline text-ink">Weekly brief</Link>
+        </nav>
+      </div>
       <div className="flex flex-wrap gap-6 items-start">
         <div className="flex-[999_1_560px] min-w-0 flex flex-col gap-6">
           <section aria-label="Brief" className="bg-surface border border-line rounded-2xl p-6 flex flex-col gap-3">
@@ -79,6 +89,8 @@ export default async function TodayPage() {
               </div>
             </form>
           </section>
+
+          <Suspense fallback={null}><EventAlerts symbols={p.holdings.map((h) => h.symbol)} now={ws.now} /></Suspense>
 
           {later.length > 0 && (
             <section aria-labelledby="later-h" className="bg-surface border border-line rounded-2xl p-5">

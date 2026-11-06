@@ -9,6 +9,9 @@ import { getQuote } from "@/lib/market/quotes";
 import { getFilings, getFundamentals } from "@/lib/market/sec";
 import { getNews } from "@/lib/market/news";
 import { screenCompany } from "@/lib/research/screen";
+import { getHistories } from "@/lib/market/history";
+import { buildRisk } from "@/lib/portfolio/risk";
+import { loadEventAlerts } from "@/lib/alerts/events";
 import { newCapital } from "@/lib/decision/newCapital";
 import { expectedReturnAt, repriceCheck, scenarioReturnsAt, zoneFor } from "@/lib/research/valuation";
 import { researchAgeDays } from "@/lib/research/records";
@@ -67,6 +70,18 @@ export const TOOLS: Anthropic.Beta.BetaTool[] = [
     name: "get_fundamentals",
     description: "Reported financials from SEC XBRL data: revenue, operating income, net income, diluted EPS, operating cash flow, capital spending (latest quarter, same quarter last year, year-over-year change, latest fiscal year, trailing 12 months) plus cash, long-term debt and shares outstanding. Each figure has its period end and filing date.",
     input_schema: { type: "object", properties: { symbol: { type: "string" } }, required: ["symbol"], additionalProperties: false },
+    strict: true,
+  },
+  {
+    name: "get_risk",
+    description: "HYPOTHETICAL risk analytics for today's holdings at past daily prices (not actual returns): change vs S&P 500, yearly volatility, largest drop, beta, worst month, concentration with ETF look-through, per-holding volatility and beta, and what-if scenarios (S&P -20%, Nasdaq -30%, semis -35%, largest stock -50%, worst month repeated) in dollars of investable capital.",
+    input_schema: { type: "object", properties: { range: { type: "string", enum: ["3mo", "6mo", "1y", "2y"] } }, required: ["range"], additionalProperties: false },
+    strict: true,
+  },
+  {
+    name: "get_events",
+    description: "Company events for held stocks from SEC filings: results just filed, estimated upcoming reports (estimates, not confirmed dates), share or debt offerings, and material 8-Ks in the last few days.",
+    input_schema: { type: "object", properties: {}, required: [], additionalProperties: false },
     strict: true,
   },
   {
@@ -201,6 +216,23 @@ export async function runTool(name: string, input: Record<string, unknown>, ws: 
         missing: r.missing,
         metrics: r.metrics.map((m) => ({ metric: m.label, unit: m.unit, latest_quarter: m.latestQuarter, year_ago_quarter: m.yearAgoQuarter, yoy_change: r4(m.yoy), latest_fiscal_year: m.latestAnnual, trailing_12m: m.ttm, latest: m.latest })),
       };
+    }
+    case "get_risk": {
+      const range = (["3mo", "6mo", "1y", "2y"].includes(String(input.range)) ? input.range : "1y") as "3mo" | "6mo" | "1y" | "2y";
+      const histories = await getHistories([...p.holdings.map((h) => h.symbol), "SPY", "QQQ", "SOXX"], range);
+      const r = buildRisk({ positions: p.holdings.map((h) => ({ symbol: h.symbol, quantity: h.quantity, value: h.value })), cash: p.cash, investable: p.total, histories, exposures: p.exposures.map((e) => ({ symbol: e.symbol, total: e.total })) });
+      return {
+        layer: "model_output",
+        label: "Hypothetical: today's holdings at past prices. Not the person's actual return.",
+        range, start: r.start, as_of: r.asOf, stats: r.stats, concentration: r.concentration,
+        holdings: r.holdings.map((h) => ({ ...h, weight: r4(h.weight), vol: r4(h.vol), beta: r4(h.beta), ret: r4(h.ret), maxDrawdown: r4(h.maxDrawdown) })),
+        scenarios: r.scenarios.map((s) => ({ name: s.name, basis: s.basis, dollars: Math.round(s.dollars), pct: r4(s.pct), worst_lines: s.lines.slice(0, 5) })),
+        missing_history: r.missing, partial_history: r.partial,
+      };
+    }
+    case "get_events": {
+      const { alerts } = await loadEventAlerts(p.holdings.map((h) => h.symbol), ws.now);
+      return { layer: "external_data", provider: "SEC EDGAR", events: alerts.map((a) => ({ symbol: a.symbol, severity: a.severity, title: a.title, detail: a.detail })) };
     }
     case "get_pipeline": {
       const held = new Set(p.holdings.map((h) => h.symbol));

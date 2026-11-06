@@ -13,7 +13,7 @@ export type Alert = {
   id: string;
   severity: Severity;
   symbol: string | null;
-  kind: "price_zone" | "big_move" | "over_limit" | "bucket" | "research_stale" | "research_missing" | "holdings_stale" | "review" | "policy_conflict" | "data_missing";
+  kind: "price_zone" | "big_move" | "over_limit" | "bucket" | "research_stale" | "research_missing" | "holdings_stale" | "review" | "policy_conflict" | "data_missing" | "event";
   title: string;
   detail: string;
   href: string;

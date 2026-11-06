@@ -70,3 +70,10 @@ body {
   color: var(--ink);
   font-family: var(--font-inter), system-ui, sans-serif;
 }
+
+/* Phones: 16px form text stops iOS zooming on focus; tables scroll inside their card. */
+@media (max-width: 640px) {
+  input, select, textarea { font-size: 16px; }
+}
+html { -webkit-text-size-adjust: 100%; }
+body { overflow-x: hidden; }
