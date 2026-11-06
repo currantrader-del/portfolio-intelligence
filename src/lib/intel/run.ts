@@ -13,7 +13,7 @@ export function costOf(u: { input: number; output: number; searches: number }) {
   return (u.input * PRICE.inPerM + u.output * PRICE.outPerM) / 1e6 + u.searches * PRICE.perSearch;
 }
 
-/** One desk, kept inside the hosting time limit: it stops resuming a paused turn after ~40 seconds. */
+/** One desk, kept inside the hosting time limit: at most 4 searches, and it stops resuming a paused turn after ~25 seconds. */
 export async function runDesk(key: DeskKey, ctx: { now: Date; snapshot: Snapshot; holdings: string[]; watch: string[] }): Promise<DeskResult> {
   const desk = DESKS.find((d) => d.key === key)!;
   const client = new Anthropic();
@@ -30,7 +30,7 @@ export async function runDesk(key: DeskKey, ctx: { now: Date; snapshot: Snapshot
       system: deskSystem(),
       // Basic search: results arrive as plain search-result blocks the model reads directly. The dynamic-filtering
       // version ran searches inside code and the desks reported failed searches on the preview (2026-11-06).
-      tools: [{ type: "web_search_20250305", name: "web_search", max_uses: 6 }],
+      tools: [{ type: "web_search_20250305", name: "web_search", max_uses: 4 }],
       output_config: { effort: "low" },
       betas: ["server-side-fallback-2026-07-01"],
       fallbacks: "default",
@@ -42,7 +42,7 @@ export async function runDesk(key: DeskKey, ctx: { now: Date; snapshot: Snapshot
     usage.searches += res.usage.server_tool_use?.web_search_requests ?? 0;
     content.push(...res.content);
     if (res.stop_reason === "refusal") { problems.push("The model declined this desk"); break; }
-    if (res.stop_reason !== "pause_turn" || Date.now() - started > 40_000) {
+    if (res.stop_reason !== "pause_turn" || Date.now() - started > 25_000) {
       if (res.stop_reason === "pause_turn") problems.push("Stopped searching early to stay within the time limit");
       break;
     }

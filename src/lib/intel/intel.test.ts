@@ -128,7 +128,7 @@ describe("desk results", () => {
 });
 
 describe("synthesis checks", () => {
-  const desk = (key: "world" | "us" | "markets", n: number): DeskResult => ({
+  const desk = (key: "world" | "us" | "markets" | "events", n: number): DeskResult => ({
     version: "desk@1", desk: key, title: key, generatedAt: now.toISOString(), model: "m", searches: 1, pagesReturned: 1, problems: [], uncertainties: [], usage: { input: 0, output: 0, searches: 0 },
     items: Array.from({ length: n }, (_, i) => ({ headline: `h${i}`, detail: "d", kind: "verified", significance: "medium", sources: [], portfolio: null, unsourced: false })),
     calendar: key === "markets" ? [{ date: "2026-11-13", time: null, event: "CPI", type: "economic", status: "confirmed", expectation: null, why: "", symbols: [], source: null }] : [],

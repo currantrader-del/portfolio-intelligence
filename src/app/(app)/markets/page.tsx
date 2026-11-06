@@ -34,7 +34,7 @@ export default async function MarketsPage() {
       ])
     : [null, null];
   const snapshot = (snapRow?.data?.outputs ?? null) as Snapshot | null;
-  const desks = ((deskRows?.data ?? []) as { id: string; outputs: DeskResult }[]).map((d) => d.outputs).sort((x, y) => ["world", "us", "markets"].indexOf(x.desk) - ["world", "us", "markets"].indexOf(y.desk));
+  const desks = ((deskRows?.data ?? []) as { id: string; outputs: DeskResult }[]).map((d) => d.outputs).sort((x, y) => ["world", "us", "markets", "events"].indexOf(x.desk) - ["world", "us", "markets", "events"].indexOf(y.desk));
   const fresh = b && etDay(new Date(b.generatedAt)) === etDay(now);
   // Start today's briefing on first open, unless one started in the last 10 minutes.
   const inFlight = recentSnap && now.getTime() - Date.parse(recentSnap.computed_at) < 10 * 60000 && (!last || Date.parse(last.computed_at) < Date.parse(recentSnap.computed_at));

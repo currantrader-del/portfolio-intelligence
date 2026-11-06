@@ -7,7 +7,7 @@
 import type { Snapshot } from "./snapshot";
 
 export const DESK_VERSION = "desk@1";
-export type DeskKey = "world" | "us" | "markets";
+export type DeskKey = "world" | "us" | "markets" | "events";
 export const DESKS: { key: DeskKey; title: string; brief: string }[] = [
   {
     key: "world",
@@ -22,7 +22,13 @@ export const DESKS: { key: DeskKey; title: string; brief: string }[] = [
   {
     key: "markets",
     title: "Markets, sectors and catalysts",
-    brief: `Cover the last 1-5 sessions: which US sectors and industries led and lagged and what sources say drove it, earnings season results and guidance, estimate revisions, analyst sentiment, positioning and risk appetite (fund flows, surveys, options activity) where a source reports it. Then build a calendar of scheduled catalysts for the next 15 trading days: US economic releases, Federal Reserve events, Treasury auctions that sources flag as important, and earnings dates for the companies listed in the portfolio context (confirmed by the company or estimated).`,
+    brief: `Cover the last 1-5 sessions: which US sectors and industries led and lagged and what sources say drove it, earnings season results and guidance, estimate revisions, analyst sentiment, positioning and risk appetite (fund flows, surveys, options activity) where a source reports it, and news on the companies listed in the portfolio context. Leave the calendar empty; another desk builds it.`,
+  },
+  {
+    // Split from the markets desk: one desk doing both ran past the hosting time limit (2026-11-06).
+    key: "events",
+    title: "Upcoming events",
+    brief: `Build only the calendar of scheduled catalysts for the next 15 trading days: US economic releases (with the consensus when a source states one), Federal Reserve meetings, minutes and major speeches, Treasury auctions that sources flag as important, market holidays, and earnings dates for the companies listed in the portfolio context (confirmed by the company or estimated). Prefer official schedules (bls.gov, bea.gov, federalreserve.gov, company investor-relations pages). Return items only for a scheduling change that is itself news.`,
   },
 ];
 

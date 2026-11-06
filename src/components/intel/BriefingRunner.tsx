@@ -8,6 +8,7 @@ const DESKS = [
   { key: "world", label: "World and geopolitics" },
   { key: "us", label: "US economy and policy" },
   { key: "markets", label: "Markets, sectors and catalysts" },
+  { key: "events", label: "Upcoming events" },
 ];
 
 async function call(body: Record<string, unknown>) {
