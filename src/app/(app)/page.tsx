@@ -12,6 +12,8 @@ import { pctStr, shortDate, toneOf, usd } from "@/lib/format";
 import { Bar, Card, CardHead, Chevron, DataLabel, Disclose, Dot, Metric, PageHeader, Pill, Skel } from "@/components/ui";
 import { AlertList } from "@/components/cards/Alerts";
 import { EventsCard, EventsSkeleton } from "@/components/cards/Events";
+import { Markdown } from "@/components/Markdown";
+import { MorningRunner } from "@/components/MorningRunner";
 
 const pts = (v: number) => `${v >= 0 ? "+" : "−"}${Math.abs(v).toFixed(2)}`;
 
@@ -21,6 +23,10 @@ export default async function TodayPage() {
   // Recording today's row happens after the response is sent, so it never slows the page.
   const db = await createClient();
   after(() => recordDaily(db, ws));
+  const { data: mrow } = await db.from("model_runs").select("computed_at, outputs").eq("kind", "assistant_answer").eq("inputs->>purpose", "morning").order("computed_at", { ascending: false }).limit(1).maybeSingle();
+  const mout = mrow?.outputs as { answer?: string; ms?: number; costUsd?: number; error?: string } | undefined;
+  const etDay = (d: Date) => d.toLocaleDateString("en-CA", { timeZone: "America/New_York" });
+  const morning = mrow && mout?.answer && !mout.error ? { answer: mout.answer, at: mrow.computed_at as string, ms: mout.ms ?? 0, costUsd: mout.costUsd ?? 0, today: etDay(new Date(mrow.computed_at)) === etDay(ws.now) } : null;
 
   const spy = ws.benchmarks.find((b) => b.symbol === "SPY")?.dayPct ?? null;
   const brief = writeBrief(p, spy, ws.alerts);
@@ -56,6 +62,16 @@ export default async function TodayPage() {
           <Link href="/brief" className="btn btn-sm lg:min-h-11 lg:px-4 lg:text-[15px] max-lg:hidden">Daily brief</Link>
         </>
       } />
+
+      <Card labelledBy="mb-h" className="!gap-2">
+        <CardHead id="mb-h" cap="Morning briefing" right={<MorningRunner label={morning ? "Write a new one" : "Write it now"} />} />
+        {morning ? (
+          <>
+            <div className="text-[15px] leading-relaxed"><Markdown text={morning.answer} /></div>
+            <span className="t-xs">Written {new Intl.DateTimeFormat("en-US", { hour: "numeric", minute: "2-digit", timeZone: "America/New_York" }).format(new Date(morning.at))} ET{morning.today ? "" : ` on ${shortDate(morning.at)}`} · {Math.round(morning.ms / 1000)}s · ${morning.costUsd.toFixed(2)} · from your portfolio, policy, research and today&apos;s market briefing</span>
+          </>
+        ) : <p className="t-sm">Written automatically at 6:30 AM ET on weekdays: what happened, what it means for your holdings, and what (if anything) to do.</p>}
+      </Card>
 
       <MarketsTeaser />
 

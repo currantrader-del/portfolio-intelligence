@@ -3,6 +3,7 @@
  * takes a few minutes is not cut off; the browser polls for the stored answer.
  *   POST {messages, page, symbol, deep}  -> {requestId}
  *   POST {action: "demo"}                -> the five test questions, each also asked of plain Claude
+ *   POST {action: "morning"}             -> writes the morning briefing now (also scheduled each weekday)
  *   GET ?id=<requestId>                  -> {status: "running" | "done", answer?}
  *   GET ?demo=<demoId>                   -> every request and answer of one demo run
  */
@@ -10,6 +11,7 @@ import { createClient } from "@/lib/supabase/server";
 import { dispatchJob, save } from "@/lib/intel/jobs";
 import { AGENT_VERSION } from "@/lib/assistant/agent";
 import { DEMO_QUESTIONS, type AskRequest } from "@/lib/assistant/jobs";
+import { DAILY_CAP, MORNING_QUESTION, spentToday } from "@/lib/intel/start";
 
 export const runtime = "nodejs";
 export const maxDuration = 30;
@@ -34,7 +36,13 @@ export async function POST(req: Request) {
     await dispatchJob(origin, { job: "ask", requestId: id, token });
     return id;
   };
+  const spent = await spentToday(db);
+  if (spent.answers >= DAILY_CAP.answers || spent.total >= DAILY_CAP.total) return Response.json({ error: `Today's cost limit is reached ($${spent.total.toFixed(2)} spent; limits $${DAILY_CAP.answers} for questions, $${DAILY_CAP.total} in all). It resets at midnight UTC.` }, { status: 429 });
   try {
+    if (body?.action === "morning") {
+      const requestId = await start({ question: MORNING_QUESTION, mode: "app", purpose: "morning" });
+      return Response.json({ requestId });
+    }
     if (body?.action === "demo") {
       const demo = `demo-${new Date().toISOString()}`;
       const ids = await Promise.all(DEMO_QUESTIONS.flatMap((q) => (["app", "baseline"] as const).map((mode) => start({ question: q, mode, demo }))));

@@ -12,6 +12,8 @@ export type AskRequest = {
   page?: string | null; symbol?: string | null; deep?: boolean;
   /** "baseline" = a plain Claude conversation with pasted holdings, for comparison. */
   mode: "app" | "baseline"; demo?: string | null;
+  /** "morning" = the scheduled executive briefing shown at the top of Today. */
+  purpose?: "morning" | null;
 };
 
 /** The five questions the assistant is judged on (Brendan, 2026-11-06). */
@@ -34,5 +36,5 @@ export async function runAskJob(db: SupabaseClient, requestId: string) {
   } catch (e) {
     out = { error: (e as Error).message.slice(0, 300), mode: r.mode, question: r.question };
   }
-  return save(db, "assistant_answer", AGENT_VERSION, { request_id: requestId, mode: r.mode, question: r.question, demo: r.demo ?? null }, out);
+  return save(db, "assistant_answer", AGENT_VERSION, { request_id: requestId, mode: r.mode, question: r.question, demo: r.demo ?? null, purpose: r.purpose ?? null }, out);
 }

@@ -7,12 +7,11 @@
  * Every stored row is new (nothing is updated), with its inputs hashed, so every briefing can be audited.
  */
 import { createClient } from "@/lib/supabase/server";
-import { buildWorkspace } from "@/lib/workspace";
-import { takeSnapshot, type Snapshot } from "@/lib/intel/snapshot";
-import { DESKS, DESK_VERSION, type DeskResult } from "@/lib/intel/desks";
+import { startBriefing } from "@/lib/intel/start";
+import type { Snapshot } from "@/lib/intel/snapshot";
+import { DESKS, type DeskResult } from "@/lib/intel/desks";
 import { costOf } from "@/lib/intel/run";
-import { portfolioContext, watchlist } from "@/lib/intel/context";
-import { briefingFor, deskRows, dispatchJob, planDesks, recentMacro, save, type SnapshotInputs } from "@/lib/intel/jobs";
+import { briefingFor, deskRows, dispatchJob, type SnapshotInputs } from "@/lib/intel/jobs";
 
 export const runtime = "nodejs";
 export const maxDuration = 60;
@@ -32,25 +31,8 @@ export async function POST(req: Request) {
   try {
     if (body?.action === "start") {
       if (!process.env.ANTHROPIC_API_KEY) return Response.json({ error: "ANTHROPIC_API_KEY is not set in Netlify." }, { status: 503 });
-      const now = new Date();
-      const [cachedMacro, plan, ws] = await Promise.all([recentMacro(db, now), planDesks(db, now, !!body.force), buildWorkspace(db)]);
-      const snapshot = await takeSnapshot(now, { cachedMacro });
-      if (snapshot.rows.length < 10) return Response.json({ error: `Market data could not be retrieved (${snapshot.rows.length} of the panel loaded).`, fetchLog: snapshot.fetchLog }, { status: 502 });
-      const inputs: SnapshotInputs = { at: snapshot.takenAt, provider: "yahoo+fred", holdings: ws.portfolio.holdings.map((h) => h.symbol), watch: watchlist(ws), portfolio: portfolioContext(ws), plan, names: Object.fromEntries(ws.research.filter((r) => r.name).map((r) => [r.symbol, r.name!])) };
-      const snapshotId = await save(db, "market_snapshot", snapshot.version, inputs, snapshot);
-      const started = await Promise.allSettled(plan.run.map((k) => dispatchJob(origin, { job: "desk", snapshotId, desk: k, token })));
-      // A desk whose job could not start is recorded as failed, so the briefing does not wait for it.
-      const failedStart = plan.run.flatMap((k, i) => { const r = started[i]; return r.status === "rejected" ? [`${k}: ${(r.reason as Error)?.message ?? "did not start"}`] : []; });
-      for (const f of failedStart) {
-        const k = f.split(":")[0] as (typeof plan.run)[number];
-        const d = DESKS.find((x) => x.key === k)!;
-        await save(db, "briefing_desk", DESK_VERSION, { snapshot_id: snapshotId, desk: k, holdings: inputs.holdings }, { version: DESK_VERSION, desk: k, title: d.title, generatedAt: now.toISOString(), model: "", items: [], calendar: [], uncertainties: [], searches: 0, pagesReturned: 0, problems: [], usage: { input: 0, output: 0, searches: 0 }, status: "failed", error: f, ms: 0, requests: [] } satisfies DeskResult);
-      }
-      if (!plan.run.length || failedStart.length === plan.run.length) await dispatchJob(origin, { job: "synthesize", snapshotId, token });
-      return Response.json({
-        snapshotId, rows: snapshot.rows.length, missing: snapshot.missing.length, macro: snapshot.macro.length, macroSource: snapshot.macroSource,
-        run: plan.run, reuse: plan.reuse, failedStart,
-      });
+      const r = await startBriefing(db, token, origin, !!body.force);
+      return Response.json(r, { status: "error" in r ? 502 : 200 });
     }
     if (body?.action === "synthesize" && body.snapshotId) {
       if (await briefingFor(db, body.snapshotId)) return Response.json({ ok: true, already: true });
