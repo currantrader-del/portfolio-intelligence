@@ -5,7 +5,7 @@
  */
 import { INSTRUMENTS, MACRO, type Group, type Instrument, type MacroSpec } from "./instruments";
 
-export const SNAPSHOT_VERSION = "market-snapshot@1";
+export const SNAPSHOT_VERSION = "market-snapshot@2";
 
 export type Series = { symbol: string; price: number; prevClose: number | null; marketTime: string; closes: { date: string; close: number }[]; provider: "yahoo" };
 
@@ -43,6 +43,11 @@ export type Snapshot = {
   macro: MacroRow[];
   macroMissing: string[];
   notes: string[];
+  /** Where the macro rows came from; absent on snapshots taken before 2026-11-06 19:30Z. */
+  macroSource?: { kind: "fred-api" | "fred-csv" | "reused"; detail: string; snapshotId: string | null };
+  /** Every provider request: status, latency and rows, for diagnosis and the test report. */
+  fetchLog?: FetchLog[];
+  fetchMs?: number;
 };
 
 const etDate = (d: Date) => new Intl.DateTimeFormat("en-CA", { timeZone: "America/New_York", year: "numeric", month: "2-digit", day: "2-digit" }).format(d);
@@ -169,49 +174,108 @@ export function parseYahooSeries(symbol: string, body: unknown): Series | null {
   return { symbol, price, prevClose: Number.isFinite(prev) && prev > 0 ? prev : prior, marketTime: new Date(t * 1000).toISOString(), closes, provider: "yahoo" };
 }
 
-async function fetchSeries(symbol: string): Promise<Series | null> {
+export type FetchLog = { source: "yahoo" | "fred-api" | "fred-csv"; id: string; ms: number; status: number | null; ok: boolean; rows: number; error: string | null };
+
+const errText = (e: unknown) => {
+  const err = e as Error & { cause?: { code?: string; message?: string } };
+  if (err?.name === "TimeoutError" || err?.name === "AbortError") return "timed out";
+  return [err?.message, err?.cause?.code ?? err?.cause?.message].filter(Boolean).join(": ").slice(0, 120) || "request failed";
+};
+
+async function timed<T>(source: FetchLog["source"], id: string, timeoutMs: number, url: string, init: RequestInit, read: (res: Response) => Promise<{ value: T | null; rows: number; error?: string }>): Promise<{ value: T | null; log: FetchLog }> {
+  const t0 = Date.now();
   try {
-    const url = `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(symbol)}?range=1y&interval=1d`;
-    const res = await fetch(url, { headers: { "User-Agent": UA }, cache: "no-store", signal: AbortSignal.timeout(8000) });
-    return res.ok ? parseYahooSeries(symbol, await res.json()) : null;
-  } catch {
-    return null;
+    const res = await fetch(url, { ...init, cache: "no-store", signal: AbortSignal.timeout(timeoutMs) });
+    if (!res.ok) return { value: null, log: { source, id, ms: Date.now() - t0, status: res.status, ok: false, rows: 0, error: `HTTP ${res.status}` } };
+    const r = await read(res);
+    return { value: r.value, log: { source, id, ms: Date.now() - t0, status: res.status, ok: r.value !== null, rows: r.rows, error: r.value === null ? (r.error ?? "no usable data") : null } };
+  } catch (e) {
+    return { value: null, log: { source, id, ms: Date.now() - t0, status: null, ok: false, rows: 0, error: errText(e) } };
   }
 }
 
-/** FRED observations. With FRED_API_KEY set it uses the official API; otherwise the public CSV download. Failures carry a reason. */
-async function fetchFred(id: string): Promise<{ obs: { date: string; value: number }[] | null; error?: string }> {
-  const start = new Date(Date.now() - 800 * 86400000).toISOString().slice(0, 10);
-  const key = process.env.FRED_API_KEY;
-  try {
-    if (key) {
-      const res = await fetch(`https://api.stlouisfed.org/fred/series/observations?series_id=${id}&observation_start=${start}&file_type=json&api_key=${encodeURIComponent(key)}`, { cache: "no-store", signal: AbortSignal.timeout(12000) });
-      if (!res.ok) return { obs: null, error: `FRED API HTTP ${res.status}` };
-      const j = (await res.json()) as { observations?: { date: string; value: string }[] };
-      const obs = (j.observations ?? []).map((o) => ({ date: o.date, value: Number(o.value) })).filter((o) => Number.isFinite(o.value));
-      return obs.length ? { obs } : { obs: null, error: "FRED API returned no observations" };
-    }
-    const res = await fetch(`https://fred.stlouisfed.org/graph/fredgraph.csv?id=${id}&cosd=${start}`, { headers: { "User-Agent": UA, Accept: "text/csv" }, cache: "no-store", signal: AbortSignal.timeout(12000) });
-    if (!res.ok) return { obs: null, error: `FRED CSV HTTP ${res.status}` };
+function fetchSeries(symbol: string) {
+  const url = `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(symbol)}?range=1y&interval=1d`;
+  return timed<Series>("yahoo", symbol, 8000, url, { headers: { "User-Agent": UA } }, async (res) => {
+    const s = parseYahooSeries(symbol, await res.json());
+    return { value: s, rows: s?.closes.length ?? 0 };
+  });
+}
+
+type Obs = { date: string; value: number }[];
+const FRED_START = () => new Date(Date.now() - 800 * 86400000).toISOString().slice(0, 10);
+
+/** The official FRED API (needs FRED_API_KEY). The key is never logged. */
+function fredApi(id: string, key: string) {
+  const url = `https://api.stlouisfed.org/fred/series/observations?series_id=${id}&observation_start=${FRED_START()}&file_type=json&api_key=${encodeURIComponent(key)}`;
+  return timed<Obs>("fred-api", id, 10000, url, { headers: { Accept: "application/json" } }, async (res) => {
+    const j = (await res.json()) as { observations?: { date: string; value: string }[]; error_message?: string };
+    const obs = (j.observations ?? []).map((o) => ({ date: o.date, value: Number(o.value) })).filter((o) => Number.isFinite(o.value));
+    return { value: obs.length ? obs : null, rows: obs.length, error: j.error_message };
+  });
+}
+
+/** The public CSV download, used when no key is set or the API fails. */
+function fredCsv(id: string) {
+  const url = `https://fred.stlouisfed.org/graph/fredgraph.csv?id=${id}&cosd=${FRED_START()}`;
+  return timed<Obs>("fred-csv", id, 10000, url, { headers: { "User-Agent": UA, Accept: "text/csv" } }, async (res) => {
     const text = await res.text();
     const obs = parseFredCsv(text);
-    return obs.length ? { obs } : { obs: null, error: `FRED CSV had no rows (starts "${text.slice(0, 40).replace(/\s+/g, " ")}")` };
-  } catch (e) {
-    return { obs: null, error: (e as Error).name === "TimeoutError" ? "FRED request timed out" : `FRED request failed: ${(e as Error).message.slice(0, 80)}` };
-  }
+    return { value: obs.length ? obs : null, rows: obs.length, error: `no rows (response starts "${text.slice(0, 40).replace(/\s+/g, " ")}")` };
+  });
 }
 
-export async function takeSnapshot(now = new Date()): Promise<Snapshot> {
-  const [series, macro] = await Promise.all([
-    Promise.all(INSTRUMENTS.map(async (i) => [i.symbol, await fetchSeries(i.symbol)] as const)),
-    Promise.all(MACRO.map(async (m) => [m.id, await fetchFred(m.id)] as const)),
-  ]);
-  const snap = buildSnapshot(
-    new Map(series.filter((x): x is readonly [string, Series] => x[1] !== null)),
-    new Map(macro.flatMap(([id, r]) => (r.obs ? [[id, r.obs] as const] : []))),
-    now,
-  );
-  const reasons = [...new Set(macro.flatMap(([, r]) => (r.error ? [r.error] : [])))];
-  if (reasons.length) snap.notes.push(`Macro data problems: ${reasons.join("; ")}.`);
+async function fetchFred(id: string, key: string | undefined, useCsvFallback: boolean): Promise<{ obs: Obs | null; logs: FetchLog[] }> {
+  const logs: FetchLog[] = [];
+  if (key) {
+    const a = await fredApi(id, key);
+    logs.push(a.log);
+    if (a.value) return { obs: a.value, logs };
+    if (!useCsvFallback) return { obs: null, logs };
+  }
+  const c = await fredCsv(id);
+  logs.push(c.log);
+  return { obs: c.value, logs };
+}
+
+/** Macro data reused from an earlier snapshot, so unchanged monthly series are not fetched again. */
+export type CachedMacro = { snapshotId: string; takenAt: string; macro: MacroRow[] };
+
+export async function takeSnapshot(now = new Date(), opts: { cachedMacro?: CachedMacro | null } = {}): Promise<Snapshot> {
+  const t0 = Date.now();
+  const key = process.env.FRED_API_KEY || undefined;
+  const yahoo = Promise.all(INSTRUMENTS.map(async (i) => [i.symbol, await fetchSeries(i.symbol)] as const));
+  const fredLogs: FetchLog[] = [];
+  const macro = new Map<string, Obs>();
+  let macroSource: Snapshot["macroSource"];
+  if (opts.cachedMacro && opts.cachedMacro.macro.length) {
+    macroSource = { kind: "reused", detail: `reused from the ${opts.cachedMacro.takenAt} snapshot`, snapshotId: opts.cachedMacro.snapshotId };
+  } else {
+    // One series first: if it fails, the rest are still tried (and logged) so the failure can be diagnosed.
+    const first = await fetchFred(MACRO[0].id, key, true);
+    fredLogs.push(...first.logs);
+    if (first.obs) macro.set(MACRO[0].id, first.obs);
+    // If the API worked, the rest use it alone; if it failed, each series also tries the CSV.
+    const apiWorked = first.logs.some((l) => l.source === "fred-api" && l.ok);
+    const csvFallback = !apiWorked;
+    const rest = await Promise.all(MACRO.slice(1).map(async (m) => [m.id, await fetchFred(m.id, key, csvFallback)] as const));
+    for (const [id, r] of rest) { fredLogs.push(...r.logs); if (r.obs) macro.set(id, r.obs); }
+    macroSource = { kind: key ? "fred-api" : "fred-csv", detail: key ? "FRED API (with key), CSV as fallback" : "FRED public CSV (no API key set)", snapshotId: null };
+  }
+  const series = await yahoo;
+  const snap = buildSnapshot(new Map(series.flatMap(([s, r]) => (r.value ? [[s, r.value] as const] : []))), macro, now);
+  if (opts.cachedMacro && opts.cachedMacro.macro.length) {
+    snap.macro = opts.cachedMacro.macro;
+    const have = new Set(snap.macro.map((m) => m.id));
+    snap.macroMissing = MACRO.filter((m) => !have.has(m.id)).map((m) => m.label);
+  }
+  snap.macroSource = macroSource;
+  snap.fetchLog = [...series.map(([, r]) => r.log), ...fredLogs];
+  snap.fetchMs = Date.now() - t0;
+  const failedFred = fredLogs.filter((l) => !l.ok);
+  if (failedFred.length) {
+    const reasons = [...new Set(failedFred.map((l) => `${l.source} ${l.error}`))].slice(0, 4);
+    snap.notes.push(`Macro data: ${failedFred.length} of ${fredLogs.length} FRED requests failed (${reasons.join("; ")}).`);
+  }
   return snap;
 }

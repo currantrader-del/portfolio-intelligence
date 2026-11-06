@@ -6,17 +6,23 @@ import { AskButton } from "@/components/AskPanel";
 import { GROUP_LABEL, type Group } from "@/lib/intel/instruments";
 import { fmtChange, type DeskResult, type Item, type Source } from "@/lib/intel/desks";
 import type { Snapshot, Row } from "@/lib/intel/snapshot";
-import type { Point, Synthesis } from "@/lib/intel/synthesis";
-import type { CalendarEvent } from "@/lib/intel/desks";
+import type { Point } from "@/lib/intel/synthesis";
+import type { Briefing } from "@/lib/intel/jobs";
+import type { Coverage, Level, OutlookGate } from "@/lib/intel/coverage";
+import type { CheckStatus } from "@/lib/intel/verify";
 
 export const dynamic = "force-dynamic";
 
-type Briefing = { version: string; generatedAt: string; model: string; snapshotId: string; deskIds: string[]; missingDesks: string[]; synthesis: Synthesis; calendar: CalendarEvent[]; problems: string[]; costUsd: number };
 
 const et = (iso: string, opts: Intl.DateTimeFormatOptions) => new Intl.DateTimeFormat("en-US", { timeZone: "America/New_York", ...opts }).format(new Date(iso));
 const etDay = (d: Date) => new Intl.DateTimeFormat("en-CA", { timeZone: "America/New_York" }).format(d);
 const KIND_TONE = { verified: "gain", statistical: "info", interpretation: "neutral", speculation: "warn" } as const;
 const STANCE_TONE = { bullish: "gain", bearish: "alert", neutral: "neutral", mixed: "warn" } as const;
+const LEVEL_TONE = { complete: "gain", partial: "warn", unavailable: "alert" } as const;
+const CHECK_LABEL: Record<CheckStatus, { text: string; tone: "gain" | "warn" | "alert" | "neutral" } | null> = {
+  matched: { text: "figures match the source page", tone: "gain" }, partial: { text: "some figures not on the source page", tone: "warn" },
+  not_found: { text: "figures not found on the source page", tone: "alert" }, unreachable: { text: "source page could not be read", tone: "neutral" }, not_checked: null,
+};
 const ACTION_LABEL = { none: "No action", monitor: "Monitor", research: "Research", review: "Review" } as const;
 
 export default async function MarketsPage() {
@@ -36,9 +42,10 @@ export default async function MarketsPage() {
   const snapshot = (snapRow?.data?.outputs ?? null) as Snapshot | null;
   const desks = ((deskRows?.data ?? []) as { id: string; outputs: DeskResult }[]).map((d) => d.outputs).sort((x, y) => ["world", "us", "markets", "events"].indexOf(x.desk) - ["world", "us", "markets", "events"].indexOf(y.desk));
   const fresh = b && etDay(new Date(b.generatedAt)) === etDay(now);
-  // Start today's briefing on first open, unless one started in the last 10 minutes.
-  const inFlight = recentSnap && now.getTime() - Date.parse(recentSnap.computed_at) < 10 * 60000 && (!last || Date.parse(last.computed_at) < Date.parse(recentSnap.computed_at));
+  // Start today's briefing on first open; if one is still running (started in the last 15 minutes, not yet written), watch it instead.
+  const inFlight = !!recentSnap && now.getTime() - Date.parse(recentSnap.computed_at) < 15 * 60000 && (!last || Date.parse(last.computed_at) < Date.parse(recentSnap.computed_at));
   const auto = !fresh && !inFlight;
+  const cov = b?.coverage ?? null;
 
   const itemId = new Map<string, { desk: string; item: Item }>();
   desks.forEach((d) => d.items.forEach((it, i) => itemId.set(`${d.desk[0].toUpperCase()}${i + 1}`, { desk: d.title, item: it })));
@@ -48,15 +55,16 @@ export default async function MarketsPage() {
       <div className="flex flex-col gap-1">
         <span className="cap">Market intelligence</span>
         <h1 className="h1">{b ? b.synthesis.headline : "Daily market briefing"}</h1>
-        {b && <p className="t-xs">Written {et(b.generatedAt, { weekday: "short", month: "short", day: "numeric", hour: "numeric", minute: "2-digit" })} ET · {b.model} · {b.version} · about ${b.costUsd.toFixed(2)}{!fresh ? " · from an earlier day" : ""}</p>}
+        {b && <p className="t-xs">Written {et(b.generatedAt, { weekday: "short", month: "short", day: "numeric", hour: "numeric", minute: "2-digit" })} ET{snapshot ? ` · prices as of ${et(snapshot.takenAt, { hour: "numeric", minute: "2-digit" })} ET` : ""} · {b.model} · about ${b.costUsd.toFixed(2)}{b.reused && Object.keys(b.reused).length ? " (reused research not counted)" : ""}{!fresh ? " · from an earlier day" : ""}</p>}
       </div>
 
       <Card className="!gap-2">
         {!b && <p className="t-sm">No briefing yet. It reads current market data and macro data, searches for the day&apos;s developments with sources, and writes outlooks and implications for your holdings. It takes about a minute.</p>}
         {b && !fresh && <p className="t-sm warn">This briefing is from an earlier day.</p>}
-        <BriefingRunner auto={auto} label={b ? "Refresh briefing" : "Generate briefing"} />
-        {inFlight && !fresh && <p className="t-xs">A briefing started in the last few minutes. Refresh the page shortly, or start a new one.</p>}
+        <BriefingRunner auto={auto} resume={inFlight ? recentSnap!.id : null} label={b ? "Refresh briefing" : "Generate briefing"} />
       </Card>
+
+      {cov && <CoverageCard cov={cov} />}
 
       {b && (
         <>
@@ -73,13 +81,18 @@ export default async function MarketsPage() {
 
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-3 lg:gap-4 items-start">
             <Card labelledBy="st-h" className="!gap-2">
-              <CardHead id="st-h" title="Short term · 1–20 trading days" right={<><Pill small tone={STANCE_TONE[b.synthesis.shortTerm.stance]}>{b.synthesis.shortTerm.stance}</Pill><Pill small>{b.synthesis.shortTerm.evidence} evidence</Pill></>} />
+              <CardHead id="st-h" title="Short term · 1–20 trading days" right={cov?.shortTerm.status === "withheld" ? <Pill small tone="alert">not issued</Pill> : <><Pill small tone={STANCE_TONE[b.synthesis.shortTerm.stance]}>{b.synthesis.shortTerm.stance}</Pill><Pill small>{b.synthesis.shortTerm.evidence} evidence</Pill></>} />
+              {cov && <GateNote gate={cov.shortTerm} />}
+              {cov?.shortTerm.status !== "withheld" && <>
               <Labelled label="What supports it"><Points points={b.synthesis.shortTerm.drivers} items={itemId} /></Labelled>
               <Labelled label="Evidence against"><Points points={b.synthesis.shortTerm.contrary} items={itemId} /></Labelled>
               <Labelled label="What would change it"><Plain list={b.synthesis.shortTerm.wouldChange} /></Labelled>
+              </>}
             </Card>
             <Card labelledBy="lt-h" className="!gap-2">
-              <CardHead id="lt-h" title="Long term · 6–36 months" right={<><Pill small tone={STANCE_TONE[b.synthesis.longTerm.stance]}>{b.synthesis.longTerm.stance}</Pill><Pill small>{b.synthesis.longTerm.evidence} evidence</Pill></>} />
+              <CardHead id="lt-h" title="Long term · 6–36 months" right={cov?.longTerm.status === "withheld" ? <Pill small tone="alert">not issued</Pill> : <><Pill small tone={STANCE_TONE[b.synthesis.longTerm.stance]}>{b.synthesis.longTerm.stance}</Pill><Pill small>{b.synthesis.longTerm.evidence} evidence</Pill></>} />
+              {cov && <GateNote gate={cov.longTerm} />}
+              {cov?.longTerm.status !== "withheld" && <>
               {(["base", "bull", "bear"] as const).map((k) => (
                 <Disclose key={k} open={k === "base"} summary={<span className="t-sm capitalize">{k} case</span>}>
                   <p className="t-sm">{b.synthesis.longTerm[k].summary}</p>
@@ -90,6 +103,7 @@ export default async function MarketsPage() {
               <Labelled label="Evidence against the stance"><Points points={b.synthesis.longTerm.contrary} items={itemId} /></Labelled>
               <Labelled label="What would change it"><Plain list={b.synthesis.longTerm.wouldChange} /></Labelled>
               <p className="t-xs">No probabilities or price targets: scenarios describe conditions, not predictions.</p>
+              </>}
             </Card>
           </div>
 
@@ -124,6 +138,7 @@ export default async function MarketsPage() {
                     {c.expectation && <span className="t-xs">Expectation (as reported): {c.expectation}</span>}
                     {c.why && <span className="t-xs">{c.why}</span>}
                     {c.source && <SourceLink s={c.source} />}
+                    {c.check && <span className={`t-xs ${c.status === "confirmed" ? "gain" : ""}`}>{c.status === "confirmed" ? "Confirmed: " : "Estimated: "}{c.check.note}</span>}
                   </li>
                 ))}
               </ul>
@@ -134,7 +149,8 @@ export default async function MarketsPage() {
 
           {desks.map((d) => (
             <Card key={d.desk} labelledBy={`d-${d.desk}`} className="!gap-2">
-              <CardHead id={`d-${d.desk}`} title={d.title} right={<span className="t-xs">{d.searches} searches · {d.pagesReturned} pages</span>} />
+              <CardHead id={`d-${d.desk}`} title={d.title} right={<span className="t-xs">{b.reused?.[d.desk] ? `reused from ${et(b.reused[d.desk]!, { hour: "numeric", minute: "2-digit" })} ET · ` : ""}{d.searches} searches · {d.pagesReturned} pages</span>} />
+              {d.status === "failed" && <p className="t-sm warn">This section failed: {d.error}</p>}
               <ul className="flex flex-col divide-y divide-line">
                 {d.items.map((it, i) => {
                   const id = `${d.desk[0].toUpperCase()}${i + 1}`;
@@ -145,6 +161,7 @@ export default async function MarketsPage() {
                         <Pill small tone={KIND_TONE[it.kind]}>{it.kind}</Pill>
                         {it.significance === "high" && <Pill small tone="copper">high significance</Pill>}
                         {it.unsourced && <Pill small tone="warn" dot="hollow">not confirmed by a returned source</Pill>}
+                        {it.check && CHECK_LABEL[it.check.status] && <Pill small tone={CHECK_LABEL[it.check.status]!.tone}>{CHECK_LABEL[it.check.status]!.text}</Pill>}
                       </span>
                       <span className="text-ink font-semibold t-sm">{it.headline}</span>
                       <span className="t-sm">{it.detail}</span>
@@ -173,6 +190,35 @@ export default async function MarketsPage() {
           <div className="flex gap-2"><AskButton question="Based on today's briefing, what could affect my portfolio over the next week, and what should I check?" className="btn flex-1">Ask about today&apos;s briefing</AskButton></div>
         </>
       )}
+    </div>
+  );
+}
+
+function CoverageCard({ cov }: { cov: Coverage }) {
+  const s = cov.sources;
+  return (
+    <Card labelledBy="cov-h" className="!gap-2">
+      <CardHead id="cov-h" title="What this briefing is based on" />
+      <ul className="flex flex-col gap-1 t-sm">
+        {cov.inputs.map((i) => (
+          <li key={i.key} className="flex flex-wrap items-center gap-1.5">
+            <Pill small tone={LEVEL_TONE[i.level as Level]}>{i.level}</Pill>
+            <span className="text-ink">{i.label}</span>
+            <span className="t-xs">{i.detail}{i.reusedFrom ? ` · reused from ${i.reusedFrom.includes("T") ? et(i.reusedFrom, { hour: "numeric", minute: "2-digit" }) + " ET" : i.reusedFrom}` : ""}</span>
+          </li>
+        ))}
+      </ul>
+      <p className="t-xs">Sources: {s.cited} cited, {s.returnedBySearch} returned by the searches. Of the reported facts, {s.matched} match their source page, {s.partial} partly, {s.notFound} not found, {s.unreachable} pages could not be read. Calendar: {cov.calendar.confirmed} confirmed by an official source, {cov.calendar.estimated} estimated.</p>
+    </Card>
+  );
+}
+
+function GateNote({ gate }: { gate: OutlookGate }) {
+  if (gate.status === "issued") return null;
+  return (
+    <div className={`t-sm rounded-[12px] px-3 py-2 ${gate.status === "withheld" ? "bg-warn-bg text-warn-ink" : ""}`}>
+      {gate.status === "withheld" ? "Not issued: an input this outlook requires is unavailable." : "Partial evidence: an input this outlook relies on is incomplete."}
+      <ul className="list-disc pl-5 t-xs">{gate.reasons.map((r) => <li key={r}>{r}</li>)}</ul>
     </div>
   );
 }

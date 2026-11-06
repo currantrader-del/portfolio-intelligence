@@ -1,82 +1,88 @@
 /**
- * Daily briefing pipeline, split into short steps so each one stays inside the hosting time limit:
- *   start      -> market snapshot (code), stored as model_runs "market_snapshot"
- *   desk       -> one research desk with web search, stored as "briefing_desk"
- *   synthesize -> outlooks and portfolio implications, stored as "market_briefing"
- * Each stored row is new (nothing is updated), with its inputs hashed, so every briefing can be audited.
+ * Daily briefing. This route does only the quick parts; research and writing run as background jobs
+ * (see src/lib/intel/jobs.ts and netlify/functions/intel-job-background.mts):
+ *   POST start       -> market snapshot (code), the desk plan, and the desk jobs started
+ *   POST synthesize  -> starts the writing job (the browser's fallback if no desk job started it)
+ *   GET ?snapshotId= -> progress: which desks have stored results, and whether the briefing exists
+ * Every stored row is new (nothing is updated), with its inputs hashed, so every briefing can be audited.
  */
-import { createHash } from "node:crypto";
-import Anthropic from "@anthropic-ai/sdk";
 import { createClient } from "@/lib/supabase/server";
 import { buildWorkspace } from "@/lib/workspace";
 import { takeSnapshot, type Snapshot } from "@/lib/intel/snapshot";
-import { DESKS, type DeskKey, type DeskResult } from "@/lib/intel/desks";
-import { costOf, runDesk, runSynthesis, SYNTHESIS_VERSION } from "@/lib/intel/run";
+import { DESKS, DESK_VERSION, type DeskResult } from "@/lib/intel/desks";
+import { costOf } from "@/lib/intel/run";
 import { portfolioContext, watchlist } from "@/lib/intel/context";
-import { mergedCalendar } from "@/lib/intel/synthesis";
+import { briefingFor, deskRows, dispatchJob, planDesks, recentMacro, save, type SnapshotInputs } from "@/lib/intel/jobs";
 
 export const runtime = "nodejs";
 export const maxDuration = 60;
 
-const sha = (x: unknown) => createHash("sha256").update(JSON.stringify(x)).digest("hex");
-
-export async function POST(req: Request) {
-  const body = (await req.json().catch(() => null)) as { action?: string; snapshotId?: string; desk?: string } | null;
+async function session() {
   const db = await createClient();
   const { data: auth } = await db.auth.getUser();
-  if (!auth.user) return Response.json({ error: "Sign in first." }, { status: 401 });
-  const save = async (kind: string, version: string, inputs: unknown, outputs: unknown) => {
-    const { data, error } = await db.from("model_runs").insert({ kind, code_version: version, inputs, inputs_sha256: sha(inputs), outputs }).select("id").single();
-    if (error) throw error;
-    return data.id as string;
-  };
+  const { data: s } = await db.auth.getSession();
+  return { db, user: auth.user, token: s.session?.access_token ?? null };
+}
 
+export async function POST(req: Request) {
+  const body = (await req.json().catch(() => null)) as { action?: string; snapshotId?: string; force?: boolean } | null;
+  const { db, user, token } = await session();
+  if (!user || !token) return Response.json({ error: "Sign in first." }, { status: 401 });
+  const origin = new URL(req.url).origin;
   try {
     if (body?.action === "start") {
-      const snapshot = await takeSnapshot(new Date());
-      if (snapshot.rows.length < 10) return Response.json({ error: `Market data could not be retrieved (${snapshot.rows.length} of the panel loaded).` }, { status: 502 });
-      const id = await save("market_snapshot", snapshot.version, { at: snapshot.takenAt, provider: "yahoo+fred" }, snapshot);
-      return Response.json({ snapshotId: id, rows: snapshot.rows.length, missing: snapshot.missing.length, macro: snapshot.macro.length });
+      if (!process.env.ANTHROPIC_API_KEY) return Response.json({ error: "ANTHROPIC_API_KEY is not set in Netlify." }, { status: 503 });
+      const now = new Date();
+      const [cachedMacro, plan, ws] = await Promise.all([recentMacro(db, now), planDesks(db, now, !!body.force), buildWorkspace(db)]);
+      const snapshot = await takeSnapshot(now, { cachedMacro });
+      if (snapshot.rows.length < 10) return Response.json({ error: `Market data could not be retrieved (${snapshot.rows.length} of the panel loaded).`, fetchLog: snapshot.fetchLog }, { status: 502 });
+      const inputs: SnapshotInputs = { at: snapshot.takenAt, provider: "yahoo+fred", holdings: ws.portfolio.holdings.map((h) => h.symbol), watch: watchlist(ws), portfolio: portfolioContext(ws), plan };
+      const snapshotId = await save(db, "market_snapshot", snapshot.version, inputs, snapshot);
+      const started = await Promise.allSettled(plan.run.map((k) => dispatchJob(origin, { job: "desk", snapshotId, desk: k, token })));
+      // A desk whose job could not start is recorded as failed, so the briefing does not wait for it.
+      const failedStart = plan.run.flatMap((k, i) => { const r = started[i]; return r.status === "rejected" ? [`${k}: ${(r.reason as Error)?.message ?? "did not start"}`] : []; });
+      for (const f of failedStart) {
+        const k = f.split(":")[0] as (typeof plan.run)[number];
+        const d = DESKS.find((x) => x.key === k)!;
+        await save(db, "briefing_desk", DESK_VERSION, { snapshot_id: snapshotId, desk: k, holdings: inputs.holdings }, { version: DESK_VERSION, desk: k, title: d.title, generatedAt: now.toISOString(), model: "", items: [], calendar: [], uncertainties: [], searches: 0, pagesReturned: 0, problems: [], usage: { input: 0, output: 0, searches: 0 }, status: "failed", error: f, ms: 0, requests: [] } satisfies DeskResult);
+      }
+      if (!plan.run.length || failedStart.length === plan.run.length) await dispatchJob(origin, { job: "synthesize", snapshotId, token });
+      return Response.json({
+        snapshotId, rows: snapshot.rows.length, missing: snapshot.missing.length, macro: snapshot.macro.length, macroSource: snapshot.macroSource,
+        run: plan.run, reuse: plan.reuse, failedStart,
+      });
     }
-
-    if (!process.env.ANTHROPIC_API_KEY) return Response.json({ error: "ANTHROPIC_API_KEY is not set in Netlify." }, { status: 503 });
-    const snap = body?.snapshotId ? await db.from("model_runs").select("id, outputs").eq("id", body.snapshotId).eq("kind", "market_snapshot").maybeSingle() : null;
-    if (!snap?.data) return Response.json({ error: "Unknown snapshot." }, { status: 400 });
-    const snapshot = snap.data.outputs as Snapshot;
-
-    if (body?.action === "desk") {
-      const key = body.desk as DeskKey;
-      if (!DESKS.some((d) => d.key === key)) return Response.json({ error: "Unknown desk." }, { status: 400 });
-      const ws = await buildWorkspace(db);
-      const holdings = ws.portfolio.holdings.map((h) => h.symbol);
-      const result = await runDesk(key, { now: new Date(), snapshot, holdings, watch: watchlist(ws) });
-      const id = await save("briefing_desk", result.version, { snapshot_id: snap.data.id, desk: key, holdings }, result);
-      return Response.json({ deskId: id, items: result.items.length, unsourced: result.items.filter((i) => i.unsourced).length, calendar: result.calendar.length, searches: result.searches, costUsd: costOf(result.usage) });
-    }
-
-    if (body?.action === "synthesize") {
-      const { data: rows } = await db.from("model_runs").select("id, outputs").eq("kind", "briefing_desk").eq("inputs->>snapshot_id", snap.data.id).order("computed_at", { ascending: true });
-      // Latest result per desk, in desk order.
-      const byDesk = new Map<string, { id: string; outputs: DeskResult }>();
-      for (const r of rows ?? []) byDesk.set((r.outputs as DeskResult).desk, r as { id: string; outputs: DeskResult });
-      const desks = DESKS.map((d) => byDesk.get(d.key)).filter((x): x is { id: string; outputs: DeskResult } => !!x);
-      const ws = await buildWorkspace(db);
-      const portfolio = portfolioContext(ws);
-      const out = await runSynthesis({ now: new Date(), snapshot, desks: desks.map((d) => d.outputs), portfolio });
-      const missingDesks = DESKS.filter((d) => !byDesk.has(d.key)).map((d) => d.title);
-      const usage = desks.reduce((u, d) => ({ input: u.input + d.outputs.usage.input, output: u.output + d.outputs.usage.output, searches: u.searches + d.outputs.usage.searches }), out.usage);
-      const briefing = {
-        version: SYNTHESIS_VERSION, generatedAt: new Date().toISOString(), model: out.model,
-        snapshotId: snap.data.id, deskIds: desks.map((d) => d.id), missingDesks,
-        synthesis: out.synthesis, calendar: mergedCalendar(desks.map((d) => d.outputs)), problems: out.problems,
-        costUsd: Number(costOf(usage).toFixed(4)),
-      };
-      const id = await save("market_briefing", SYNTHESIS_VERSION, { snapshot_id: snap.data.id, desk_ids: briefing.deskIds, portfolio }, briefing);
-      return Response.json({ briefingId: id, problems: out.problems.length, costUsd: briefing.costUsd });
+    if (body?.action === "synthesize" && body.snapshotId) {
+      if (await briefingFor(db, body.snapshotId)) return Response.json({ ok: true, already: true });
+      await dispatchJob(origin, { job: "synthesize", snapshotId: body.snapshotId, token });
+      return Response.json({ ok: true });
     }
     return Response.json({ error: "Unknown action." }, { status: 400 });
   } catch (e) {
-    const msg = e instanceof Anthropic.APIError ? `The AI service returned an error (${e.status}): ${e.message.slice(0, 200)}` : (e as Error).message.slice(0, 300);
-    return Response.json({ error: msg }, { status: 500 });
+    return Response.json({ error: (e as Error).message.slice(0, 300) }, { status: 500 });
   }
+}
+
+export async function GET(req: Request) {
+  const id = new URL(req.url).searchParams.get("snapshotId");
+  const { db, user } = await session();
+  if (!user) return Response.json({ error: "Sign in first." }, { status: 401 });
+  if (!id) return Response.json({ error: "snapshotId is required." }, { status: 400 });
+  const { data: snap } = await db.from("model_runs").select("id, computed_at, inputs, outputs").eq("id", id).eq("kind", "market_snapshot").maybeSingle();
+  if (!snap) return Response.json({ error: "Unknown snapshot." }, { status: 404 });
+  const inputs = snap.inputs as SnapshotInputs;
+  const s = snap.outputs as Snapshot;
+  const rows = await deskRows(db, id);
+  const desks = DESKS.map((d) => {
+    const reused = inputs.plan?.reuse?.[d.key];
+    if (reused) return { key: d.key, state: "reused", note: `reused research from ${reused.at}` };
+    const r = rows.get(d.key)?.result as DeskResult | undefined;
+    if (!r) return { key: d.key, state: "run", note: null };
+    if (r.status === "failed") return { key: d.key, state: "fail", note: r.error ?? "failed" };
+    const checked = r.items.filter((i) => i.check && i.check.status !== "not_checked").length;
+    const what = d.key === "events" ? `${r.calendar.length} events, ${r.calendar.filter((c) => c.status === "confirmed").length} confirmed` : `${r.items.length} items, ${checked} checked on their pages`;
+    return { key: d.key, state: "done", note: `${what}, ${r.searches} searches, ${Math.round((r.ms ?? 0) / 1000)}s, $${costOf(r.usage).toFixed(2)}` };
+  });
+  const b = await briefingFor(db, id);
+  return Response.json({ snapshotId: id, startedAt: snap.computed_at, rows: s.rows.length, macro: s.macro.length, macroSource: s.macroSource, desks, briefingId: b?.id ?? null });
 }

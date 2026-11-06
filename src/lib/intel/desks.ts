@@ -4,9 +4,10 @@
  * cites is checked against the pages its own searches actually returned, and an item with no
  * checked source is kept but marked unsourced, never presented as verified.
  */
+import type { ClaimCheck, EventCheck } from "./verify";
 import type { Snapshot } from "./snapshot";
 
-export const DESK_VERSION = "desk@1";
+export const DESK_VERSION = "desk@2";
 export type DeskKey = "world" | "us" | "markets" | "events";
 export const DESKS: { key: DeskKey; title: string; brief: string }[] = [
   {
@@ -34,13 +35,19 @@ export const DESKS: { key: DeskKey; title: string; brief: string }[] = [
 
 export type Kind = "verified" | "statistical" | "interpretation" | "speculation";
 export type Source = { url: string; title: string; publisher: string | null; published: string | null; checked: boolean };
-export type Item = { headline: string; detail: string; kind: Kind; significance: "high" | "medium" | "low"; sources: Source[]; portfolio: string | null; unsourced: boolean };
-export type CalendarEvent = { date: string; time: string | null; event: string; type: "economic" | "fed" | "earnings" | "policy" | "auction" | "other"; status: "confirmed" | "estimated"; expectation: string | null; why: string; symbols: string[]; source: Source | null };
+export type Item = { headline: string; detail: string; kind: Kind; significance: "high" | "medium" | "low"; sources: Source[]; portfolio: string | null; unsourced: boolean; check?: ClaimCheck };
+export type CalendarEvent = { date: string; time: string | null; event: string; type: "economic" | "fed" | "earnings" | "policy" | "auction" | "other"; status: "confirmed" | "estimated"; expectation: string | null; why: string; symbols: string[]; source: Source | null; check?: EventCheck };
 export type DeskResult = {
   version: string; desk: DeskKey; title: string; generatedAt: string; model: string;
   items: Item[]; calendar: CalendarEvent[]; uncertainties: string[];
   searches: number; pagesReturned: number; problems: string[];
   usage: { input: number; output: number; searches: number };
+  /** Added 2026-11-06 (desk@2): job outcome, timing and request log. */
+  status?: "ok" | "failed";
+  error?: string | null;
+  startedAt?: string;
+  ms?: number;
+  requests?: { kind: "model" | "page"; ms: number; detail: string; ok: boolean }[];
 };
 
 const KINDS: Kind[] = ["verified", "statistical", "interpretation", "speculation"];
