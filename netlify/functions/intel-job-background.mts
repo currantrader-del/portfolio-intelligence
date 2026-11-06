@@ -3,6 +3,7 @@
  * and answers the caller with 202 at once). It acts as the signed-in user: the caller passes the
  * user's access token, which is verified before anything runs, and row-level security applies.
  */
+import { timingSafeEqual } from "node:crypto";
 import { createClient } from "@supabase/supabase-js";
 import { desksSettled, dispatchJob, runDeskJob, runSynthesisJob } from "../../src/lib/intel/jobs";
 import { DESKS, type DeskKey } from "../../src/lib/intel/desks";
@@ -35,7 +36,8 @@ export default async (req: Request) => {
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL, key = process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY;
   if (body?.job === "morning") {
     const secret = process.env.CRON_SECRET;
-    if (!secret || body.secret !== secret || !url || !key) { console.error("morning: secret missing or wrong"); return; }
+    const given = Buffer.from(String(body.secret ?? "")), want = Buffer.from(secret ?? "");
+    if (!secret || given.length !== want.length || !timingSafeEqual(given, want) || !url || !key) { console.error(`morning: ${!secret ? "CRON_SECRET is not set" : "secret did not match"}`); return; }
     try {
       const token = await ownerToken(url, key);
       const db = createClient(url, key, { global: { headers: { Authorization: `Bearer ${token}` } }, auth: { persistSession: false, autoRefreshToken: false } });
