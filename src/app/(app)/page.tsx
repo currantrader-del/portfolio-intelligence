@@ -1,4 +1,7 @@
+import { Suspense } from "react";
 import Link from "next/link";
+import { FeedSkeleton, MoverHeadlines } from "@/components/CompanyFeeds";
+import { isEtf } from "@/lib/portfolio/classify";
 import { getWorkspace } from "@/lib/workspace";
 import { writeBrief } from "@/lib/brief";
 import { Tag } from "@/components/Tag";
@@ -16,6 +19,11 @@ export default async function TodayPage() {
   const queue = ws.alerts.filter((a) => a.severity !== "low");
   const later = ws.alerts.filter((a) => a.severity === "low");
   const movers = p.holdings.filter((h) => h.contributionPts !== null).sort((a, b) => Math.abs(b.contributionPts!) - Math.abs(a.contributionPts!)).slice(0, 6);
+  const newsMovers = p.holdings
+    .filter((h) => h.dayPct !== null && !isEtf(h.symbol))
+    .sort((a, b) => Math.abs(b.dayPct!) - Math.abs(a.dayPct!))
+    .slice(0, 3)
+    .map((h) => ({ symbol: h.symbol, dayPct: h.dayPct, name: ws.research.find((r) => r.symbol === h.symbol)?.name ?? null }));
   const maxPts = Math.max(0.01, ...movers.map((m) => Math.abs(m.contributionPts!)));
   const dateLabel = new Intl.DateTimeFormat("en-US", { weekday: "long", month: "long", day: "numeric", timeZone: "America/New_York" }).format(ws.now);
 
@@ -107,6 +115,9 @@ export default async function TodayPage() {
               </ul>
             )}
           </section>
+          {newsMovers.length > 0 && (
+            <Suspense fallback={<FeedSkeleton title="Headlines behind the moves" />}><MoverHeadlines movers={newsMovers} /></Suspense>
+          )}
           <section className="bg-surface border border-line rounded-2xl p-5 flex flex-col gap-2">
             <h2 className="font-semibold">Ask</h2>
             {["Why am I up or down today?", "What needs my attention this week?", "Where should $1,250 go?"].map((q) => (

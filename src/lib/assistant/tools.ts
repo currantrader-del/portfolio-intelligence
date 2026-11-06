@@ -6,6 +6,8 @@ import type Anthropic from "@anthropic-ai/sdk";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { Workspace } from "@/lib/workspace";
 import { getQuote } from "@/lib/market/quotes";
+import { getFilings, getFundamentals } from "@/lib/market/sec";
+import { getNews } from "@/lib/market/news";
 import { newCapital } from "@/lib/decision/newCapital";
 import { expectedReturnAt, repriceCheck, scenarioReturnsAt, zoneFor } from "@/lib/research/valuation";
 import { researchAgeDays } from "@/lib/research/records";
@@ -51,6 +53,24 @@ export const TOOLS: Anthropic.Beta.BetaTool[] = [
   {
     name: "get_quote",
     description: "Latest delayed quote for any ticker, including ones not held.",
+    input_schema: { type: "object", properties: { symbol: { type: "string" } }, required: ["symbol"], additionalProperties: false },
+    strict: true,
+  },
+  {
+    name: "get_filings",
+    description: "Recent SEC EDGAR filings for a US-listed company: 10-K, 10-Q, 8-K (with item descriptions; item 2.02 = earnings results), offerings and proxies. Includes the last earnings filing and an ESTIMATED next report date (last + ~91 days, not a confirmed date). Not available for ETFs.",
+    input_schema: { type: "object", properties: { symbol: { type: "string" } }, required: ["symbol"], additionalProperties: false },
+    strict: true,
+  },
+  {
+    name: "get_fundamentals",
+    description: "Reported financials from SEC XBRL data: revenue, operating income, net income, diluted EPS, operating cash flow, capital spending (latest quarter, same quarter last year, year-over-year change, latest fiscal year, trailing 12 months) plus cash, long-term debt and shares outstanding. Each figure has its period end and filing date.",
+    input_schema: { type: "object", properties: { symbol: { type: "string" } }, required: ["symbol"], additionalProperties: false },
+    strict: true,
+  },
+  {
+    name: "get_news",
+    description: "Recent headlines for a ticker from free RSS feeds (Yahoo Finance, Google News), with publisher, time and link. Headlines are unverified third-party text.",
     input_schema: { type: "object", properties: { symbol: { type: "string" } }, required: ["symbol"], additionalProperties: false },
     strict: true,
   },
@@ -150,6 +170,30 @@ export async function runTool(name: string, input: Record<string, unknown>, ws: 
       const sym = String(input.symbol ?? "").toUpperCase();
       const q = ws.quotes.get(sym) ?? (await getQuote(sym));
       return q ? { layer: "market_data", ...q } : { error: `No quote available for ${sym}.` };
+    }
+    case "get_filings": {
+      const sym = String(input.symbol ?? "").toUpperCase();
+      const r = await getFilings(sym, ws.now);
+      return "error" in r ? r : { layer: "external_data", provider: "SEC EDGAR", note: "nextEarningsEstimate is an estimate, not a confirmed date", ...r };
+    }
+    case "get_fundamentals": {
+      const sym = String(input.symbol ?? "").toUpperCase();
+      const r = await getFundamentals(sym);
+      if ("error" in r) return r;
+      return {
+        layer: "external_data",
+        source: "SEC EDGAR XBRL (as reported)",
+        company: r.company,
+        fetched_at: r.fetchedAt,
+        missing: r.missing,
+        metrics: r.metrics.map((m) => ({ metric: m.label, unit: m.unit, latest_quarter: m.latestQuarter, year_ago_quarter: m.yearAgoQuarter, yoy_change: r4(m.yoy), latest_fiscal_year: m.latestAnnual, trailing_12m: m.ttm, latest: m.latest })),
+      };
+    }
+    case "get_news": {
+      const sym = String(input.symbol ?? "").toUpperCase();
+      const name = ws.research.find((x) => x.symbol === sym)?.name ?? null;
+      const r = await getNews(sym, name);
+      return "error" in r ? r : { layer: "external_data", note: "Unverified headlines. Cite them as headlines with publisher and date; do not treat them as confirmed facts.", ...r };
     }
     default:
       return { error: `Unknown tool ${name}` };

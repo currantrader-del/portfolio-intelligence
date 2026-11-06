@@ -1,4 +1,7 @@
+import { Suspense } from "react";
 import { notFound } from "next/navigation";
+import { FeedSkeleton, FilingsSection, FundamentalsSection, NewsSection } from "@/components/CompanyFeeds";
+import { isEtf } from "@/lib/portfolio/classify";
 import { createClient } from "@/lib/supabase/server";
 import { Tag } from "@/components/Tag";
 import { EXTRACTION_LABEL, ORIGIN_LABEL } from "@/lib/research-labels";
@@ -36,6 +39,16 @@ export default async function CompanyPage({ params }: { params: Promise<{ symbol
         )}
       </div>
       <TodayValuation ws={ws} symbol={company.symbol} />
+      <div className="grid gap-6 lg:grid-cols-2 items-start">
+        {!isEtf(company.symbol) && (
+          <>
+            <Suspense fallback={<FeedSkeleton title="Reported financials" />}><FundamentalsSection symbol={company.symbol} /></Suspense>
+            <Suspense fallback={<FeedSkeleton title="SEC filings and earnings" />}><FilingsSection symbol={company.symbol} /></Suspense>
+          </>
+        )}
+        <Suspense fallback={<FeedSkeleton title="Recent headlines" />}><NewsSection symbol={company.symbol} name={company.name} /></Suspense>
+      </div>
+      {versions.length > 0 && <h2 className="font-serif text-xl font-semibold -mb-2">Your research</h2>}
       {versions.map((v) => {
         const c = v.conclusion as Record<string, string | number | null>;
         return (
