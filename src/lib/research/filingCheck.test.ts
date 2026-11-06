@@ -118,3 +118,31 @@ describe("buildFilingCheck with no new report", () => {
     expect(c.statusReason).toMatch(/No 10-Q or 10-K filed since the research/);
   });
 });
+
+describe("share counts tagged per class of stock (as in the live IREN filing)", () => {
+  // The live run on 2026-11-06 found no company-level share facts; filings with a named class
+  // tag the cover and balance-sheet counts on StatementClassOfStockAxis instead.
+  const ctx = (id: string, date: string, member: string) => `<xbrli:context id="${id}"><xbrli:entity><xbrli:identifier scheme="http://www.sec.gov/CIK">0001878848</xbrli:identifier><xbrli:segment><xbrldi:explicitMember dimension="us-gaap:StatementClassOfStockAxis">${member}</xbrldi:explicitMember></xbrli:segment></xbrli:entity><xbrli:period><xbrli:instant>${date}</xbrli:instant></xbrli:period></xbrli:context>`;
+  const classed = xml
+    .replace('contextRef="c-cover" unitRef="shares" decimals="INF">424357381', 'contextRef="k-cover" unitRef="shares" decimals="INF">424357381')
+    .replace('contextRef="c-i-2026-09-30" unitRef="shares" decimals="INF">406929463', 'contextRef="k-sep" unitRef="shares" decimals="INF">406929463')
+    .replace('contextRef="c-i-2026-06-30" unitRef="shares" decimals="INF">380710559', 'contextRef="k-jun" unitRef="shares" decimals="INF">380710559')
+    .replace("<xbrli:unit id=\"usd\">", ctx("k-cover", "2026-10-30", "iren:OrdinarySharesMember") + ctx("k-sep", "2026-09-30", "iren:OrdinarySharesMember") + ctx("k-jun", "2026-06-30", "iren:OrdinarySharesMember") + "<xbrli:unit id=\"usd\">");
+  const c = buildFilingCheck({ ...base, price: 22.34, priceAsOf: "2026-11-06", instanceXml: classed });
+
+  it("reads them from the single class, says so, and keeps the dilution findings", () => {
+    expect(c.coverShares).toMatchObject({ value: 424_357_381, date: "2026-10-30", basis: expect.stringContaining("iren:OrdinarySharesMember") });
+    expect(c.facts.find((r) => r.key === "shares")).toMatchObject({ now: 406_929_463, before: 380_710_559 });
+    expect(c.findings.find((f) => f.key === "shares")?.text).toMatch(/\+6\.9% \(now: sum of 1 share class/);
+    expect(c.findings.find((f) => f.key === "potentialDilution")).toMatchObject({ material: true });
+    expect(c.gaps).toEqual([]);
+    expect(c.diagnostics).toBeUndefined();
+  });
+  it("never adds a class value to a company total, and refuses a mix of axes", () => {
+    const mixed = classed.replace('dimension="us-gaap:StatementClassOfStockAxis">iren:OrdinarySharesMember</xbrldi:explicitMember></xbrli:segment></xbrli:entity><xbrli:period><xbrli:instant>2026-10-30', 'dimension="srt:ConsolidationItemsAxis">srt:ParentCompanyMember</xbrldi:explicitMember></xbrli:segment></xbrli:entity><xbrli:period><xbrli:instant>2026-10-30');
+    const m = buildFilingCheck({ ...base, price: 22.34, priceAsOf: "2026-11-06", instanceXml: mixed });
+    expect(m.coverShares).toBeNull();
+    expect(m.gaps).toContain("Cover-page shares outstanding were tagged in a way this check does not combine safely");
+    expect(m.diagnostics?.some((d) => d.includes("dei:EntityCommonStockSharesOutstanding 2026-10-30 [ConsolidationItemsAxis=srt:ParentCompanyMember]"))).toBe(true);
+  });
+});

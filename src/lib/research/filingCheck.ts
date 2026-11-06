@@ -9,7 +9,7 @@
  * and XBRL concept; anything it cannot find is listed as a gap, never filled in.
  */
 import type { Filing } from "@/lib/market/sec";
-import { factAt, parseXbrlInstance, type XbrlFact } from "@/lib/market/xbrl";
+import { describeConcepts, factAt, factByClass, parseXbrlInstance, type XbrlFact } from "@/lib/market/xbrl";
 import type { ParsedConclusion } from "./valuation";
 import { decideRefresh, type RefreshDecision } from "./refresh";
 
@@ -42,7 +42,7 @@ export const MATERIAL = {
   potentialDilution: 0.1, // excluded potential shares are 10%+ of shares outstanding
 };
 
-export type FactRow = { key: string; label: string; unit: string; now: number | null; before: number | null; change: number | null; concept: string | null; nowDate: string | null; beforeDate: string | null };
+export type FactRow = { key: string; label: string; unit: string; now: number | null; before: number | null; change: number | null; concept: string | null; nowDate: string | null; beforeDate: string | null; basis?: string };
 export type Finding = { key: string; material: boolean; text: string; kind: "reported" | "calculated" };
 export type FilingCheck = {
   version: string;
@@ -51,24 +51,33 @@ export type FilingCheck = {
   statusReason: string;
   researchAsOf: string;
   document: { form: string; filed: string; accession: string; periodEnd: string | null; instanceUrl: string | null; indexUrl: string } | null;
-  coverShares: { value: number; date: string } | null;
+  coverShares: { value: number; date: string; basis?: string } | null;
   facts: FactRow[];
   derived: { netDebtNow: number | null; netDebtBefore: number | null };
   findings: Finding[];
   refresh: RefreshDecision;
   sources: { url: string; what: string }[];
   gaps: string[];
+  /** Related concepts the filing does contain, recorded when a key fact was not found. */
+  diagnostics?: string[];
 };
 
 const pct = (x: number) => `${x >= 0 ? "+" : ""}${(x * 100).toFixed(1)}%`;
 const m = (x: number) => `$${Math.round(x / 1e6).toLocaleString("en-US")}m`;
 const n = (x: number) => Math.round(x).toLocaleString("en-US");
 
-function pick(facts: XbrlFact[], spec: Spec, date: string | null) {
+function pick(facts: XbrlFact[], spec: Spec, date: string | null): { value: number; concept: string; basis?: string } | null {
   if (!date) return null;
   for (const t of spec.tags) {
     const f = spec.kind === "instant" ? factAt(facts, t, date, "instant") : factAt(facts, t, date, "duration", 80, 100);
     if (f) return f;
+  }
+  // Share counts are sometimes tagged only per class of stock; never used for dollar amounts.
+  if (spec.unit === "shares" && spec.kind === "instant") {
+    for (const t of spec.tags) {
+      const c = factByClass(facts, t, date);
+      if (c) return { value: c.value, concept: t, basis: `sum of ${c.members.length} share class${c.members.length > 1 ? "es" : ""} (${c.members.join(", ")})` };
+    }
   }
   return null;
 }
@@ -115,13 +124,22 @@ export function buildFilingCheck(args: {
   const rows: FactRow[] = facts.length ? KEY_FACTS.map((s) => {
     const a = pick(facts, s, s.kind === "instant" ? nowI : nowD);
     const b = pick(facts, s, s.kind === "instant" ? beforeI : beforeD);
-    return { key: s.key, label: s.label, unit: s.unit, now: a?.value ?? null, before: b?.value ?? null, change: a && b && b.value ? a.value / b.value - 1 : null, concept: a?.concept ?? b?.concept ?? null, nowDate: s.kind === "instant" ? nowI : nowD, beforeDate: s.kind === "instant" ? beforeI : beforeD };
+    const basis = [a?.basis && `now: ${a.basis}`, b?.basis && `before: ${b.basis}`].filter(Boolean).join("; ") || undefined;
+    return { key: s.key, label: s.label, unit: s.unit, now: a?.value ?? null, before: b?.value ?? null, change: a && b && b.value ? a.value / b.value - 1 : null, concept: a?.concept ?? b?.concept ?? null, nowDate: s.kind === "instant" ? nowI : nowD, beforeDate: s.kind === "instant" ? beforeI : beforeD, ...(basis ? { basis } : {}) };
   }) : [];
   for (const r of rows) if (r.now === null) gaps.push(`${r.label}: not found in the filing's XBRL under ${KEY_FACTS.find((s) => s.key === r.key)!.tags.join(" or ")}`);
 
-  const cover = facts.filter((f) => f.concept === "dei:EntityCommonStockSharesOutstanding" && !f.dimensional && f.instant).sort((x, y) => (y.instant! > x.instant! ? 1 : -1))[0];
-  const coverShares = cover ? { value: cover.value, date: cover.instant! } : null;
-  if (facts.length && !coverShares) gaps.push("Cover-page shares outstanding not found");
+  const COVER = "dei:EntityCommonStockSharesOutstanding";
+  const coverDates = [...new Set(facts.filter((f) => f.concept === COVER && f.instant).map((f) => f.instant!))].sort().reverse();
+  let coverShares: FilingCheck["coverShares"] = null;
+  for (const d of coverDates) {
+    const plain = factAt(facts, COVER, d, "instant");
+    if (plain) { coverShares = { value: plain.value, date: d }; break; }
+    const byClass = factByClass(facts, COVER, d);
+    if (byClass) { coverShares = { value: byClass.value, date: d, basis: `sum of ${byClass.members.length} share class${byClass.members.length > 1 ? "es" : ""} (${byClass.members.join(", ")})` }; break; }
+  }
+  if (facts.length && !coverShares) gaps.push(coverDates.length ? "Cover-page shares outstanding were tagged in a way this check does not combine safely" : "Cover-page shares outstanding not found");
+  const diagnostics = facts.length && (!coverShares || rows.find((r) => r.key === "shares")?.now == null) ? describeConcepts(facts, /SharesOutstanding|SharesIssued|StockSharesOutstanding/i) : [];
 
   const v = (k: string, w: "now" | "before") => rows.find((r) => r.key === k)?.[w] ?? null;
   const netDebt = (w: "now" | "before") => {
@@ -133,10 +151,10 @@ export function buildFilingCheck(args: {
 
   const findings: Finding[] = [];
   const sh = rows.find((r) => r.key === "shares");
-  if (sh?.change != null) findings.push({ key: "shares", kind: "calculated", material: sh.change >= MATERIAL.shareGrowth, text: `Shares outstanding ${n(sh.before!)} (${sh.beforeDate}) to ${n(sh.now!)} (${sh.nowDate}): ${pct(sh.change)}` });
+  if (sh?.change != null) findings.push({ key: "shares", kind: "calculated", material: sh.change >= MATERIAL.shareGrowth, text: `Shares outstanding ${n(sh.before!)} (${sh.beforeDate}) to ${n(sh.now!)} (${sh.nowDate}): ${pct(sh.change)}${sh.basis ? ` (${sh.basis})` : ""}` });
   if (coverShares && sh?.before) {
     const c = coverShares.value / sh.before - 1;
-    findings.push({ key: "coverShares", kind: "calculated", material: c >= MATERIAL.shareGrowth, text: `Cover page: ${n(coverShares.value)} shares on ${coverShares.date}, ${pct(c)} versus ${sh.beforeDate}` });
+    findings.push({ key: "coverShares", kind: "calculated", material: c >= MATERIAL.shareGrowth, text: `Cover page: ${n(coverShares.value)} shares on ${coverShares.date}${coverShares.basis ? ` (${coverShares.basis})` : ""}, ${pct(c)} versus ${sh.beforeDate}` });
   }
   if (derived.netDebtNow !== null && derived.netDebtBefore !== null) {
     const d = derived.netDebtNow - derived.netDebtBefore;
@@ -174,6 +192,7 @@ export function buildFilingCheck(args: {
   return {
     version: FILING_CHECK_VERSION, symbol: args.symbol, status: wait ? "WAIT / REVIEW" : "CURRENT", statusReason,
     researchAsOf: args.researchAsOf, document: args.document, coverShares, facts: rows, derived, findings, refresh, sources, gaps,
+    ...(diagnostics.length ? { diagnostics } : {}),
   };
 }
 

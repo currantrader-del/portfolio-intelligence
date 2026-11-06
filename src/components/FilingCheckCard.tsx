@@ -53,7 +53,7 @@ export function FilingCheckCard({ symbol, run }: { symbol: string; run: StoredFi
                       <td className="pr-3 py-1">{r.label}</td>
                       <td className="pr-3 num text-right whitespace-nowrap">{fmt(r.before, r.unit)}<span className="t-xs block">{r.beforeDate ?? ""}</span></td>
                       <td className="pr-3 num text-right whitespace-nowrap">{fmt(r.now, r.unit)}<span className="t-xs block">{r.nowDate ?? ""}</span></td>
-                      <td className="t-xs break-all">{r.concept ?? "not found"}</td>
+                      <td className="t-xs break-all">{r.concept ?? "not found"}{r.basis ? ` · ${r.basis}` : ""}</td>
                     </tr>
                   ))}</tbody>
                 </table>
@@ -65,6 +65,11 @@ export function FilingCheckCard({ symbol, run }: { symbol: string; run: StoredFi
               <span className="t-xs warn">Not checked or not found</span>
               <ul className="flex flex-col gap-1 t-sm list-disc pl-5">{missing.map((g) => <li key={g}>{g}</li>)}</ul>
             </div>
+          )}
+          {c.diagnostics && c.diagnostics.length > 0 && (
+            <Disclose summary={<span className="t-sm">Related share facts in the filing · {c.diagnostics.length}</span>}>
+              <ul className="flex flex-col gap-1 t-xs list-disc pl-5 break-all">{c.diagnostics.map((d) => <li key={d}>{d}</li>)}</ul>
+            </Disclose>
           )}
           <div className="flex flex-wrap gap-1.5">{c.sources.map((s) => <SourceRef key={s.url} kind="SEC" href={s.url}>{s.what}</SourceRef>)}</div>
           <p className="t-xs">This is a check of reported figures against your research, not a new valuation. Stored as run {run.id.slice(0, 8)}.</p>
