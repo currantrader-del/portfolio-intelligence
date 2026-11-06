@@ -1,6 +1,7 @@
 import { Suspense } from "react";
 import { after } from "next/server";
 import Link from "next/link";
+import { MarketsTeaser } from "@/components/intel/MarketsTeaser";
 import { isEtf } from "@/lib/portfolio/classify";
 import { createClient } from "@/lib/supabase/server";
 import { recordDaily } from "@/lib/portfolio/daily";
@@ -55,6 +56,8 @@ export default async function TodayPage() {
           <Link href="/brief" className="btn btn-sm lg:min-h-11 lg:px-4 lg:text-[15px] max-lg:hidden">Daily brief</Link>
         </>
       } />
+
+      <MarketsTeaser />
 
       {/* Market strip (phones; desktop shows it inside the portfolio card) */}
       <Card tight className="lg:hidden !py-2.5" label="Market">
