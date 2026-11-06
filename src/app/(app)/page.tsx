@@ -70,7 +70,7 @@ export default async function TodayPage() {
             <div className="text-[15px] leading-relaxed"><Markdown text={morning.answer} /></div>
             <span className="t-xs">Written {new Intl.DateTimeFormat("en-US", { hour: "numeric", minute: "2-digit", timeZone: "America/New_York" }).format(new Date(morning.at))} ET{morning.today ? "" : ` on ${shortDate(morning.at)}`} · {Math.round(morning.ms / 1000)}s · ${morning.costUsd.toFixed(2)} · from your portfolio, policy, research and today&apos;s market briefing</span>
           </>
-        ) : <p className="t-sm">Written automatically at 6:30 AM ET on weekdays: what happened, what it means for your holdings, and what (if anything) to do.</p>}
+        ) : <p className="t-sm">Written automatically at 9:00 AM ET on weekdays, after the 8:30 economic data: what happened, what it means for your holdings, and what (if anything) to do.</p>}
       </Card>
 
       <MarketsTeaser />
