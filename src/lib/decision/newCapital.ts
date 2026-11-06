@@ -1,51 +1,80 @@
 /**
  * The new-capital decision ("I have $1,250, where should it go?").
- * Deterministic: ranks held, researched stocks by expected return at today's price against a broad ETF,
- * applies policy headroom, and always keeps "hold as cash" on the table.
+ *
+ * Deterministic. It compares: adding to researched holdings, buying diversified ETFs, starting researched
+ * new positions, holding cash, and reviewing positions that are above their limits.
+ *
+ * It only calls a result ACTIONABLE when the evidence behind it passes every gate: recent holdings, known
+ * cash, limits you approved, return assumptions you chose, and research current enough to rank the
+ * alternatives. Otherwise the status is WAIT / REVIEW, with a list of what to verify, and any split it
+ * computes is shown as illustrative only.
+ *
+ * A price drop never makes a stock more attractive by itself: once the price is far from the research
+ * reference (either direction) the research must be refreshed before it can size anything.
  */
 import type { PortfolioView } from "@/lib/portfolio/engine";
 import { DEFAULT_ETF_FOR_BUCKET, type Bucket } from "@/lib/portfolio/classify";
 import type { Policy } from "@/lib/policy/limits";
 import type { ResearchRecord } from "@/lib/research/records";
 import { researchAgeDays } from "@/lib/research/records";
-import { expectedReturnAt, zoneFor } from "@/lib/research/valuation";
+import { expectedReturnAt, REPRICE_LIMIT, zoneFor } from "@/lib/research/valuation";
+import type { Quote } from "@/lib/market/quotes";
 
-export const CODE_VERSION = "new-capital@1";
+export const CODE_VERSION = "new-capital@2";
 
-/** Assumptions the user can change later. Shown on screen whenever they are used. */
+/** Placeholders until you set your own on the Policy page. Shown on screen whenever they are used. */
 export const DEFAULT_ASSUMPTIONS = {
   etfExpectedReturn: 0.07, // long-run broad-equity estimate, nominal, before tax
-  hurdlePoints: 0.03, // a stock must beat the ETF by this much to be preferred (policy has no hurdle yet)
-  partialResearchShare: 0.5, // at most this share of new cash goes to a stock whose research is partial
+  hurdlePoints: 0.03, // a stock must beat the ETF by this much to be preferred
 };
 
+/** Price this far from the research reference (up or down) means the scenarios must be refreshed before use. */
+export const BIG_MOVE = REPRICE_LIMIT;
+/** Holdings older than this are not reliable enough to size a purchase. */
+export const HOLDINGS_FRESH_DAYS = 7;
+
+export type OptionLabel = "Candidate" | "Valid option" | "Refresh required" | "Research needed" | "At limit" | "Below hurdle" | "Trim review";
+
 export type Option = {
-  kind: "stock" | "etf" | "cash";
+  kind: "stock" | "new_stock" | "etf" | "cash" | "trim";
   symbol: string;
+  label: OptionLabel;
   price: number | null;
   priceSource: "quote" | "statement" | null;
-  expectedReturn: number | null;
+  expectedReturn: number | null; // only when the research is current enough to re-price
   headroomDollars: number | null;
   weightNow: number | null;
   maxWeight: number | null;
+  limitStatus: string | null;
   eligible: boolean;
   notes: string[];
   researchAction: string | null;
   zoneAction: string | null;
-  refreshFirst?: boolean; // would qualify on the numbers, but the price has moved too far from the research
+  refreshFirst?: boolean;
+  toVerify: string[];
 };
+
+export type Gate = { key: string; label: string; ok: boolean; detail: string };
 
 export type NewCapitalResult = {
   amount: number;
+  source: "new" | "existing";
   asOf: string;
+  status: "actionable" | "wait_review";
+  gates: Gate[];
+  toVerify: string[];
   options: Option[];
-  recommendation: { allocations: { symbol: string; amount: number }[]; confidence: number; headline: string; rationale: string[]; wouldChange: string[] };
-  assumptions: typeof DEFAULT_ASSUMPTIONS & { hurdleSource: "policy" | "default" };
+  recommendation: {
+    allocations: { symbol: string; amount: number }[];
+    illustrative: boolean; // true when status is wait_review: not a recommendation to act on
+    confidence: number;
+    headline: string;
+    rationale: string[];
+    wouldChange: string[];
+  };
+  assumptions: { etfExpectedReturn: number; hurdlePoints: number; etfSource: string; hurdleSource: string; approved: boolean };
   warnings: string[];
 };
-
-/** A move this large since the research reference price means the research needs a targeted refresh before it sizes anything. */
-export const BIG_MOVE = 0.25;
 
 const ETF_BUCKETS: Bucket[] = ["US broad-market equity", "International equity", "Small/mid-cap"];
 
@@ -55,136 +84,208 @@ export function newCapital(args: {
   research: ResearchRecord[];
   policy: Policy | null;
   now: Date;
+  source?: "new" | "existing";
+  quotes?: Map<string, Quote>;
   assumptions?: Partial<typeof DEFAULT_ASSUMPTIONS>;
 }): NewCapitalResult {
   const { amount, portfolio, research, policy, now } = args;
-  const a = { ...DEFAULT_ASSUMPTIONS, ...args.assumptions };
-  const hurdle = policy?.hurdleOverEtfPoints ?? a.hurdlePoints;
+  const source = args.source ?? "new";
+  const audit = policy?.audit;
+  const etfReturn = args.assumptions?.etfExpectedReturn ?? audit?.assumptions.etfExpectedReturn.value ?? DEFAULT_ASSUMPTIONS.etfExpectedReturn;
+  const hurdle = args.assumptions?.hurdlePoints ?? policy?.hurdleOverEtfPoints ?? audit?.assumptions.hurdle.value ?? DEFAULT_ASSUMPTIONS.hurdlePoints;
+  const assumptionsApproved = !!audit && audit.assumptions.etfExpectedReturn.status === "approved" && audit.assumptions.hurdle.status === "approved";
   const freshDays = policy?.researchFreshnessDays ?? 120;
-  const postTotal = portfolio.total + amount;
+  // Money already counted as deployable cash only moves within the portfolio; new money grows it.
+  const postTotal = source === "new" ? portfolio.total + amount : portfolio.total;
   const warnings: string[] = [];
-
-  const stale = portfolio.oldestHoldingsAsOf ? (now.getTime() - new Date(portfolio.oldestHoldingsAsOf).getTime()) / 86_400_000 : null;
-  if (stale !== null && stale > 3) warnings.push(`Holdings come from statements up to ${Math.floor(stale)} days old. Anything bought since then is not counted.`);
+  if (portfolio.quality.status === "estimated") warnings.push(portfolio.quality.headline + ". " + portfolio.quality.reasons[0]);
   if (portfolio.pricedLive < portfolio.holdings.length) warnings.push("Some prices are from statements, not live quotes.");
 
-  // Stock options: every held single stock, researched or not.
-  const stockOptions: Option[] = portfolio.exposures.map((e) => {
-    const h = portfolio.holdings.find((x) => x.symbol === e.symbol)!;
-    const r = research.find((x) => x.symbol === e.symbol);
+  const stockOption = (symbol: string, held: boolean): Option => {
+    const h = portfolio.holdings.find((x) => x.symbol === symbol);
+    const e = portfolio.exposures.find((x) => x.symbol === symbol);
+    const q = args.quotes?.get(symbol);
+    const price = h?.price ?? q?.price ?? null;
+    const r = research.find((x) => x.symbol === symbol);
+    const v = r?.current;
     const notes: string[] = [];
+    const toVerify: string[] = [];
+    let label: OptionLabel = "Candidate";
     let er: number | null = null;
-    let eligible = true;
     let zoneAction: string | null = null;
     let refreshFirst = false;
-    const v = r?.current;
-    if (!r || (!v && !r.conflict)) { notes.push("No stored research"); eligible = false; }
-    else if (r.conflict) { notes.push("Research records conflict; needs a targeted refresh first"); eligible = false; }
-    else if (v) {
-      er = expectedReturnAt(v.parsed, h.price, now);
-      if (er === null) { notes.push("Research has no scenario valuation to re-price"); eligible = false; }
-      if (v.completeness !== "complete") notes.push(`Research is ${v.completeness}; position capped at ${Math.round(a.partialResearchShare * 100)}% of new cash`);
-      const age = researchAgeDays(r, now);
-      if (age !== null && age > freshDays) { notes.push(`Research is ${age} days old (limit ${freshDays})`); eligible = false; }
-      zoneAction = zoneFor(v.parsed.zones, h.price)?.action ?? null;
-    }
-    // New cash fills a position only up to the top of its normal range. Going higher needs the policy's
-    // high-conviction conditions, which is a separate, explicit decision.
-    const normalHigh = policy?.companies[e.symbol]?.normal?.high ?? null;
-    const ceiling = Math.min(e.max, normalHigh ?? e.max);
-    const maxDollars = ceiling * postTotal - e.total * portfolio.total;
-    const headroom = Math.max(0, Math.round(maxDollars * 100) / 100);
-    if (headroom <= 0) {
-      notes.push(ceiling < e.max ? `At the top of its normal range (${pct(ceiling)}); higher needs a high-conviction decision` : `At or above its ${pct(e.max)} maximum (including ETF look-through)`);
-      eligible = false;
-    } else if (ceiling < e.max) notes.push(`New cash fills it only to the top of its normal range, ${pct(ceiling)}`);
-    const ref = v?.parsed.referencePrice ?? null;
-    if (ref && h.price < ref * (1 - BIG_MOVE)) {
-      notes.push(`Price is ${Math.round((1 - h.price / ref) * 100)}% below the research reference. Refresh the research first: a drop this large may mean the scenarios no longer hold`);
-      eligible = false;
-      refreshFirst = true;
-    } else if (ref && h.price > ref * (1 + BIG_MOVE)) {
-      notes.push(`Price is ${Math.round((h.price / ref - 1) * 100)}% above the research reference; the scenarios may be out of date`);
-    }
-    if (er !== null && er < a.etfExpectedReturn + hurdle) { notes.push(`Expected return does not clear the ETF + ${pct(hurdle)} hurdle`); eligible = false; }
-    return {
-      kind: "stock", symbol: e.symbol, price: h.price, priceSource: h.priceSource, expectedReturn: er, headroomDollars: headroom,
-      weightNow: e.total, maxWeight: ceiling, eligible, notes, researchAction: v?.parsed.action ?? null, zoneAction, refreshFirst,
-    };
-  });
+    const lim = policy?.companies[symbol];
+    const max = e?.max ?? lim?.hardMax ?? policy?.genericCompanyHardMax ?? 0.1;
 
-  // ETF option: the most underweight core bucket.
-  const ranked = portfolio.buckets
+    if (!r || (!v && !r.conflict)) { label = "Research needed"; notes.push("No current research on file"); toVerify.push(`${symbol}: full research before it can be compared`); }
+    else if (r.conflict) { label = "Research needed"; notes.push("Research records conflict and none is marked current"); toVerify.push(`${symbol}: resolve which research record is current`); }
+    else if (v) {
+      const age = researchAgeDays(r, now);
+      const ref = v.parsed.referencePrice;
+      const drift = ref && price ? price / ref - 1 : null;
+      zoneAction = price ? zoneFor(v.parsed.zones, price)?.action ?? null : null;
+      if (v.completeness !== "complete") { label = "Refresh required"; notes.push(`Research is ${v.completeness}`); toVerify.push(`${symbol}: complete the missing research phases`); }
+      if (age !== null && age > freshDays) { label = "Refresh required"; notes.push(`Research is ${age} days old (limit ${freshDays})`); toVerify.push(`${symbol}: refresh research older than ${freshDays} days`); }
+      if (drift !== null && Math.abs(drift) > BIG_MOVE) {
+        label = "Refresh required";
+        refreshFirst = true;
+        notes.push(`Price is ${Math.round(Math.abs(drift) * 100)}% ${drift < 0 ? "below" : "above"} the $${ref} research reference (${v.parsed.referenceDate}). Not re-priced: a move this large can change the scenario probabilities, financing, dilution and cash-flow assumptions`);
+        toVerify.push(`${symbol}: re-underwrite the scenarios at today's price (${drift < 0 ? "a lower price is not a buy signal by itself" : "check the valuation still holds"})`);
+      }
+      if (label === "Candidate" && price) {
+        er = expectedReturnAt(v.parsed, price, now);
+        if (er === null) { label = "Research needed"; notes.push("Research has no scenario valuation to compare"); }
+        else if (er < etfReturn + hurdle) { label = "Below hurdle"; notes.push(`Expected return ${pct(er)} does not clear the ETF + ${pct(hurdle)} hurdle`); }
+      }
+      if (v.parsed.action) notes.push(`Research action at the reference price: ${v.parsed.action}`);
+    }
+
+    // New cash fills a position only to the top of its normal range; higher needs an explicit high-conviction decision.
+    const normalHigh = lim?.normal?.high ?? null;
+    const ceiling = Math.min(max, normalHigh ?? max);
+    const current = (e?.total ?? 0) * portfolio.total;
+    const headroom = Math.max(0, Math.round((ceiling * postTotal - current) * 100) / 100);
+    if (headroom <= 0) {
+      if (label === "Candidate") label = "At limit";
+      notes.push(ceiling < max ? `At the top of its normal range (${pct(ceiling)})` : `At or above its ${pct(max)} maximum, including ETF look-through`);
+    }
+    if (lim?.status === "conflict") {
+      notes.push(`Your sources disagree on its limit; using the stricter ${pct(max)} until you choose on the Policy page`);
+      toVerify.push(`${symbol}: choose which allocation limit is authoritative`);
+    } else if (!lim || lim.status === "none") notes.push(`No company-specific limit; the generic ${pct(max)} maximum applies`);
+
+    return {
+      kind: held ? "stock" : "new_stock", symbol, label, price, priceSource: h?.priceSource ?? (q ? "quote" : null), expectedReturn: er,
+      headroomDollars: headroom, weightNow: e?.total ?? 0, maxWeight: ceiling, limitStatus: lim?.status ?? null,
+      eligible: label === "Candidate", notes, researchAction: v?.parsed.action ?? null, zoneAction, refreshFirst, toVerify,
+    };
+  };
+
+  const stockOptions = portfolio.exposures.map((e) => stockOption(e.symbol, true));
+  const heldSet = new Set(portfolio.holdings.map((h) => h.symbol));
+  const newOptions = research.filter((r) => !heldSet.has(r.symbol) && r.current).map((r) => stockOption(r.symbol, false));
+
+  // ETFs: every core bucket, labelled by how far it sits from its range. Underweight is a reason to look, not to buy.
+  const etfOptions: Option[] = portfolio.buckets
     .filter((b) => ETF_BUCKETS.includes(b.bucket))
     .map((b) => ({ b, gap: (b.normal ? (b.normal.low + b.normal.high) / 2 : 0) - b.weight }))
-    .sort((x, y) => y.gap - x.gap);
-  const etfBucket = ranked[0]?.b.bucket ?? "US broad-market equity";
-  const etfSymbol = DEFAULT_ETF_FOR_BUCKET[etfBucket] ?? "VOO";
-  const etfHolding = portfolio.holdings.find((h) => h.symbol === etfSymbol);
-  const etfRow = portfolio.buckets.find((b) => b.bucket === etfBucket);
-  const etf: Option = {
-    kind: "etf", symbol: etfSymbol, price: etfHolding?.price ?? null, priceSource: etfHolding?.priceSource ?? null,
-    expectedReturn: a.etfExpectedReturn, headroomDollars: null, weightNow: etfRow?.weight ?? null, maxWeight: etfRow?.hardMax ?? null, eligible: true,
-    notes: [`${etfBucket} is ${etfRow ? pct(etfRow.weight) : "0%"} of the portfolio${etfRow?.normal ? `, normal range ${pct(etfRow.normal.low)}–${pct(etfRow.normal.high)}` : ""}`, `Expected return is an assumption (${pct(a.etfExpectedReturn)}), not a forecast`],
-    researchAction: null, zoneAction: null,
-  };
+    .sort((x, y) => y.gap - x.gap)
+    .map(({ b, gap }, i) => {
+      const symbol = DEFAULT_ETF_FOR_BUCKET[b.bucket] ?? "VOO";
+      const h = portfolio.holdings.find((x) => x.symbol === symbol);
+      const notes = [`${b.bucket} is ${pct(b.weight)}${b.normal ? `, normal range ${pct(b.normal.low)}–${pct(b.normal.high)}` : ""}`, `Expected return is an assumption (${pct(etfReturn)}), not a forecast`];
+      if (b.status === "over_max" || b.status === "above") notes.push("Already above its normal range");
+      return {
+        kind: "etf" as const, symbol, label: (i === 0 && gap > 0 ? "Candidate" : "Valid option") as OptionLabel, price: h?.price ?? args.quotes?.get(symbol)?.price ?? null,
+        priceSource: h?.priceSource ?? null, expectedReturn: etfReturn, headroomDollars: null, weightNow: b.weight, maxWeight: b.hardMax,
+        limitStatus: b.status === "no_limit" ? "none" : "approved", eligible: b.status !== "over_max", notes, researchAction: null, zoneAction: null, toVerify: [],
+      };
+    });
+
+  const trimOptions: Option[] = portfolio.exposures.filter((e) => e.total > e.max).map((e) => ({
+    kind: "trim", symbol: e.symbol, label: "Trim review", price: portfolio.holdings.find((h) => h.symbol === e.symbol)?.price ?? null, priceSource: null,
+    expectedReturn: null, headroomDollars: null, weightNow: e.total, maxWeight: e.max, limitStatus: policy?.companies[e.symbol]?.status ?? null, eligible: false,
+    notes: [`${pct(e.total)} including ETFs, above its ${pct(e.max)} maximum. Policy: review, not an automatic sale`, "Selling in a taxable account can realize gains; check the cost basis first"],
+    researchAction: null, zoneAction: null, toVerify: [],
+  }));
+
   const cash: Option = {
-    kind: "cash", symbol: "CASH", price: null, priceSource: null, expectedReturn: null, headroomDollars: null, weightNow: portfolio.total ? portfolio.cash / portfolio.total : 0,
-    maxWeight: null, eligible: true, notes: ["Policy: new cash does not have to be invested immediately", `The $${(policy?.protectedSavingsFloor ?? 10000).toLocaleString()} protected savings floor is excluded from sizing`],
-    researchAction: null, zoneAction: null,
+    kind: "cash", symbol: "CASH", label: "Valid option", price: null, priceSource: null, expectedReturn: null, headroomDollars: null,
+    weightNow: portfolio.total ? portfolio.cash / portfolio.total : 0, maxWeight: null, limitStatus: null, eligible: true,
+    notes: ["Policy: new cash does not have to be invested immediately", `The $${portfolio.cashDetail.protectedReserve.toLocaleString()} protected reserve is excluded from sizing`, "Cash yield not entered, so it is not compared on return"],
+    researchAction: null, zoneAction: null, toVerify: [],
   };
 
-  const eligible = stockOptions.filter((o) => o.eligible).sort((x, y) => (y.expectedReturn ?? 0) - (x.expectedReturn ?? 0));
+  // ---- Illustrative split: best eligible stocks to their ceilings, the rest to the most underweight ETF ----
+  const eligible = [...stockOptions, ...newOptions].filter((o) => o.eligible).sort((x, y) => (y.expectedReturn ?? 0) - (x.expectedReturn ?? 0));
   const allocations: { symbol: string; amount: number }[] = [];
   const rationale: string[] = [];
   const wouldChange: string[] = [];
   let remaining = amount;
   let confidence = 6;
-
-  const top = eligible[0];
-  for (const cand of eligible) {
+  for (const c of eligible) {
     if (remaining < 1) break;
-    const r = research.find((x) => x.symbol === cand.symbol)!;
-    const partial = r.current?.completeness !== "complete";
-    const cap = partial ? amount * a.partialResearchShare : amount;
-    const toStock = Math.floor(Math.min(cap, cand.headroomDollars ?? 0, remaining));
+    const toStock = Math.floor(Math.min(c.headroomDollars ?? 0, remaining));
     if (toStock <= 0) continue;
-    const limitedByRoom = (cand.headroomDollars ?? 0) < Math.min(cap, remaining);
-    allocations.push({ symbol: cand.symbol, amount: toStock });
+    allocations.push({ symbol: c.symbol, amount: toStock });
     remaining -= toStock;
-    rationale.push(`${cand.symbol}: about ${pct(cand.expectedReturn!)} a year expected at today's price, against ${pct(a.etfExpectedReturn)} assumed for ${etfSymbol}. $${toStock.toLocaleString()}${limitedByRoom ? ` fills it to its ${pct(cand.maxWeight ?? 0)} ceiling` : ""}.`);
-    if (cand.researchAction && /no add/i.test(cand.researchAction)) rationale.push(`${cand.symbol}'s research said "${cand.researchAction}" at $${r.current?.parsed.referencePrice ?? "?"}; the lower price is what changes the answer.`);
-    if (cand.zoneAction) rationale.push(`${cand.symbol} is in the research's "${cand.zoneAction}" band. Bands are prompts to research, never automatic trades.`);
-    if (partial) { confidence -= 1; rationale.push(`${cand.symbol}'s research is partial, so it gets at most ${Math.round(a.partialResearchShare * 100)}% of the new cash.`); }
-    if (/specul|asymmetric/i.test(r.current?.parsed.classification ?? "")) confidence -= 1;
-    wouldChange.push(`${cand.symbol} rising until its expected return is below ${pct(a.etfExpectedReturn + hurdle)}, or new evidence against its thesis.`);
+    rationale.push(`${c.symbol}: about ${pct(c.expectedReturn!)} a year expected at today's price from current research, against ${pct(etfReturn)} assumed for an ETF.`);
+    if (/specul|asymmetric/i.test(research.find((r) => r.symbol === c.symbol)?.current?.parsed.classification ?? "")) confidence -= 1;
+    wouldChange.push(`${c.symbol} rising until its expected return is below ${pct(etfReturn + hurdle)}, or new evidence against its thesis.`);
   }
-  if (remaining > 0) {
-    allocations.push({ symbol: etfSymbol, amount: Math.round(remaining * 100) / 100 });
-    rationale.push(top
-      ? `The rest goes to ${etfSymbol}, the most underweight core bucket (${etfBucket}).`
-      : `No stock qualifies right now, so the simple choice wins: ${etfSymbol} for the most underweight core bucket (${etfBucket}).`);
+  const etf = etfOptions.find((o) => o.eligible) ?? etfOptions[0];
+  if (remaining > 0 && etf) {
+    allocations.push({ symbol: etf.symbol, amount: Math.round(remaining * 100) / 100 });
+    rationale.push(eligible.length
+      ? `The rest to ${etf.symbol}, the most underweight core bucket.`
+      : `No stock can be ranked on current evidence, so the diversified option is ${etf.symbol} (${etf.notes[0]}). Being underweight is a reason to consider it, not proof it is the best use of the money.`);
   }
-  const pending = stockOptions.filter((o) => o.refreshFirst && o.expectedReturn !== null && o.expectedReturn >= a.etfExpectedReturn + hurdle && (o.headroomDollars ?? 0) > 0);
-  if (pending.length) {
-    rationale.push(`${pending.map((o) => `${o.symbol} (about ${pct(o.expectedReturn!)} a year if its research still holds)`).join(" and ")} would qualify on the numbers, but ${pending.length > 1 ? "their prices have" : "its price has"} fallen so far since the research that ${pending.length > 1 ? "they need" : "it needs"} a targeted refresh first.`);
-    wouldChange.unshift(`A targeted research refresh on ${pending.map((o) => o.symbol).join(" and ")} that confirms the thesis. That could move part of this cash there.`);
-    confidence -= 1;
-  }
-  if (warnings.length) confidence -= 1;
-  const noResearch = stockOptions.filter((o) => !o.eligible && !o.refreshFirst && o.expectedReturn === null).map((o) => o.symbol);
-  if (noResearch.length) wouldChange.push(`Research on ${noResearch.join(", ")} (missing or conflicting today) could add candidates.`);
+  rationale.push("Account: assumes the money goes to your taxable brokerage account. Retirement contributions have annual limits, and selling in a taxable account can realize gains.");
 
-  const headline = allocations.map((x) => `$${x.amount.toLocaleString()} ${x.symbol}`).join(" + ");
+  // ---- Gates ----
+  const brokerAccounts = portfolio.accounts.filter((a) => a.role !== "cash" && a.role !== "protected_savings");
+  const oldest = brokerAccounts.reduce((m, a) => Math.max(m, a.ageDays), 0);
+  const gaps = brokerAccounts.filter((a) => a.statementGap !== null && Math.abs(a.statementGap) > 1);
+  const refresh = [...stockOptions].filter((o) => o.label === "Refresh required" || o.label === "Research needed");
+  const receiving = allocations.map((x) => x.symbol);
+  const limitIssues = stockOptions.filter((o) => receiving.includes(o.symbol) && o.limitStatus !== "approved").map((o) => o.symbol);
+  const conflicts = audit?.conflicts.map((c) => c.subject) ?? [];
+  const gates: Gate[] = [
+    { key: "holdings", label: "Holdings are current", ok: oldest <= HOLDINGS_FRESH_DAYS && !gaps.length,
+      detail: oldest <= HOLDINGS_FRESH_DAYS ? (gaps.length ? `Statement totals do not add up for ${gaps.map((a) => a.name).join(", ")}` : "All accounts updated within a week") : `Oldest statement is ${oldest} days old. Confirm holdings or record trades since then` },
+    { key: "cash", label: "Cash and savings are known", ok: portfolio.cashDetail.savings !== null && (source === "new" || amount <= portfolio.cashDetail.deployable),
+      detail: portfolio.cashDetail.savings === null ? "Enter your savings balance so the protected reserve and deployable cash are known"
+        : source === "existing" && amount > portfolio.cashDetail.deployable ? `Only $${portfolio.cashDetail.deployable.toLocaleString()} is deployable after the protected reserve` : `Deployable cash $${portfolio.cashDetail.deployable.toLocaleString()}` },
+    { key: "limits", label: "Limits you approved", ok: !limitIssues.length && !conflicts.length,
+      detail: conflicts.length ? `Your sources disagree on limits for ${conflicts.join(", ")}` : limitIssues.length ? `No approved limit for ${limitIssues.join(", ")}` : "Every limit used is approved" },
+    { key: "assumptions", label: "Return assumptions you chose", ok: assumptionsApproved,
+      detail: assumptionsApproved ? `ETF ${pct(etfReturn)}, hurdle ${pct(hurdle)}` : `ETF return ${pct(etfReturn)} and hurdle ${pct(hurdle)} are app placeholders, not your numbers` },
+    { key: "research", label: "Research can rank the alternatives", ok: !refresh.length,
+      detail: refresh.length ? `${refresh.map((o) => o.symbol).join(", ")} cannot be compared on current evidence` : "Every held stock has current research" },
+  ];
+  const status: NewCapitalResult["status"] = gates.every((g) => g.ok) ? "actionable" : "wait_review";
+  const toVerify = [
+    ...gates.filter((g) => !g.ok && g.key !== "research").map((g) => g.detail),
+    ...refresh.flatMap((o) => o.toVerify),
+  ].filter((x, i, a) => a.indexOf(x) === i);
+
+  if (refresh.length) wouldChange.unshift(`Refreshed research on ${refresh.map((o) => o.symbol).join(", ")} that sets expected returns at today's prices.`);
+  if (!assumptionsApproved) wouldChange.push("Your own ETF return and hurdle assumptions.");
+  confidence -= gates.filter((g) => !g.ok).length;
+
+  const split = allocations.map((x) => `$${x.amount.toLocaleString()} ${x.symbol}`).join(" + ");
   return {
     amount,
+    source,
     asOf: now.toISOString(),
-    options: [...stockOptions.sort((x, y) => (y.expectedReturn ?? -1) - (x.expectedReturn ?? -1)), etf, cash],
-    recommendation: { allocations, confidence: Math.max(2, Math.min(10, confidence)), headline, rationale, wouldChange },
-    assumptions: { ...a, hurdlePoints: hurdle, hurdleSource: policy?.hurdleOverEtfPoints != null ? "policy" : "default" },
+    status,
+    gates,
+    toVerify,
+    options: [
+      ...stockOptions.sort((x, y) => rankLabel(x.label) - rankLabel(y.label) || (y.expectedReturn ?? -1) - (x.expectedReturn ?? -1)),
+      ...newOptions,
+      ...etfOptions,
+      cash,
+      ...trimOptions,
+    ],
+    recommendation: {
+      allocations,
+      illustrative: status !== "actionable",
+      confidence: Math.max(1, Math.min(10, confidence)),
+      headline: status === "actionable" ? split : "WAIT / REVIEW",
+      rationale,
+      wouldChange,
+    },
+    assumptions: {
+      etfExpectedReturn: etfReturn, hurdlePoints: hurdle, approved: assumptionsApproved,
+      etfSource: audit?.assumptions.etfExpectedReturn.source ?? "App default", hurdleSource: audit?.assumptions.hurdle.source ?? "App default",
+    },
     warnings,
   };
 }
+
+const LABEL_ORDER: OptionLabel[] = ["Candidate", "Refresh required", "Below hurdle", "At limit", "Research needed", "Valid option", "Trim review"];
+const rankLabel = (l: OptionLabel) => LABEL_ORDER.indexOf(l);
 
 export function pct(n: number, digits = 1) {
   return `${(n * 100).toFixed(digits)}%`;

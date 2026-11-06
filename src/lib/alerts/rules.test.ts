@@ -3,6 +3,7 @@ import { buildPortfolio } from "@/lib/portfolio/engine";
 import { toResearchRecord } from "@/lib/research/records";
 import { evaluateAlerts } from "./rules";
 
+// Synthetic data only.
 const now = new Date("2026-11-05T16:00:00Z");
 const quotes = new Map([["AAA", { symbol: "AAA", price: 33.8, prevClose: 37.23, asOf: now.toISOString(), provider: "yahoo" as const, delayClass: "delayed" as const }]]);
 const portfolio = buildPortfolio(
@@ -15,6 +16,7 @@ const portfolio = buildPortfolio(
   }],
   quotes,
   null,
+  {}, [], now,
 );
 const research = [toResearchRecord("AAA", null, "held", [{
   id: "v", research_as_of: "2026-09-10", completeness: "complete", origin: "chatgpt_original", is_current: true,
@@ -22,15 +24,21 @@ const research = [toResearchRecord("AAA", null, "held", [{
 }])];
 
 describe("alerts", () => {
-  it("raises a high alert for a big move and for entering a strong-add band", () => {
+  it("merges a big move, a band change and a limit breach on one company into one review", () => {
     const a = evaluateAlerts({ portfolio, research, marketDayPct: -0.008, now });
     expect(a[0].severity).toBe("high");
-    expect(a.map((x) => x.kind)).toEqual(expect.arrayContaining(["big_move", "price_zone", "research_missing", "holdings_stale"]));
-    expect(a.find((x) => x.kind === "big_move")!.title).toBe("AAA −9.2% today");
+    const aaa = a.filter((x) => x.symbol === "AAA" && x.kind !== "research_missing");
+    expect(aaa).toHaveLength(1);
+    expect(aaa[0].kind).toBe("review");
+    expect(aaa[0].title).toMatch(/^Review AAA: −9\.2% today/);
+    expect(aaa[0].detail).toMatch(/not a buy signal by itself/);
+    expect(aaa[0].detail).toMatch(/not an automatic sale/);
+    expect(a.map((x) => x.kind)).toEqual(expect.arrayContaining(["research_missing", "holdings_stale", "data_missing"]));
   });
 
-  it("flags concentration above the maximum as a review", () => {
-    const a = evaluateAlerts({ portfolio, research, marketDayPct: null, now });
-    expect(a.find((x) => x.kind === "over_limit" && x.symbol === "AAA")?.detail).toMatch(/not an automatic sale/);
+  it("treats a move in line with the market as low priority", () => {
+    const a = evaluateAlerts({ portfolio, research: [], marketDayPct: -0.08, now });
+    const move = a.find((x) => x.symbol === "AAA");
+    expect(move?.severity).not.toBe("high");
   });
 });

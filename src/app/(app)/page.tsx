@@ -3,6 +3,7 @@ import { getWorkspace } from "@/lib/workspace";
 import { writeBrief } from "@/lib/brief";
 import { Tag } from "@/components/Tag";
 import { AskButton } from "@/components/AskPanel";
+import { DataQuality } from "@/components/DataQuality";
 import { pctStr, shortDate, toneOf, usd } from "@/lib/format";
 
 const SEV_TONE = { high: "alert", medium: "warn", low: "neutral" } as const;
@@ -30,20 +31,21 @@ export default async function TodayPage() {
 
   return (
     <div className="flex flex-col gap-6">
-      <h1 className="font-serif text-3xl font-semibold">{dateLabel}</h1>
+      <h1 className="font-serif text-2xl sm:text-3xl font-semibold">{dateLabel}</h1>
       <div className="flex flex-wrap gap-6 items-start">
         <div className="flex-[999_1_560px] min-w-0 flex flex-col gap-6">
           <section aria-label="Brief" className="bg-surface border border-line rounded-2xl p-6 flex flex-col gap-3">
             <div className="flex flex-wrap items-baseline justify-between gap-3">
-              <span className="text-sm text-muted">Your portfolio today</span>
+              <span className="text-sm text-muted">{p.quality.status === "verified" ? "Your portfolio" : "Estimated portfolio move"} {ws.marketOpen ? "today" : "last session"}</span>
               <span className={`font-mono text-2xl ${toneOf(p.dayPct)}`}>{p.dayPct === null ? usd(p.total) : `${pctStr(p.dayPct, 2, true)} · ${usd(p.dayDollar)}`}</span>
             </div>
             <p className="font-serif text-lg leading-relaxed">{brief.sentences.join(" ")}</p>
-            <div className="text-xs text-muted">Written from the app&apos;s calculations · total {usd(p.total)} · holdings from statements dated {shortDate(p.oldestHoldingsAsOf)} or later</div>
+            <div className="text-xs text-muted">Written from the app&apos;s calculations · estimated investable capital {usd(p.total)} · holdings from statements dated {shortDate(p.oldestHoldingsAsOf)} or later</div>
+            <DataQuality p={p} compact />
           </section>
 
           <section aria-labelledby="queue-h" className="flex flex-col gap-3">
-            <h2 id="queue-h" className="text-lg font-semibold">{queue.length + 1} decision{queue.length ? "s" : ""} waiting</h2>
+            <h2 id="queue-h" className="text-lg font-semibold">{queue.length ? `${queue.length} item${queue.length > 1 ? "s" : ""} to review` : "Nothing urgent"}</h2>
             {queue.map((a) => (
               <Link key={a.id} href={a.href} className="bg-surface border border-line rounded-2xl p-5 no-underline text-ink hover:border-line-strong flex flex-col gap-1">
                 <div className="flex items-center justify-between gap-3">
@@ -58,7 +60,7 @@ export default async function TodayPage() {
                 <span className="font-semibold">New cash to invest</span>
                 <Tag tone="warn">WHEN READY</Tag>
               </div>
-              <span className="text-sm text-ink-2">Compare your researched stocks at today&apos;s prices with an ETF and holding cash.</span>
+              <span className="text-sm text-ink-2">Compare holdings, ETFs, new positions and holding cash. You get a recommendation only when the evidence is current.</span>
               <div className="flex flex-wrap gap-2">
                 <label htmlFor="amt" className="sr-only">Amount</label>
                 <div className="flex items-center rounded-lg border border-line-strong bg-ground px-3 min-h-11">

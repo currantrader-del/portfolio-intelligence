@@ -19,9 +19,9 @@ export function writeBrief(p: PortfolioView, spyDayPct: number | null, alerts: A
     const top = movers[0];
     if (spyDayPct !== null) {
       const word = Math.abs(gap!) < 0.002 ? "in line with" : gap! > 0 ? "ahead of" : "behind";
-      sentences.push(`You are ${fmt(p.dayPct)} today, ${word} the S&P 500 at ${fmt(spyDayPct)}.`);
+      sentences.push(`${p.quality.status === "verified" ? "You are" : "Your estimated portfolio is"} ${fmt(p.dayPct)}, ${word} the S&P 500 at ${fmt(spyDayPct)}.`);
     } else {
-      sentences.push(`You are ${fmt(p.dayPct)} today.`);
+      sentences.push(`${p.quality.status === "verified" ? "You are" : "Your estimated portfolio is"} ${fmt(p.dayPct)}.`);
     }
     if (top && Math.abs(top.contributionPts!) >= 0.05) {
       const share = p.dayPct !== 0 ? Math.round((top.contributionPts! / (p.dayPct * 100)) * 100) : null;

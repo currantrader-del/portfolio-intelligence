@@ -51,6 +51,7 @@ export default async function ReviewPage({ params }: { params: Promise<{ symbol:
             {rv.researchAction && <p className="text-sm text-muted">Research action then: {rv.researchAction} at {usd(rv.referencePrice, 2)}.</p>}
           </section>
 
+          {rv.repriceNote && <p className="rounded-lg border border-warn-ink/30 bg-warn-bg text-warn-ink px-3 py-2 text-sm">{rv.repriceNote}</p>}
           {rv.scenarios.length > 0 && (
             <section aria-labelledby="val-h" className="bg-surface border border-line rounded-2xl p-6 overflow-x-auto">
               <h2 id="val-h" className="font-semibold mb-3">Valuation at today&apos;s price</h2>
@@ -81,7 +82,7 @@ export default async function ReviewPage({ params }: { params: Promise<{ symbol:
               <input type="hidden" name="symbol" value={sym} />
               {rv.options.map((o) => (
                 <label key={o.key} className={`grid grid-cols-[20px_56px_1fr] gap-2 items-start p-3 rounded-lg border ${o.key === rv.suggestion.key ? "border-accent bg-accent-soft" : "border-line"} ${o.available ? "" : "opacity-50"}`}>
-                  <input type="radio" name="chosen" value={o.key} defaultChecked={o.key === rv.suggestion.key} disabled={!o.available} className="mt-1" />
+                  <input type="radio" name="chosen" value={o.key} required disabled={!o.available} className="mt-1" />
                   <span className="font-semibold">{o.label}</span>
                   <span className="text-sm">
                     {o.key === "hold" ? o.note : `${o.key === "add" ? "+" : "−"}${usd(o.dollars)} → ${pctStr(o.weightAfter)}`}

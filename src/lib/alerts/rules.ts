@@ -5,14 +5,15 @@
 import type { PortfolioView } from "@/lib/portfolio/engine";
 import type { ResearchRecord } from "@/lib/research/records";
 import { researchAgeDays } from "@/lib/research/records";
-import { expectedReturnAt, zoneFor } from "@/lib/research/valuation";
+import { repriceCheck, zoneFor } from "@/lib/research/valuation";
+import type { Policy } from "@/lib/policy/limits";
 
 export type Severity = "high" | "medium" | "low";
 export type Alert = {
   id: string;
   severity: Severity;
   symbol: string | null;
-  kind: "price_zone" | "big_move" | "over_limit" | "bucket" | "research_stale" | "research_missing" | "holdings_stale";
+  kind: "price_zone" | "big_move" | "over_limit" | "bucket" | "research_stale" | "research_missing" | "holdings_stale" | "review" | "policy_conflict" | "data_missing";
   title: string;
   detail: string;
   href: string;
@@ -27,6 +28,7 @@ export function evaluateAlerts(args: {
   marketDayPct: number | null;
   now: Date;
   freshnessDays?: number;
+  policy?: Policy | null;
 }): Alert[] {
   const { portfolio, research, marketDayPct, now } = args;
   const freshDays = args.freshnessDays ?? 120;
@@ -38,13 +40,15 @@ export function evaluateAlerts(args: {
 
     if (h.dayPct !== null && Math.abs(h.dayPct) >= 0.05) {
       const rel = marketDayPct !== null ? h.dayPct - marketDayPct : null;
+      // A move that mostly tracks the market is context, not a decision.
+      const withMarket = rel !== null && Math.abs(rel) < 0.03;
       out.push({
         id: `move:${h.symbol}`,
-        severity: Math.abs(h.dayPct) >= 0.08 ? "high" : "medium",
+        severity: withMarket ? "low" : Math.abs(h.dayPct) >= 0.08 ? "high" : "medium",
         symbol: h.symbol,
         kind: "big_move",
         title: `${h.symbol} ${signed(h.dayPct)} today`,
-        detail: rel !== null ? `${signed(rel)} versus the S&P 500. Check filings and news before acting.` : "Check filings and news before acting.",
+        detail: rel !== null ? `${signed(rel)} versus the S&P 500${withMarket ? ", so mostly a market move" : ""}. A drop is not a buy signal by itself; check filings and news first.` : "A drop is not a buy signal by itself; check filings and news first.",
         href: `/decisions/review/${h.symbol}`,
       });
     }
@@ -53,7 +57,7 @@ export function evaluateAlerts(args: {
       const z = zoneFor(v.parsed.zones, h.price);
       const refZone = v.parsed.referencePrice ? zoneFor(v.parsed.zones, v.parsed.referencePrice) : null;
       if (z && refZone && z.label !== refZone.label) {
-        const er = expectedReturnAt(v.parsed, h.price, now);
+        const check = repriceCheck(v.parsed, h.price, researchAgeDays(r!, now), freshDays);
         const severity: Severity = /strong/i.test(z.action) ? "high" : /add|trim/i.test(z.action) ? "medium" : "low";
         out.push({
           id: `zone:${h.symbol}:${z.label}`,
@@ -63,7 +67,7 @@ export function evaluateAlerts(args: {
           title: `${h.symbol} at $${h.price.toFixed(2)} is in your "${z.label}" band`,
           detail:
             `Research action for this band: ${z.action}.` +
-            (er !== null ? ` Expected return at this price is about ${(er * 100).toFixed(1)}% a year.` : "") +
+            (check.ok ? "" : ` ${check.reason}`) +
             ` The research was set at $${v.parsed.referencePrice} on ${v.parsed.referenceDate}.`,
           href: `/decisions/review/${h.symbol}`,
         });
@@ -114,14 +118,48 @@ export function evaluateAlerts(args: {
     }
   }
 
+  const conflicts = args.policy?.audit?.conflicts ?? [];
+  if (conflicts.length) {
+    out.push({
+      id: "policy-conflict", severity: "medium", symbol: null, kind: "policy_conflict",
+      title: `Your sources disagree on limits for ${conflicts.map((c) => c.subject).join(", ")}`,
+      detail: "Until you choose, the app uses the stricter limit and will not size purchases above it.",
+      href: "/policy",
+    });
+  }
+  if (portfolio.cashDetail.savings === null) {
+    out.push({ id: "savings-missing", severity: "medium", symbol: null, kind: "data_missing", title: "Savings balance not entered", detail: "Without it the app cannot tell deployable savings from your protected $" + portfolio.cashDetail.protectedReserve.toLocaleString() + " reserve.", href: "/portfolio/reconcile" });
+  }
+
   if (portfolio.oldestHoldingsAsOf) {
     const days = Math.floor((now.getTime() - new Date(portfolio.oldestHoldingsAsOf).getTime()) / 86_400_000);
     if (days > 3) {
-      out.push({ id: "holdings", severity: "low", symbol: null, kind: "holdings_stale", title: `Holdings are from statements up to ${days} days old`, detail: "Trades since then are not counted. Upload new statements or connect Schwab.", href: "/portfolio" });
+      out.push({ id: "holdings", severity: "low", symbol: null, kind: "holdings_stale", title: `Holdings are from statements up to ${days} days old`, detail: "Trades since then are not counted unless you record them. Record trades or load a new statement.", href: "/portfolio/reconcile" });
     }
   }
 
-  return out.sort((a, b) => RANK[a.severity] - RANK[b.severity]);
+  return consolidate(out).sort((a, b) => RANK[a.severity] - RANK[b.severity]);
+}
+
+/** One review per company: a big drop that also lands in a research band is one decision, not two. */
+export function consolidate(alerts: Alert[]): Alert[] {
+  const perSymbol = new Map<string, Alert[]>();
+  const rest: Alert[] = [];
+  for (const a of alerts) {
+    if (a.symbol && (a.kind === "big_move" || a.kind === "price_zone" || a.kind === "over_limit")) perSymbol.set(a.symbol, [...(perSymbol.get(a.symbol) ?? []), a]);
+    else rest.push(a);
+  }
+  for (const [symbol, group] of perSymbol) {
+    if (group.length === 1) { rest.push(group[0]); continue; }
+    const severity = group.map((g) => g.severity).sort((x, y) => RANK[x] - RANK[y])[0];
+    rest.push({
+      id: `review:${symbol}`, severity, symbol, kind: "review",
+      title: `Review ${symbol}: ${group.map((g) => g.title.replace(new RegExp(`^${symbol}\\s*`), "")).join("; ")}`,
+      detail: group.map((g) => g.detail).join(" "),
+      href: `/decisions/review/${symbol}`,
+    });
+  }
+  return rest;
 }
 
 export function signed(n: number) {

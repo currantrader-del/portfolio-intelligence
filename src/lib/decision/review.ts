@@ -4,7 +4,7 @@
  */
 import type { Workspace } from "@/lib/workspace";
 import { BIG_MOVE, DEFAULT_ASSUMPTIONS } from "./newCapital";
-import { expectedReturnAt, scenarioReturnsAt, zoneFor } from "@/lib/research/valuation";
+import { expectedReturnAt, repriceCheck, scenarioReturnsAt, zoneFor } from "@/lib/research/valuation";
 import { researchAgeDays } from "@/lib/research/records";
 
 export const REVIEW_CODE_VERSION = "position-review@1";
@@ -21,12 +21,13 @@ export function reviewPosition(ws: Workspace, symbol: string) {
   const lim = ws.policy?.companies[symbol];
   const max = exp?.max ?? 0.1;
   const weight = exp?.total ?? h.weight;
-  const er = v ? expectedReturnAt(v.parsed, h.price, ws.now) : null;
-  const zone = v ? zoneFor(v.parsed.zones, h.price) : null;
-  const hurdle = ws.policy?.hurdleOverEtfPoints ?? DEFAULT_ASSUMPTIONS.hurdlePoints;
-  const etf = DEFAULT_ASSUMPTIONS.etfExpectedReturn;
   const age = r ? researchAgeDays(r, ws.now) : null;
   const freshDays = ws.policy?.researchFreshnessDays ?? 120;
+  const check = v ? repriceCheck(v.parsed, h.price, age, freshDays) : null;
+  const er = v && check?.ok ? expectedReturnAt(v.parsed, h.price, ws.now) : null;
+  const zone = v ? zoneFor(v.parsed.zones, h.price) : null;
+  const hurdle = ws.policy?.audit?.assumptions.hurdle.value ?? ws.policy?.hurdleOverEtfPoints ?? DEFAULT_ASSUMPTIONS.hurdlePoints;
+  const etf = ws.policy?.audit?.assumptions.etfExpectedReturn.value ?? DEFAULT_ASSUMPTIONS.etfExpectedReturn;
 
   // Taxable share of the position (retirement accounts carry no tax on sale).
   const taxable = p.accounts.filter((a) => a.role === "taxable_brokerage").map((a) => a.name);
@@ -59,7 +60,7 @@ export function reviewPosition(ws: Workspace, symbol: string) {
     suggestion = {
       key: "hold",
       label: "Hold. Refresh the research first.",
-      reason: `The price is ${Math.round(Math.abs(move) * 100)}% ${move < 0 ? "below" : "above"} the $${v.parsed.referencePrice} the research was set at.${er !== null ? ` If the research still held, the expected return would be about ${(er * 100).toFixed(1)}% a year.` : ""} A move that large needs a targeted update (what changed, and does it touch the thesis?) before sizing anything.`,
+      reason: `The price is ${Math.round(Math.abs(move) * 100)}% ${move < 0 ? "below" : "above"} the $${v.parsed.referencePrice} the research was set at. The old scenarios are not re-priced at this price: a move that large can change the probabilities, financing and cash-flow assumptions. A targeted update (what changed, and does it touch the thesis?) comes before sizing anything.`,
       confidence: 4,
     };
   } else if (er !== null && er >= etf + hurdle && addDollars > 1 && v.completeness === "complete" && (age ?? 0) <= freshDays) {
@@ -82,7 +83,8 @@ export function reviewPosition(ws: Workspace, symbol: string) {
     weight,
     max,
     expectedReturn: er,
-    scenarios: v ? scenarioReturnsAt(v.parsed, h.price, ws.now) : [],
+    scenarios: v && check?.ok ? scenarioReturnsAt(v.parsed, h.price, ws.now) : [],
+    repriceNote: check?.reason ?? null,
     zone,
     researchVersionId: v?.id ?? null,
     researchAsOf: v?.research_as_of ?? null,

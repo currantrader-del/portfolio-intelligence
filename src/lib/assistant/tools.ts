@@ -7,7 +7,7 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import type { Workspace } from "@/lib/workspace";
 import { getQuote } from "@/lib/market/quotes";
 import { newCapital } from "@/lib/decision/newCapital";
-import { expectedReturnAt, scenarioReturnsAt, zoneFor } from "@/lib/research/valuation";
+import { expectedReturnAt, repriceCheck, scenarioReturnsAt, zoneFor } from "@/lib/research/valuation";
 import { researchAgeDays } from "@/lib/research/records";
 import { LOOKTHROUGH_AS_OF } from "@/lib/portfolio/classify";
 
@@ -32,8 +32,14 @@ export const TOOLS: Anthropic.Beta.BetaTool[] = [
   },
   {
     name: "simulate_new_capital",
-    description: "Runs the deterministic new-cash decision engine for an amount in dollars: ranks held stocks by expected return at today's price against a broad ETF, applies policy limits, and returns options plus a recommendation.",
-    input_schema: { type: "object", properties: { amount: { type: "number", description: "Dollars of new cash" } }, required: ["amount"], additionalProperties: false },
+    description: "Runs the deterministic new-capital engine for an amount in dollars. Compares researched holdings, ETFs, researched new positions, holding cash and trims; checks evidence gates (current holdings, known cash, approved limits, chosen assumptions, current research). Returns status actionable or wait_review, the gates, what to verify, labelled alternatives, and a split that is illustrative when status is wait_review.",
+    input_schema: { type: "object", properties: { amount: { type: "number", description: "Dollars" }, source: { type: "string", enum: ["new", "existing"], description: "new = money coming in; existing = cash already held" } }, required: ["amount", "source"], additionalProperties: false },
+    strict: true,
+  },
+  {
+    name: "get_policy",
+    description: "The investment policy as versioned rules: for each company, bucket and assumption, the rule in use, its source and date, its approval status (approved, conflict, placeholder), competing candidates and superseded history. Use for any question about limits, ranges, reserves or assumptions.",
+    input_schema: { type: "object", properties: {}, required: [], additionalProperties: false },
     strict: true,
   },
   {
@@ -60,20 +66,22 @@ export async function runTool(name: string, input: Record<string, unknown>, ws: 
         layer: "model_output",
         computed_at: ws.now.toISOString(),
         market_open: ws.marketOpen,
-        total_value: p.total,
-        cash: p.cash,
+        data_quality: p.quality,
+        investable_capital: p.total,
+        cash: p.cashDetail,
+        estimated_price_change_since_statements: p.sinceStatementDollar,
         day_change_dollars: p.dayDollar,
         day_change_pct: r4(p.dayPct),
         holdings_as_of_oldest_statement: p.oldestHoldingsAsOf,
         benchmarks: ws.benchmarks.map((b) => ({ ...b, dayPct: r4(b.dayPct) })),
-        accounts: p.accounts,
+        accounts: p.accounts.map((a) => ({ name: a.name, role: a.role, statement_as_of: a.asOf, age_days: a.ageDays, source: a.sourceKind, value_now_estimated: a.value, statement_total: a.statementTotal, statement_adds_up: a.statementGap === null ? null : Math.abs(a.statementGap) <= 1, trades_recorded_since: a.tradesAfter })),
         holdings: p.holdings.map((h) => ({
           symbol: h.symbol, quantity: h.quantity, price: h.price, price_source: h.priceSource, price_as_of: h.priceAsOf, value: h.value,
           weight: r4(h.weight), day_pct: r4(h.dayPct), contribution_pts: r4(h.contributionPts), cost_basis: h.costBasis, unrealized: h.unrealized,
           bucket: h.bucket, accounts: h.accounts,
         })),
         buckets: p.buckets.map((b) => ({ bucket: b.bucket, weight: r4(b.weight), normal: b.normal, hard_max: b.hardMax, status: b.status })),
-        company_exposure: p.exposures.map((e) => ({ symbol: e.symbol, direct: r4(e.direct), via_etfs: r4(e.viaEtfs), total: r4(e.total), max: e.max, headroom_dollars: e.headroomDollars })),
+        company_exposure: p.exposures.map((e) => ({ symbol: e.symbol, direct: r4(e.direct), via_etfs: r4(e.viaEtfs), total: r4(e.total), max: e.max, limit_status: ws.policy?.companies[e.symbol]?.status ?? "none", limit_source: ws.policy?.companies[e.symbol]?.source ?? null, headroom_dollars: e.headroomDollars })),
         lookthrough_weights_as_of: LOOKTHROUGH_AS_OF,
       };
     case "get_research": {
@@ -84,6 +92,7 @@ export async function runTool(name: string, input: Record<string, unknown>, ws: 
       const h = p.holdings.find((x) => x.symbol === sym);
       const q = h ? null : await getQuote(sym);
       const price = h?.price ?? q?.price ?? null;
+      const check = v ? repriceCheck(v.parsed, price, researchAgeDays(r, ws.now), ws.policy?.researchFreshnessDays ?? 120) : null;
       return {
         layer: "research_conclusion",
         symbol: sym,
@@ -100,8 +109,10 @@ export async function runTool(name: string, input: Record<string, unknown>, ws: 
         at_today_price: v && price ? {
           layer: "model_output",
           price, price_source: h?.priceSource ?? (q ? "quote" : null),
-          expected_annual_return: r4(expectedReturnAt(v.parsed, price, ws.now)),
-          scenario_annual_returns: scenarioReturnsAt(v.parsed, price, ws.now).map((s) => ({ name: s.name, probability: s.probability, annualized: r4(s.annualized) })),
+          repriced: !!check?.ok,
+          not_repriced_reason: check?.reason ?? null,
+          expected_annual_return: check?.ok ? r4(expectedReturnAt(v.parsed, price, ws.now)) : null,
+          scenario_annual_returns: check?.ok ? scenarioReturnsAt(v.parsed, price, ws.now).map((s) => ({ name: s.name, probability: s.probability, annualized: r4(s.annualized) })) : [],
           band: zoneFor(v.parsed.zones, price)?.label ?? null,
         } : null,
       };
@@ -120,7 +131,18 @@ export async function runTool(name: string, input: Record<string, unknown>, ws: 
     case "simulate_new_capital": {
       const amount = Number(input.amount);
       if (!(amount > 0)) return { error: "amount must be positive" };
-      return { layer: "model_output", ...newCapital({ amount, portfolio: p, research: ws.research, policy: ws.policy, now: ws.now }) };
+      const source = input.source === "existing" ? "existing" : "new";
+      return { layer: "model_output", ...newCapital({ amount, source, portfolio: p, research: ws.research, policy: ws.policy, now: ws.now, quotes: ws.quotes }) };
+    }
+    case "get_policy": {
+      const a = ws.policy?.audit;
+      if (!a) return { error: "No versioned policy rules loaded." };
+      const rule = (r: import("@/lib/policy/rules").PolicyRuleRow | null) => r && ({ source: r.source_label, source_date: r.source_date, source_status: r.source_status, approval: r.approval, normal: [r.normal_low, r.normal_high], high_conviction: [r.high_conviction_low, r.high_conviction_high], hard_max: r.hard_max, value: r.value, conditions: r.conditions, note: r.approval_note });
+      return {
+        layer: "policy",
+        conflicts: a.conflicts.map((c) => ({ subject: c.subject, differences: c.differences, using_meanwhile: rule(c.used), candidates: c.candidates.map(rule) })),
+        subjects: a.subjects.map((s) => ({ scope: s.scope, subject: s.subject, status: s.status, in_use: rule(s.used), superseded: s.history.map(rule) })),
+      };
     }
     case "get_alerts":
       return { layer: "model_output", computed_at: ws.now.toISOString(), alerts: ws.alerts };

@@ -36,23 +36,37 @@ async function saveRun(db: Awaited<ReturnType<typeof createClient>>, kind: strin
 /** Re-runs the calculation on the server (never trusts numbers from the form) and records what the person chose. */
 export async function recordNewCapital(formData: FormData) {
   const amount = Number(formData.get("amount"));
+  const source = formData.get("source") === "existing" ? "existing" : "new";
   const action = String(formData.get("user_action")) as UserAction;
   const note = String(formData.get("note") ?? "").slice(0, 2000) || null;
-  if (!(amount > 0) || !ACTIONS.includes(action)) throw new Error("Invalid decision");
+  const execution = String(formData.get("execution") ?? "").trim().slice(0, 500);
+  if (!(amount > 0) || !ACTIONS.includes(action)) throw new Error("Choose what you decided");
 
   const db = await createClient();
   const ws = await buildWorkspace(db);
-  const result = newCapital({ amount, portfolio: ws.portfolio, research: ws.research, policy: ws.policy, now: ws.now });
+  const result = newCapital({ amount, source, portfolio: ws.portfolio, research: ws.research, policy: ws.policy, now: ws.now, quotes: ws.quotes });
   const symbols = result.options.map((o) => o.symbol).filter((s) => s !== "CASH");
-  const inputs = { amount, holdings: ws.portfolio.holdings.map((h) => ({ s: h.symbol, q: h.quantity, p: h.price, src: h.priceSource })), cash: ws.portfolio.cash, policy: ws.policy?.version ?? null, research: ws.research.filter((r) => r.current).map((r) => ({ s: r.symbol, v: r.current!.id })), at: ws.now.toISOString() };
+  // Everything the result depended on, with timestamps and sources, so the decision can be audited later.
+  const inputs = {
+    amount, source, at: ws.now.toISOString(),
+    holdings: ws.portfolio.holdings.map((h) => ({ s: h.symbol, q: h.quantity, p: h.price, src: h.priceSource, price_as_of: h.priceAsOf, holdings_as_of: h.holdingsAsOf })),
+    accounts: ws.portfolio.accounts.map((a) => ({ name: a.name, as_of: a.asOf, source: a.sourceKind, trades_after: a.tradesAfter })),
+    cash: ws.portfolio.cashDetail, data_quality: ws.portfolio.quality.status,
+    policy: ws.policy?.version ?? null,
+    limits: Object.values(ws.policy?.companies ?? {}).map((c) => ({ s: c.symbol, max: c.hardMax, status: c.status ?? null, source: c.source ?? null })),
+    assumptions: result.assumptions,
+    research: ws.research.filter((r) => r.current).map((r) => ({ s: r.symbol, v: r.current!.id, as_of: r.current!.research_as_of, completeness: r.current!.completeness })),
+  };
   const runId = await saveRun(db, "new_capital", CODE_VERSION, inputs, result);
   const topStock = result.recommendation.allocations.find((a) => a.symbol !== "CASH" && symbols.includes(a.symbol));
   const rv = ws.research.find((r) => r.symbol === topStock?.symbol)?.current?.id ?? null;
   const { error } = await db.from("decisions").insert({
     kind: "new_capital",
     symbol: null,
-    recommendation: { action: `New cash ${"$" + amount.toLocaleString()}: ${result.recommendation.headline}`, summary: result.recommendation.rationale.join(" "), allocations: result.recommendation.allocations, confidence: result.recommendation.confidence, would_change: result.recommendation.wouldChange, prices_at_decision: snapshotPrices(ws, symbols) },
-    alternatives: result.options.map((o) => ({ symbol: o.symbol, kind: o.kind, expected_return: o.expectedReturn, eligible: o.eligible, notes: o.notes })),
+    status: result.status,
+    recommendation: { action: `New cash ${"$" + amount.toLocaleString()}: ${result.recommendation.headline}`, status: result.status, summary: result.recommendation.rationale.join(" "), allocations: result.recommendation.allocations, illustrative: result.recommendation.illustrative, confidence: result.recommendation.confidence, would_change: result.recommendation.wouldChange, gates: result.gates, to_verify: result.toVerify, assumptions: result.assumptions, prices_at_decision: snapshotPrices(ws, symbols) },
+    alternatives: result.options.map((o) => ({ symbol: o.symbol, kind: o.kind, label: o.label, expected_return: o.expectedReturn, eligible: o.eligible, notes: o.notes })),
+    execution: execution ? { description: execution, recorded_at: new Date().toISOString() } : null,
     model_run_id: runId,
     research_version_id: rv,
     user_action: action,

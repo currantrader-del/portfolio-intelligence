@@ -2,12 +2,14 @@
 
 import { useEffect, useRef, useState } from "react";
 import { usePathname } from "next/navigation";
+import { Markdown } from "./Markdown";
 
 type Msg = { role: "user" | "assistant"; content: string; meta?: string };
 
 const SUGGESTIONS: Record<string, string[]> = {
   "/": ["Why am I up or down today?", "What needs my attention?", "Where should $1,250 go?"],
-  "/portfolio": ["Am I too concentrated anywhere?", "Which buckets are outside my policy?", "What's my exposure to AI infrastructure?"],
+  "/portfolio": ["Am I too concentrated anywhere?", "What is missing before these numbers are verified?", "What's my exposure to AI infrastructure?"],
+  "/policy": ["Explain my policy limit conflicts", "Which of my limits are still placeholders?"],
   "/research": ["Which research is stale?", "Which researched stock has the best expected return today?"],
   "/decisions": ["Summarize my past decisions", "Which decisions have worked out so far?"],
 };
@@ -120,7 +122,7 @@ export function AskPanel() {
               )}
               {msgs.map((m, i) => (
                 <div key={i} className={m.role === "user" ? "self-end max-w-[85%] bg-ink text-ground rounded-xl px-3.5 py-2 text-sm" : "text-[15px] leading-relaxed"}>
-                  <div className="whitespace-pre-wrap">{m.content}</div>
+                  {m.role === "assistant" ? <Markdown text={m.content} /> : <div className="whitespace-pre-wrap">{m.content}</div>}
                   {m.meta && <div className="text-xs text-muted mt-1.5">{m.meta}</div>}
                 </div>
               ))}

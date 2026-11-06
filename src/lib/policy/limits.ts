@@ -5,8 +5,9 @@
 import type { Bucket } from "@/lib/portfolio/classify";
 
 export type Range = { low: number; high: number } | null;
-export type BucketLimit = { bucket: Bucket; normal: Range; hardMax: number | null };
-export type CompanyLimit = { symbol: string; role: string | null; normal: Range; highConviction: Range; hardMax: number | null; action: string | null; researchStatus: string | null };
+export type LimitStatus = "approved" | "conflict" | "proposed" | "none";
+export type BucketLimit = { bucket: Bucket; normal: Range; hardMax: number | null; status?: LimitStatus };
+export type CompanyLimit = { symbol: string; role: string | null; normal: Range; highConviction: Range; hardMax: number | null; action: string | null; researchStatus: string | null; status?: LimitStatus; source?: string };
 export type Policy = {
   version: string;
   buckets: BucketLimit[];
@@ -15,6 +16,7 @@ export type Policy = {
   protectedSavingsFloor: number;
   researchFreshnessDays: number;
   hurdleOverEtfPoints: number | null;
+  audit?: import("./rules").PolicyAudit;
 };
 
 /** "25-40%" -> {0.25, 0.40}; "~3-5%" -> {0.03,0.05}; "TBD" -> null */

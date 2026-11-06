@@ -1,7 +1,7 @@
 import Link from "next/link";
 import type { Workspace } from "@/lib/workspace";
 import { getQuote } from "@/lib/market/quotes";
-import { expectedReturnAt, scenarioReturnsAt, zoneFor } from "@/lib/research/valuation";
+import { expectedReturnAt, repriceCheck, scenarioReturnsAt, zoneFor } from "@/lib/research/valuation";
 import { researchAgeDays } from "@/lib/research/records";
 import { pctStr, shortDate, usd } from "@/lib/format";
 import { Tag } from "./Tag";
@@ -15,8 +15,9 @@ export async function TodayValuation({ ws, symbol }: { ws: Workspace; symbol: st
   const price = q?.price ?? h?.price ?? null;
   const v = r?.current;
   const age = r ? researchAgeDays(r, ws.now) : null;
-  const er = v && price ? expectedReturnAt(v.parsed, price, ws.now) : null;
-  const scen = v && price ? scenarioReturnsAt(v.parsed, price, ws.now) : [];
+  const check = v ? repriceCheck(v.parsed, price, age, ws.policy?.researchFreshnessDays ?? 120) : null;
+  const er = v && price && check?.ok ? expectedReturnAt(v.parsed, price, ws.now) : null;
+  const scen = v && price && check?.ok ? scenarioReturnsAt(v.parsed, price, ws.now) : [];
   const zone = v && price ? zoneFor(v.parsed.zones, price) : null;
   const exp = ws.portfolio.exposures.find((e) => e.symbol === symbol);
 
@@ -33,11 +34,12 @@ export async function TodayValuation({ ws, symbol }: { ws: Workspace; symbol: st
       ) : (
         <>
           <dl className="grid gap-x-8 gap-y-3 sm:grid-cols-2 lg:grid-cols-4 text-sm">
-            <div><dt className="text-muted">Expected return</dt><dd className="font-mono text-lg">{er === null ? "—" : `${pctStr(er)} / yr`}</dd><dd className="text-xs text-muted">Calculated · to {shortDate(v.parsed.horizonDate)}</dd></div>
+            <div><dt className="text-muted">Expected return</dt><dd className="font-mono text-lg">{er === null ? "Not re-priced" : `${pctStr(er)} / yr`}</dd><dd className="text-xs text-muted">{er === null ? "Refresh required" : `Calculated · to ${shortDate(v.parsed.horizonDate)}`}</dd></div>
             <div><dt className="text-muted">Research reference</dt><dd className="font-mono text-lg">{usd(v.parsed.referencePrice, 2)}</dd><dd className="text-xs text-muted">{v.parsed.action} · {shortDate(v.parsed.referenceDate)}</dd></div>
             <div><dt className="text-muted">Price band today</dt><dd className="font-medium">{zone ? zone.label : "—"}</dd><dd className="text-xs text-muted">{zone ? zone.action : "No band covers this price"}</dd></div>
             <div><dt className="text-muted">Your exposure</dt><dd className="font-mono text-lg">{exp ? pctStr(exp.total) : "Not held"}</dd><dd className="text-xs text-muted">{exp ? `max ${pctStr(exp.max, 0)} · room ${usd(exp.headroomDollars)}` : ""}</dd></div>
           </dl>
+          {check?.reason && <p className="rounded-lg border border-warn-ink/30 bg-warn-bg text-warn-ink px-3 py-2 text-sm">{check.reason}</p>}
           {scen.length > 0 && (
             <div className="overflow-x-auto">
               <table className="w-full min-w-[480px] text-sm">
