@@ -158,6 +158,11 @@ function tables(): Record<string, Record<string, unknown>[]> {
       { id: "d2", kind: "new_capital", symbol: null, decided_at: ago(9) + "T15:00:00Z", recommendation: { action: "WAIT / REVIEW", summary: "Two checks open; kept in cash.", prices_at_decision: { VOO: 600, SPY: 655 }, to_verify: ["Enter savings balance"] }, user_action: "deferred", user_note: "Waiting for savings figure", status: "wait_review", research_as_of: null, imported_at: null, execution: null },
     ],
     model_runs: [
+      { id: "ws-1", kind: "watch_settings", computed_at: ago(2) + "T15:00:00Z", inputs: {}, outputs: { topic: "pi-sample7k2mfq9xw3hnd8r", enabled: true } },
+      { id: "wr-2", kind: "watch_run", computed_at: ago(0) + "T15:30:00Z", inputs: {}, outputs: { version: "watch@1", at: ago(0) + "T15:30:00Z", trigger: "schedule", checked: 6, sent: [], summary: null, pushed: false, error: null, costUsd: 0 } },
+      { id: "wr-1", kind: "watch_run", computed_at: ago(1) + "T17:00:00Z", inputs: {}, outputs: { version: "watch@1", at: ago(1) + "T17:00:00Z", trigger: "schedule", checked: 7, pushed: true, error: null, costUsd: 0.0006,
+        summary: "BOLT fell with no filing; your thesis rests on contract wins, so check news before reading anything into it.",
+        sent: [{ key: "x|move:BOLT", alert: { id: "move:BOLT", severity: "medium", symbol: "BOLT", kind: "big_move", title: "BOLT -6.4% today", detail: "-5.9% versus the S&P 500. A drop is not a buy signal by itself; check filings and news first.", href: "/decisions/review/BOLT" } }] } },
       { id: "plan-1", kind: "portfolio_plan", computed_at: ago(1) + "T14:05:00Z", inputs: { request_id: "pr-1", trigger: "research" }, outputs: { ok: true, trigger: "research", costUsd: 0.31, ms: 70000, searches: 0, model: "sample", plan: {
         summary: "Keep the index core and hold the stocks you own. CRWN is above its limit, so let new cash go to the index until it drifts back. ACME is the one idea worth adding, but only below $40.",
         market: { stance: "Neutral", shortTerm: "Breadth is mixed and volatility is low; no strong signal.", longTerm: "Earnings growth is intact; valuations are full." },
