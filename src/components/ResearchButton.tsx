@@ -63,11 +63,11 @@ export function ResearchButton({ symbol, hasResearch, needsResearch }: { symbol:
       <CardHead id="ai-r-h" title="AI research" right={running ? <Pill small tone="copper" dot="solid">Running</Pill> : needsResearch ? <Pill small tone="warn">Needed</Pill> : null} />
       {running ? (
         <p className="t-sm" role="status" aria-live="polite">
-          Researching {symbol}: reading filings, financials and news, then valuing it. {Math.floor(elapsed / 60)}:{String(elapsed % 60).padStart(2, "0")} so far; this usually takes 5–10 minutes. You can leave this page and come back.
+          Researching {symbol}: reading filings, financials and news, then valuing it. {Math.floor(elapsed / 60)}:{String(elapsed % 60).padStart(2, "0")} so far; this usually takes 2–8 minutes. You can leave this page and come back.
         </p>
       ) : (
         <p className="t-sm">
-          Claude works through the business, financials and filings, competition, risks and catalysts, a bear/base/bull valuation, and a conclusion with sources. It is saved as a new research version{hasResearch ? "; your earlier research is kept" : ""}. Roughly $0.50–1.50, counted in today&apos;s cost limit.
+          Claude works through the business, financials and filings, competition, risks and catalysts, a bear/base/bull valuation, and a conclusion with sources. It is saved as a new research version{hasResearch ? "; your earlier research is kept" : ""}. About $0.25–1 per company, counted in today&apos;s cost limit.
         </p>
       )}
       {last && !running && (
