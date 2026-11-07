@@ -150,7 +150,14 @@ function cost(model: { inPerM: number; outPerM: number }, u: AgentAnswer["usage"
   return (u.input * model.inPerM + u.cacheRead * model.inPerM * 0.1 + u.cacheWrite * model.inPerM * 1.25 + u.output * model.outPerM) / 1e6 + searches * PER_SEARCH;
 }
 
-type Run = { client?: Anthropic; question: string; history?: { role: "user" | "assistant"; content: string }[]; page?: string | null; symbol?: string | null; deep?: boolean };
+type Limits = typeof LIMITS;
+type Run = {
+  client?: Anthropic; question: string; history?: { role: "user" | "assistant"; content: string }[]; page?: string | null; symbol?: string | null; deep?: boolean;
+  /** Replaces the assistant's own instructions (the investor context is still added). */
+  system?: string;
+  /** Overrides the per-question cost controls, e.g. for full company research. */
+  limits?: Partial<Limits>;
+};
 
 /** The app's assistant: investor context + tools + web search. */
 export async function runAgent(db: SupabaseClient, ws: Workspace, run: Run): Promise<AgentAnswer> {
@@ -160,12 +167,13 @@ export async function runAgent(db: SupabaseClient, ws: Workspace, run: Run): Pro
   const ctx = await investorContext(ws, db);
   const where = run.page ? `\nThe investor is on page ${run.page}${run.symbol ? `, looking at ${run.symbol}` : ""}.` : "";
   const system: Anthropic.Beta.BetaTextBlockParam[] = [
-    { type: "text", text: SYSTEM },
+    { type: "text", text: run.system ?? SYSTEM },
     { type: "text", text: `INVESTOR CONTEXT (loaded by the app)\n${ctx.text}`, cache_control: { type: "ephemeral" } },
   ];
   const messages: Anthropic.Beta.BetaMessageParam[] = [...(run.history ?? []).slice(-10).map((m) => ({ role: m.role, content: m.content })), { role: "user", content: `${run.question}${where}` }];
-  const tools: Anthropic.Beta.BetaToolUnion[] = [...TOOLS, ...EXTRA_TOOLS, { type: "web_search_20250305", name: "web_search", max_uses: LIMITS.searches } as Anthropic.Beta.BetaWebSearchTool20250305];
-  return loop({ client, model, system, messages, tools, t0, question: run.question, mode: "app", briefingId: ctx.briefingId, exec: (name, input) => execTool(name, input, ws, db) });
+  const limits: Limits = { ...LIMITS, ...run.limits };
+  const tools: Anthropic.Beta.BetaToolUnion[] = [...TOOLS, ...EXTRA_TOOLS, { type: "web_search_20250305", name: "web_search", max_uses: limits.searches } as Anthropic.Beta.BetaWebSearchTool20250305];
+  return loop({ client, model, system, messages, tools, t0, question: run.question, mode: "app", briefingId: ctx.briefingId, limits, exec: (name, input) => execTool(name, input, ws, db) });
 }
 
 /** The comparison: a plain Claude conversation where the investor pastes their holdings, with web search only. */
@@ -175,7 +183,7 @@ export async function runBaseline(ws: Workspace, question: string, client = new 
   const pasted = `My portfolio: ${p.holdings.map((h) => `${h.symbol} ${(h.weight * 100).toFixed(1)}%`).join(", ")}. Total about $${Math.round(p.total).toLocaleString("en-US")}, cash about $${Math.round(p.cashDetail.brokerage).toLocaleString("en-US")}.`;
   const messages: Anthropic.Beta.BetaMessageParam[] = [{ role: "user", content: `${pasted}\n\n${question}` }];
   const tools: Anthropic.Beta.BetaToolUnion[] = [{ type: "web_search_20250305", name: "web_search", max_uses: LIMITS.searches } as Anthropic.Beta.BetaWebSearchTool20250305];
-  return loop({ client, model: MODELS.standard, system: [{ type: "text", text: `You are Claude, a helpful assistant. Today is ${ws.now.toISOString().slice(0, 10)}.` }], messages, tools, t0, question, mode: "baseline", briefingId: null, exec: async () => ({ error: "no tools" }) });
+  return loop({ client, model: MODELS.standard, system: [{ type: "text", text: `You are Claude, a helpful assistant. Today is ${ws.now.toISOString().slice(0, 10)}.` }], messages, tools, t0, question, mode: "baseline", briefingId: null, limits: LIMITS, exec: async () => ({ error: "no tools" }) });
 }
 
 async function execTool(name: string, input: Record<string, unknown>, ws: Workspace, db: SupabaseClient): Promise<unknown> {
@@ -185,14 +193,17 @@ async function execTool(name: string, input: Record<string, unknown>, ws: Worksp
   return runTool(name, input, ws, db);
 }
 
-async function loop(a: { client: Anthropic; model: (typeof MODELS)["standard"] | (typeof MODELS)["deep"]; system: Anthropic.Beta.BetaTextBlockParam[]; messages: Anthropic.Beta.BetaMessageParam[]; tools: Anthropic.Beta.BetaToolUnion[]; t0: number; question: string; mode: AgentAnswer["mode"]; briefingId: string | null; exec: (name: string, input: Record<string, unknown>) => Promise<unknown> }): Promise<AgentAnswer> {
+async function loop(a: { client: Anthropic; model: (typeof MODELS)["standard"] | (typeof MODELS)["deep"]; system: Anthropic.Beta.BetaTextBlockParam[]; messages: Anthropic.Beta.BetaMessageParam[]; tools: Anthropic.Beta.BetaToolUnion[]; t0: number; question: string; mode: AgentAnswer["mode"]; briefingId: string | null; limits: Limits; exec: (name: string, input: Record<string, unknown>) => Promise<unknown> }): Promise<AgentAnswer> {
   const usage = { input: 0, cacheRead: 0, cacheWrite: 0, output: 0 };
   const steps: Step[] = [];
   let searches = 0, turns = 0, served = a.model.id, answer = "", stopped: string | null = null;
-  for (; turns < LIMITS.turns; turns++) {
-    if (Date.now() - a.t0 > LIMITS.ms) { stopped = "time limit"; break; }
+  for (; turns < a.limits.turns; turns++) {
+    if (Date.now() - a.t0 > a.limits.ms) { stopped = "time limit"; break; }
+    // On the last allowed turn (or close to the time limit) tools are switched off, so the model writes its answer
+    // from what it has gathered instead of stopping mid-research.
+    const last = turns === a.limits.turns - 1 || Date.now() - a.t0 > a.limits.ms * 0.8;
     const res = await a.client.beta.messages.create({
-      model: a.model.id, max_tokens: LIMITS.maxTokens, system: a.system, tools: a.tools,
+      model: a.model.id, max_tokens: a.limits.maxTokens, system: a.system, tools: a.tools, ...(last ? { tool_choice: { type: "none" as const } } : {}),
       output_config: { effort: a.model.effort }, betas: ["server-side-fallback-2026-07-01"], fallbacks: "default", messages: a.messages,
     });
     served = res.model;
