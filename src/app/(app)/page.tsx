@@ -12,7 +12,7 @@ import { pctStr, shortDate, toneOf, usd } from "@/lib/format";
 import { Bar, Card, CardHead, Chevron, DataLabel, Disclose, Dot, Metric, PageHeader, Pill, Skel } from "@/components/ui";
 import { AlertList } from "@/components/cards/Alerts";
 import { EventsCard, EventsSkeleton } from "@/components/cards/Events";
-import { Markdown } from "@/components/Markdown";
+import { AnswerView } from "@/components/AnswerView";
 import { MorningRunner } from "@/components/MorningRunner";
 
 const pts = (v: number) => `${v >= 0 ? "+" : "−"}${Math.abs(v).toFixed(2)}`;
@@ -67,7 +67,7 @@ export default async function TodayPage() {
         <CardHead id="mb-h" cap="Morning briefing" right={<MorningRunner label={morning ? "Write a new one" : "Write it now"} />} />
         {morning ? (
           <>
-            <div className="text-[15px] leading-relaxed"><Markdown text={morning.answer} /></div>
+            <AnswerView text={morning.answer} />
             <span className="t-xs">Written {new Intl.DateTimeFormat("en-US", { hour: "numeric", minute: "2-digit", timeZone: "America/New_York" }).format(new Date(morning.at))} ET{morning.today ? "" : ` on ${shortDate(morning.at)}`} · {Math.round(morning.ms / 1000)}s · ${morning.costUsd.toFixed(2)} · from your portfolio, policy, research and today&apos;s market briefing</span>
           </>
         ) : <p className="t-sm">Written automatically at 9:00 AM ET on weekdays, after the 8:30 economic data: what happened, what it means for your holdings, and what (if anything) to do.</p>}

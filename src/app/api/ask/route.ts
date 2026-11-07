@@ -26,7 +26,7 @@ async function session() {
 }
 
 export async function POST(req: Request) {
-  const body = (await req.json().catch(() => null)) as { action?: string; messages?: ClientMsg[]; page?: string; symbol?: string | null; deep?: boolean } | null;
+  const body = (await req.json().catch(() => null)) as { action?: string; messages?: ClientMsg[]; page?: string; symbol?: string | null; deep?: boolean; slot?: number } | null;
   if (!process.env.ANTHROPIC_API_KEY) return Response.json({ error: "The assistant is not configured yet: add ANTHROPIC_API_KEY in Netlify environment variables." }, { status: 503 });
   const { db, user, token } = await session();
   if (!user || !token) return Response.json({ error: "Sign in first." }, { status: 401 });
@@ -51,7 +51,7 @@ export async function POST(req: Request) {
     const history = (body?.messages ?? []).filter((m) => (m.role === "user" || m.role === "assistant") && typeof m.content === "string").slice(-11);
     const last = history.pop();
     if (!last || last.role !== "user") return Response.json({ error: "No question." }, { status: 400 });
-    const requestId = await start({ question: last.content.slice(0, 4000), history: history.map((m) => ({ role: m.role, content: m.content.slice(0, 6000) })), page: body?.page ?? null, symbol: body?.symbol ?? null, deep: !!body?.deep, mode: "app" });
+    const requestId = await start({ question: last.content.slice(0, 4000), history: history.map((m) => ({ role: m.role, content: m.content.slice(0, 6000) })), page: body?.page ?? null, symbol: body?.symbol ?? null, deep: !!body?.deep, mode: "app", ...(Number.isInteger(body?.slot) && body!.slot! >= 0 && body!.slot! < 10 ? { purpose: "quick" as const, slot: body!.slot! } : {}) });
     return Response.json({ requestId });
   } catch (e) {
     return Response.json({ error: (e as Error).message.slice(0, 200) }, { status: 502 });
