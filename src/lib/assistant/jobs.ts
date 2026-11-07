@@ -13,8 +13,22 @@ export type AskRequest = {
   /** "baseline" = a plain Claude conversation with pasted holdings, for comparison. */
   mode: "app" | "baseline"; demo?: string | null;
   /** "morning" = the scheduled executive briefing shown at the top of Today. */
-  purpose?: "morning" | null;
+  purpose?: "morning" | "quick" | null;
+  /** Which saved question on the Questions page this answers (purpose "quick"). */
+  slot?: number | null;
 };
+
+/**
+ * The saved questions on the Questions page. {cash} becomes today's deployable cash and {ticker} the
+ * chosen stock when the page loads; the investor can edit any question before asking it.
+ */
+export const QUICK_QUESTIONS = [
+  "What happened in the market today, and what should I do?",
+  "Should I add {cash} to my portfolio, and where?",
+  "What changed for {ticker} following its latest earnings?",
+  "Analyze a stock I have never researched before: pick one that fits my portfolio and tell me whether it deserves a place in it.",
+  "What are the most promising investment opportunities worth researching right now?",
+];
 
 /** The five questions the assistant is judged on (Brendan, 2026-11-06). */
 export const DEMO_QUESTIONS = [
@@ -36,5 +50,5 @@ export async function runAskJob(db: SupabaseClient, requestId: string) {
   } catch (e) {
     out = { error: (e as Error).message.slice(0, 300), mode: r.mode, question: r.question };
   }
-  return save(db, "assistant_answer", AGENT_VERSION, { request_id: requestId, mode: r.mode, question: r.question, demo: r.demo ?? null, purpose: r.purpose ?? null }, out);
+  return save(db, "assistant_answer", AGENT_VERSION, { request_id: requestId, mode: r.mode, question: r.question, demo: r.demo ?? null, purpose: r.purpose ?? null, slot: r.slot ?? null }, out);
 }
