@@ -7,6 +7,9 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import { buildWorkspace } from "@/lib/workspace-core";
 import { save } from "@/lib/intel/jobs";
 import { runAgent, type AgentAnswer } from "@/lib/assistant/agent";
+import { getFilings, getFundamentals } from "@/lib/market/sec";
+import { getQuote } from "@/lib/market/quotes";
+import { screenCompany, type ScreenResult } from "./screen";
 import { RESEARCH_LIMITS, RESEARCH_SYSTEM, RESEARCH_VERSION, extractJson, researchQuestion, validateReport } from "./aiResearch";
 
 export type ResearchRequest = { symbol: string };
@@ -26,8 +29,11 @@ export async function runResearchJob(db: SupabaseClient, requestId: string): Pro
   const done = (r: Omit<ResearchResult, "symbol">) => save(db, "research_result", RESEARCH_VERSION, { request_id: requestId, symbol }, { symbol, ...r });
   const empty = { costUsd: 0, ms: 0, searches: 0, turns: 0, model: null, steps: [] };
 
-  const { data: company } = await db.from("companies").select("id, symbol, name, research_versions(id, research_as_of, completeness, origin, is_current, conclusion)").eq("symbol", symbol).maybeSingle();
+  const { data: company } = await db.from("companies").select("id, symbol, name, pipeline_stage, stage_history, research_versions(id, research_as_of, completeness, origin, is_current, conclusion)").eq("symbol", symbol).maybeSingle();
   if (!company) return done({ ok: false, error: `${symbol} is not in your research list.`, ...empty });
+
+  // The free SEC screen runs first and is stored on the company as before; the research reads its result.
+  const screen = await runScreenFor(db, company, symbol).catch(() => null);
 
   const ws = await buildWorkspace(db);
   const today = new Intl.DateTimeFormat("en-CA", { timeZone: "America/New_York" }).format(ws.now);
@@ -40,7 +46,7 @@ export async function runResearchJob(db: SupabaseClient, requestId: string): Pro
 
   let ans: AgentAnswer;
   try {
-    ans = await runAgent(db, ws, { question: researchQuestion({ symbol, name: company.name, today, price: appPrice, earlier }), system: RESEARCH_SYSTEM, limits: RESEARCH_LIMITS, page: `/research/${symbol}`, symbol });
+    ans = await runAgent(db, ws, { question: researchQuestion({ symbol, name: company.name, today, price: appPrice, earlier, screen: screen ? screenText(screen) : null }), system: RESEARCH_SYSTEM, limits: RESEARCH_LIMITS, page: `/research/${symbol}`, symbol });
   } catch (e) {
     return done({ ok: false, error: (e as Error).message.slice(0, 300), ...empty });
   }
@@ -75,5 +81,23 @@ export async function runResearchJob(db: SupabaseClient, requestId: string): Pro
     if (error) report.problems.push(`Could not mark the new research current: ${error.message}`);
     else madeCurrent = true;
   }
+  // Research on file moves an idea along the pipeline (never past "researching"; Ready stays the investor's call).
+  if (company.pipeline_stage === "idea" || company.pipeline_stage === "screening") {
+    const at = new Date().toISOString();
+    await db.from("companies").update({ pipeline_stage: "researching", stage_updated_at: at, stage_history: [...((company.stage_history as unknown[]) ?? []), { stage: "researching", at, note: "AI research written" }] }).eq("id", company.id);
+  }
   return done({ ok: true, versionId: version.id, madeCurrent, completeness: report.completeness, problems: report.problems, summary: report.summary, ...meta });
+}
+
+async function runScreenFor(db: SupabaseClient, company: { id: string; name: string | null; pipeline_stage?: string | null; stage_history?: unknown }, symbol: string): Promise<ScreenResult> {
+  const [fundamentals, filings, quote] = await Promise.all([getFundamentals(symbol), getFilings(symbol), getQuote(symbol)]);
+  const result = screenCompany({ symbol, fundamentals, filings: "error" in filings ? null : filings, price: quote?.price ?? null, priceAsOf: quote?.asOf ?? null });
+  const update: Record<string, unknown> = { screen: result, screened_at: result.computedAt };
+  if (!company.name && !("error" in fundamentals) && fundamentals.company) { update.name = fundamentals.company; company.name = fundamentals.company; }
+  await db.from("companies").update(update).eq("id", company.id);
+  return result;
+}
+
+function screenText(s: ScreenResult) {
+  return `${s.verdict}. ${s.checks.map((c) => `${c.label}: ${c.value} (${c.status})`).join("; ")}. To verify: ${s.toVerify.join("; ") || "nothing flagged"}.`;
 }

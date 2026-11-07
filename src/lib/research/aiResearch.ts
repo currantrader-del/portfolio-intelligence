@@ -48,9 +48,10 @@ When done, reply with exactly one JSON object in a \`\`\`json fenced block and n
   "sources": [{ "title": string, "url": string, "date": "YYYY-MM-DD" | null }]
 }`;
 
-export function researchQuestion(a: { symbol: string; name: string | null; today: string; price: number | null; earlier: string | null }) {
+export function researchQuestion(a: { symbol: string; name: string | null; today: string; price: number | null; earlier: string | null; screen?: string | null }) {
   return `Research ${a.symbol}${a.name ? ` (${a.name})` : ""} from scratch for the research record. Today is ${a.today}.${a.price ? ` The app's latest (delayed) price is $${a.price}.` : " The app has no current price; get one with get_quote."}
 ${a.earlier ? `Earlier research on file (historical, may be stale): ${a.earlier}` : "There is no earlier research on file."}
+${a.screen ? `The app's rule-based SEC screen (a first pass, not a conclusion; check its flagged items): ${a.screen}` : ""}
 Work through all six phases, then give the JSON report.`;
 }
 
