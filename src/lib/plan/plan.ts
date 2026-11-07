@@ -13,6 +13,8 @@ How to work:
 - Research is the authority for each company's view; do not invent a new valuation. If research is stale, partial, or the price has moved far from its reference, say the action is "Refresh research first" and put it in "stale".
 - Targets stay within the policy: never above a company's maximum, buckets within their ranges, the protected reserve never invested. Broad ETFs need no company research; they are the default home for cash when no stock passes.
 - A price drop is never a reason to buy by itself; room under a limit is never a reason to add; new cash does not have to be invested now. Holding cash is a valid plan.
+- Opportunities: the companies at the "Ready for decision" stage (named in the question) are the shortlist for new cash. Rank them against simply buying VOO with the same money. For each, say "Buy now", "Wait for price" or "Not yet", with a buy-below price, a dollar amount within the deployable cash and the policy limits, the expected return from its research versus VOO's, and why. If none beats VOO today, say so in the cash plan.
+- Companies the investor marked "Passed" are decided: leave them out of positions and opportunities.
 - Prefer few, clear actions. Priority 1 is the most important.
 
 Reply with exactly one JSON object in a \`\`\`json fenced block and nothing else. Percentages are numbers like 4.5 (meaning 4.5%). Shape:
@@ -20,23 +22,28 @@ Reply with exactly one JSON object in a \`\`\`json fenced block and nothing else
   "summary": string,                                  // 2-4 sentences: the plan in plain words
   "market": { "stance": "Constructive" | "Neutral" | "Cautious", "short_term": string, "long_term": string },
   "positions": [{ "symbol": string, "status": "held" | "idea", "target_pct": number | null, "action": string, "priority": 1 | 2 | 3, "reason": string }],
+  "opportunities": [{ "symbol": string, "verdict": "Buy now" | "Wait for price" | "Not yet", "buy_below": number | null, "amount_usd": number | null, "expected_return": string, "vs_voo": string, "reason": string }],   // best first
   "cash": { "now": string, "wait_for": string },
   "stale": [{ "symbol": string, "why": string }],
   "next_actions": string[]                            // at most 5, most important first
 }`;
 
-export function planQuestion(today: string) {
-  return `Write my portfolio plan as of ${today}. Cover every holding and every company with research on file, then the cash plan.`;
+export function planQuestion(today: string, stages: { ready: string[]; passed: string[] } = { ready: [], passed: [] }) {
+  return `Write my portfolio plan as of ${today}. Cover every holding and every company with research on file, then the opportunities and the cash plan.
+Ready for decision (the shortlist for new cash): ${stages.ready.join(", ") || "none yet"}.
+Passed (leave out): ${stages.passed.join(", ") || "none"}.`;
 }
 
 export type PlanPosition = {
   symbol: string; status: "held" | "idea"; currentPct: number | null; targetPct: number | null; maxPct: number | null;
   action: string; priority: 1 | 2 | 3; reason: string; researchAsOf: string | null; flags: string[];
 };
+export type Opportunity = { symbol: string; verdict: "Buy now" | "Wait for price" | "Not yet"; buyBelow: number | null; amountUsd: number | null; expectedReturn: string; vsVoo: string; reason: string };
 export type Plan = {
   summary: string;
   market: { stance: string; shortTerm: string; longTerm: string };
   positions: PlanPosition[];
+  opportunities: Opportunity[];
   cash: { deployable: number | null; now: string; waitFor: string };
   stale: { symbol: string; why: string }[];
   nextActions: string[];
@@ -45,7 +52,7 @@ export type Plan = {
 
 export type PlanFacts = {
   holdings: { symbol: string; weight: number }[];         // weight as a fraction
-  researched: { symbol: string; asOf: string | null }[];
+  researched: { symbol: string; asOf: string | null; stage?: string }[];
   maxFor: (symbol: string) => number | null;               // fraction
   deployable: number | null;
 };
@@ -64,7 +71,9 @@ export function validatePlan(raw: unknown, f: PlanFacts): Plan | { error: string
   const problems: string[] = [];
   const known = new Map<string, { held: boolean; asOf: string | null }>();
   for (const h of f.holdings) known.set(h.symbol, { held: true, asOf: null });
-  for (const x of f.researched) known.set(x.symbol, { held: known.get(x.symbol)?.held ?? false, asOf: x.asOf });
+  const passed = new Set(f.researched.filter((x) => x.stage === "passed" && !f.holdings.some((h) => h.symbol === x.symbol)).map((x) => x.symbol));
+  const ready = new Set(f.researched.filter((x) => x.stage === "ready").map((x) => x.symbol));
+  for (const x of f.researched) if (!passed.has(x.symbol)) known.set(x.symbol, { held: known.get(x.symbol)?.held ?? false, asOf: x.asOf });
 
   const seen = new Set<string>();
   const positions: PlanPosition[] = [];
@@ -72,6 +81,7 @@ export function validatePlan(raw: unknown, f: PlanFacts): Plan | { error: string
     const symbol = str(p?.symbol, 12).toUpperCase();
     if (!symbol || seen.has(symbol)) continue;
     const k = known.get(symbol);
+    if (passed.has(symbol)) continue;
     if (!k) { problems.push(`${symbol} is not a holding or a researched company, so it was left out`); continue; }
     seen.add(symbol);
     const flags: string[] = [];
@@ -91,6 +101,26 @@ export function validatePlan(raw: unknown, f: PlanFacts): Plan | { error: string
   if (targetSum > 100.5) problems.push(`Targets add up to ${r1(targetSum)}%, more than 100%`);
   for (const p of positions) if (p.flags.some((x) => x.includes("capped"))) problems.push(`${p.symbol}: ${p.flags.find((x) => x.includes("capped"))}`);
 
+  // Opportunities: only Ready-for-decision companies, amounts within the deployable cash.
+  const opportunities: Opportunity[] = [];
+  let committed = 0;
+  for (const o of Array.isArray(r.opportunities) ? (r.opportunities as Record<string, unknown>[]) : []) {
+    const symbol = str(o?.symbol, 12).toUpperCase();
+    if (!symbol || opportunities.some((x) => x.symbol === symbol)) continue;
+    if (!ready.has(symbol)) { if (!passed.has(symbol)) problems.push(`${symbol} was suggested as an opportunity but is not Ready for decision, so it was left out`); continue; }
+    const verdict = (["Buy now", "Wait for price", "Not yet"] as const).find((v) => v === o.verdict) ?? "Not yet";
+    let amountUsd = num(o.amount_usd);
+    if (amountUsd !== null && amountUsd <= 0) amountUsd = null;
+    if (verdict === "Buy now" && amountUsd !== null && f.deployable !== null && committed + amountUsd > f.deployable + 1) {
+      problems.push(`${symbol}: $${Math.round(amountUsd)} is more than the deployable cash left, so it was cut`);
+      amountUsd = Math.max(0, Math.round(f.deployable - committed)) || null;
+    }
+    if (verdict === "Buy now" && amountUsd) committed += amountUsd;
+    const buyBelow = num(o.buy_below);
+    opportunities.push({ symbol, verdict, buyBelow: buyBelow && buyBelow > 0 ? buyBelow : null, amountUsd, expectedReturn: str(o.expected_return, 200), vsVoo: str(o.vs_voo, 300), reason: str(o.reason, 800) });
+  }
+  for (const s of ready) if (!opportunities.some((o) => o.symbol === s) && !f.holdings.some((h) => h.symbol === s)) problems.push(`${s} is Ready for decision but the plan did not rank it`);
+
   const m = (r.market ?? {}) as Record<string, unknown>;
   const c = (r.cash ?? {}) as Record<string, unknown>;
   const summary = str(r.summary, 1500);
@@ -99,6 +129,7 @@ export function validatePlan(raw: unknown, f: PlanFacts): Plan | { error: string
     summary,
     market: { stance: ["Constructive", "Neutral", "Cautious"].includes(String(m.stance)) ? String(m.stance) : "Neutral", shortTerm: str(m.short_term, 800), longTerm: str(m.long_term, 800) },
     positions: positions.sort((a, b) => a.priority - b.priority || (b.currentPct ?? 0) - (a.currentPct ?? 0)),
+    opportunities,
     cash: { deployable: f.deployable, now: str(c.now, 800), waitFor: str(c.wait_for, 800) },
     stale: (Array.isArray(r.stale) ? (r.stale as Record<string, unknown>[]) : []).map((s) => ({ symbol: str(s?.symbol, 12).toUpperCase(), why: str(s?.why, 400) })).filter((s) => s.symbol).slice(0, 20),
     nextActions: (Array.isArray(r.next_actions) ? (r.next_actions as unknown[]) : []).map((x) => str(x, 300)).filter(Boolean).slice(0, 5),

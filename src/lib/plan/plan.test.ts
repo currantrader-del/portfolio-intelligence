@@ -48,3 +48,22 @@ describe("validatePlan", () => {
   });
   it("rejects an unreadable reply", () => expect(validatePlan(null, facts)).toEqual({ error: "The planner did not return a readable plan." }));
 });
+
+describe("opportunities", () => {
+  const f2: PlanFacts = { ...facts, researched: [...facts.researched, { symbol: "GAMMA", asOf: "2026-11-05", stage: "ready" }, { symbol: "DELTA", asOf: "2026-11-05", stage: "passed" }], deployable: 1000 };
+  const r2 = () => ({ ...raw(), positions: [...raw().positions, { symbol: "DELTA", status: "idea", target_pct: 2, action: "Buy", priority: 1, reason: "x" }],
+    opportunities: [
+      { symbol: "GAMMA", verdict: "Buy now", buy_below: 50, amount_usd: 1500, expected_return: "12%/yr", vs_voo: "+5 pts", reason: "Cheap on cash flow." },
+      { symbol: "BETA", verdict: "Buy now", amount_usd: 500, reason: "Not ready." },
+      { symbol: "DELTA", verdict: "Buy now", amount_usd: 500, reason: "Passed." },
+    ] });
+  it("keeps only Ready companies, caps amounts at deployable cash, and drops passed ones everywhere", () => {
+    const p = validatePlan(r2(), f2);
+    if ("error" in p) throw new Error(p.error);
+    expect(p.opportunities.map((o) => o.symbol)).toEqual(["GAMMA"]);
+    expect(p.opportunities[0].amountUsd).toBe(1000);
+    expect(p.positions.some((x) => x.symbol === "DELTA")).toBe(false);
+    expect(p.problems.some((x) => x.startsWith("BETA was suggested"))).toBe(true);
+    expect(p.problems.some((x) => x.startsWith("DELTA"))).toBe(false);
+  });
+});
