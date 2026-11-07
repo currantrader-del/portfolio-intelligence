@@ -18,6 +18,10 @@ describe("research coverage label", () => {
     expect(coverage(rec(), 70, now, 120).key).toBe("refresh");
     expect(coverage(rec(), 140, now, 120).key).toBe("refresh");
   });
+  it("does not ask for research just because there is no live price", () => {
+    expect(coverage(rec(), null, now, 120).key).toBe("current");
+    expect(coverage(rec({ asOf: "2026-05-01" }), null, now, 120).key).toBe("refresh");
+  });
   it("asks for a refresh when research is past the freshness window", () => {
     expect(coverage(rec({ asOf: "2026-05-01" }), 100, now, 120).key).toBe("refresh");
   });

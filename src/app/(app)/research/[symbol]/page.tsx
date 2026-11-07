@@ -12,6 +12,7 @@ import { InvestmentSummary } from "@/components/TodayValuation";
 import { AskButton } from "@/components/AskPanel";
 import { FilingCheckCard, type StoredFilingCheck } from "@/components/FilingCheckCard";
 import { ResearchButton } from "@/components/ResearchButton";
+import { getQuote } from "@/lib/market/quotes";
 import { coverage } from "@/lib/research/status";
 import { pctStr, shortDate, toneOf, usd } from "@/lib/format";
 import { Card, CardHead, Chevron, DataLabel, Disclose, Pill, SourceRef } from "@/components/ui";
@@ -46,7 +47,8 @@ export default async function CompanyPage({ params, searchParams }: { params: Pr
     supabase.from("model_runs").select("id, computed_at, code_version, inputs, outputs").eq("kind", "research_filing_check").eq("inputs->>symbol", symbol).order("computed_at", { ascending: false }).limit(1).maybeSingle(),
   ]);
   const etf = isEtf(symbol);
-  const q = ws.quotes.get(symbol);
+  // The workspace only quotes holdings and benchmarks; a researched idea needs its own quote.
+  const q = ws.quotes.get(symbol) ?? (await getQuote(symbol).catch(() => null)) ?? undefined;
   const h = ws.portfolio.holdings.find((x) => x.symbol === symbol);
   const price = q?.price ?? h?.price ?? null;
   const day = q ? dayChangePct(q) : h?.dayPct ?? null;
