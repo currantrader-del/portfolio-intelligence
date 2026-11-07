@@ -81,3 +81,10 @@ it("scoreboard compares against VOO in dollars", () => {
 });
 
 it("builds OCC symbols", () => expect(occSymbol("nvda", "2026-12-18", "put", 142.5)).toBe("NVDA261218P00142500"));
+
+import { researched } from "./job";
+it("only records a search that actually researched", () => {
+  expect(researched([], 0)).toBe(false);
+  expect(researched([{ tool: "get_quote" }, { tool: "get_technicals" }], 0)).toBe(false);
+  expect(researched([{ tool: "get_quote" }, { tool: "get_technicals" }, { tool: "web_search" }], 1)).toBe(true);
+});

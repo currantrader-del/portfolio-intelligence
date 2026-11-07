@@ -60,7 +60,14 @@ Reply with exactly one JSON object in a \`\`\`json fenced block and nothing else
 }`;
 
 export function tradeQuestion(today: string, focus?: string | null) {
-  return `Today is ${today}. Look for the best short-term trade available now${focus ? `, starting with ${focus}` : " across my holdings, my researched companies and anything the market briefing points to"}. Propose at most two, and none unless one clearly clears the bar.`;
+  return `Today is ${today}. Look for the best short-term trade available now${focus ? `, starting with ${focus}` : " across my holdings, my researched companies and anything the market briefing points to"}. Propose at most two, and none unless one clearly clears the bar.
+
+Do the work before you answer; an answer without these steps is not accepted:
+1. get_briefing and get_pipeline to see what moved and what is researched.
+2. Shortlist 3 to 6 candidates${focus ? ` (${focus} first)` : ""}: holdings, researched companies, or names the briefing points to.
+3. For each: get_quote and get_technicals; get_research when it is on file.
+4. For the one or two most promising: web_search for the catalyst, its date and the consensus; get_filings for anything recent.
+5. Argue against your best case, then reply with the JSON. "No trade" is fine, but only after steps 1-4, and the none_reason must name what you checked.`;
 }
 
 const num = (v: unknown) => (typeof v === "number" && Number.isFinite(v) ? v : typeof v === "string" && v.trim() && Number.isFinite(Number(v)) ? Number(v) : null);
