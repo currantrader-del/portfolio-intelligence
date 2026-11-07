@@ -13,6 +13,7 @@ import { buildWorkspace } from "@/lib/workspace-core";
 import { save } from "@/lib/intel/jobs";
 import { DAILY_CAP, spentToday } from "@/lib/intel/start";
 import { WATCH_VERSION, formatPush, ideaAlerts, selectNew } from "./watch";
+import { checkTrades, describeIdea, type Trade } from "@/lib/trades/job";
 
 export type WatchSettings = { topic: string | null; enabled: boolean };
 export type WatchRun = {
@@ -72,9 +73,12 @@ async function summarize(items: Alert[], theses: Map<string, string>): Promise<{
  */
 export async function runWatch(db: SupabaseClient, origin: string, opts: { force?: boolean; now?: Date } = {}): Promise<WatchRun | { skipped: string }> {
   const now = opts.now ?? new Date();
-  const settings = await watchSettings(db);
-  if (!settings.enabled || !settings.topic) return { skipped: "phone alerts are off" };
   if (!opts.force && !isMarketOpen(now)) return { skipped: "market closed" };
+  // Paper trades are tracked whether or not phone alerts are on.
+  const closed = await checkTrades(db, now).catch((e) => { console.error(`watch: trade check failed: ${(e as Error).message}`); return []; });
+  const settings = await watchSettings(db);
+  if (closed.length && settings.enabled && settings.topic) await pushTradeNews(settings.topic, origin, closed, "closed").catch((e) => console.error(`watch: trade push failed: ${(e as Error).message}`));
+  if (!settings.enabled || !settings.topic) return { skipped: "phone alerts are off" };
 
   const ws = await buildWorkspace(db, now);
   const held = new Set(ws.portfolio.holdings.map((h) => h.symbol));
@@ -110,4 +114,17 @@ export async function sendTest(db: SupabaseClient, origin: string) {
   const s = await watchSettings(db);
   if (!s.topic) throw new Error("Turn phone alerts on first");
   await pushNtfy(s.topic, { title: "Portfolio Intelligence is connected", body: "This is a test. Real alerts arrive here during market hours, only when something needs a look.", priority: "default", click: `${origin}/alerts` });
+}
+
+const pct = (x: number | null) => (x === null ? "n/a" : `${x >= 0 ? "+" : ""}${(x * 100).toFixed(1)}%`);
+const STATUS = { target: "hit its target", stop: "hit its stop", ended: "reached its end date", open: "is open" } as const;
+
+/** Notifications for paper trades: a new idea, or one that closed. */
+export async function pushTradeNews(topic: string, origin: string, trades: Trade[], what: "new" | "closed") {
+  for (const t of trades.slice(0, 3)) {
+    const r = t.close?.result;
+    const title = what === "new" ? `Trade idea: ${t.idea.symbol} ${t.idea.option ? `${t.idea.option.type}` : "stock"} (${t.idea.confidence} confidence)` : `Paper trade ${t.idea.symbol} ${STATUS[r!.status]}: ${pct(r!.returnPct)} vs VOO ${pct(r!.vooPct)}`;
+    const body = what === "new" ? `${describeIdea(t.idea)}. ${t.idea.whyNow}`.slice(0, 600) : `${describeIdea(t.idea)}. ${r!.edgePct !== null ? `${r!.edgePct >= 0 ? "Beat" : "Trailed"} VOO by ${pct(Math.abs(r!.edgePct)).replace("+", "")}.` : ""}`;
+    await pushNtfy(topic, { title, body, priority: what === "new" ? "high" : "default", click: `${origin}/trades` });
+  }
 }
