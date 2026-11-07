@@ -2,7 +2,7 @@ import { shortDate, usd } from "@/lib/format";
 import { STAGES, type ScreenResult, type CheckStatus } from "@/lib/research/screen";
 import type { ResearchRecord } from "@/lib/research/records";
 import { runScreen, setStage } from "@/app/(app)/research/actions";
-import { coverage } from "@/lib/research/status";
+import { coverage, suggestStage } from "@/lib/research/status";
 import { Card, CardHead, Disclose, Pill } from "@/components/ui";
 
 const STATUS: Record<CheckStatus, { label: string; tone: "gain" | "warn" | "neutral" }> = {
@@ -22,11 +22,11 @@ export function ResearchSummary({ r, held, price, now, freshDays, error }: { r: 
   const stageLabel = STAGES.find((s) => s.key === stage)?.label ?? stage;
   const sc = r.pipeline.screen as ScreenResult | null;
 
+  const suggested = suggestStage({ stage, held, coverageKey: cov.key, hasResearch: !!v, action: v?.parsed.action ?? null, screenVerdict: sc?.verdict ?? null });
   const next: string[] = [];
   if (sc?.verdict === "Weak on screen" && !held) next.push("The screen is weak: consider passing, or note why it is still worth research.");
   if (!v) next.push("Run AI research before this can be compared for new money.");
   else if (cov.key !== "current") next.push("Refresh the research with AI before relying on its price ranges.");
-  else if (stage === "researching") next.push("Research is current: you can mark it Ready for decision.");
 
   return (
     <Card labelledBy="sum-h">
@@ -38,6 +38,15 @@ export function ResearchSummary({ r, held, price, now, freshDays, error }: { r: 
         {r.pipeline.note && <p className="t-xs">{r.pipeline.note}</p>}
       </div>
       {next.length > 0 && <p className="t-sm"><span className="text-ink font-semibold">Next: </span>{next.join(" ")}</p>}
+      {suggested && (
+        <form action={setStage} className="rounded-[12px] bg-surface-2 px-3 py-2.5 flex flex-wrap items-center justify-between gap-2">
+          <input type="hidden" name="symbol" value={r.symbol} />
+          <input type="hidden" name="stage" value={suggested.stage} />
+          <input type="hidden" name="note" value={`Suggested by the app: ${suggested.reason}`.slice(0, 500)} />
+          <span className="t-sm min-w-0"><span className="text-ink font-semibold">Suggested: {STAGES.find((x) => x.key === suggested.stage)?.label}</span> · {suggested.reason}</span>
+          <button className="btn btn-sm btn-primary shrink-0">Accept</button>
+        </form>
+      )}
 
       {sc && (
         <div className="border-t border-line">
