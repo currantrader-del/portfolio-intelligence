@@ -11,6 +11,7 @@ import { runAskJob } from "../../src/lib/assistant/jobs";
 import { runResearchJob } from "../../src/lib/research/aiResearchJob";
 import { runPlanJob, startPlan } from "../../src/lib/plan/job";
 import { runMorning } from "../../src/lib/intel/start";
+import { runWatch } from "../../src/lib/watch/job";
 
 /**
  * The owner's session for the scheduled morning run, which has no browser. The service key (server-only,
@@ -36,17 +37,19 @@ async function ownerToken(url: string, key: string) {
 export default async (req: Request) => {
   const body = (await req.json().catch(() => null)) as { job?: string; snapshotId?: string; requestId?: string; desk?: string; token?: string; secret?: string } | null;
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL, key = process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY;
-  if (body?.job === "morning") {
+  if (body?.job === "morning" || body?.job === "watch") {
+    const job = body.job;
     const secret = process.env.CRON_SECRET;
     const given = Buffer.from(String(body.secret ?? "")), want = Buffer.from(secret ?? "");
-    if (!secret || given.length !== want.length || !timingSafeEqual(given, want) || !url || !key) { console.error(`morning: ${!secret ? "CRON_SECRET is not set" : "secret did not match"}`); return; }
+    if (!secret || given.length !== want.length || !timingSafeEqual(given, want) || !url || !key) { console.error(`${job}: ${!secret ? "CRON_SECRET is not set" : "secret did not match"}`); return; }
     try {
       const token = await ownerToken(url, key);
       const db = createClient(url, key, { global: { headers: { Authorization: `Bearer ${token}` } }, auth: { persistSession: false, autoRefreshToken: false } });
-      const r = await runMorning(db, token, new URL(req.url).origin, (id) => runAskJob(db, id));
-      console.log(`morning: ${JSON.stringify(r)}`);
+      const origin = new URL(req.url).origin;
+      const r = job === "morning" ? await runMorning(db, token, origin, (id) => runAskJob(db, id)) : await runWatch(db, origin);
+      console.log(`${job}: ${JSON.stringify(r).slice(0, 2000)}`);
     } catch (e) {
-      console.error(`morning failed: ${(e as Error).message}`);
+      console.error(`${job} failed: ${(e as Error).message}`);
     }
     return;
   }
