@@ -162,7 +162,7 @@ export async function runSynthesisJob(db: SupabaseClient, snapshotId: string) {
 }
 
 /** Starts a background job on this site. Netlify answers 202 at once and runs it for up to 15 minutes. */
-export async function dispatchJob(origin: string, body: { job: "desk" | "synthesize"; snapshotId: string; desk?: DeskKey; token: string } | { job: "ask" | "research" | "plan"; requestId: string; token: string }) {
+export async function dispatchJob(origin: string, body: { job: "desk" | "synthesize"; snapshotId: string; desk?: DeskKey; token: string } | { job: "ask" | "research" | "plan" | "trades"; requestId: string; token: string }) {
   const res = await fetch(`${origin}${JOB_PATH}`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body), cache: "no-store", redirect: "manual", signal: AbortSignal.timeout(10000) });
   if (res.status >= 300 && res.status < 400) throw new Error(`Background job was redirected (HTTP ${res.status} to ${res.headers.get("location") ?? "?"})`);
   if (res.status !== 202 && !res.ok) throw new Error(`Background job did not start (HTTP ${res.status})`);
