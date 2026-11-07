@@ -34,7 +34,7 @@ describe("holdings freshness", () => {
 });
 
 describe("research freshness", () => {
-  it("IREN Sep 10 research is live within 120 days", () => {
+  it("AAA Sep 10 research is live within 120 days", () => {
     expect(freshness("research", new Date("2026-09-10T00:00:00Z"), now)).toBe("live");
   });
   it("is stale after 120 days", () => {

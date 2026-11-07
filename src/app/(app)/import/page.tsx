@@ -72,7 +72,7 @@ export default function ImportPage() {
   return (
     <div className="flex flex-col gap-6 max-w-3xl">
       <div>
-        <h1 className="font-serif text-3xl font-semibold">Import preserved research</h1>
+        <h1 className="h1">Import preserved research</h1>
         <p className="text-muted">Choose the ChatGPT files (JSON, Markdown and the two zips). Nothing is saved until you press Import. Running it twice is safe.</p>
       </div>
 

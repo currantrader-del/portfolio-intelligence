@@ -64,7 +64,7 @@ export async function applyPlan(
     const source_document_id = docIds.get(d.docKey)!;
     const { data: existing } = await db.from("decisions").select("id").eq("kind", "historical").eq("symbol", d.symbol).eq("source_document_id", source_document_id);
     if (existing?.length) continue;
-    const { error } = await db.from("decisions").insert({ owner_id, kind: "historical", symbol: d.symbol, decided_at: d.decided_at, recommendation: d.recommendation, source_document_id });
+    const { error } = await db.from("decisions").insert({ owner_id, kind: "historical", status: "historical", symbol: d.symbol, decided_at: d.decided_at, research_as_of: d.decided_at?.slice(0, 10) ?? null, imported_at: new Date().toISOString(), recommendation: d.recommendation, source_document_id });
     if (error) throw error;
   }
   log(`Saved ${plan.decisions.length} historical decisions`);

@@ -2,7 +2,11 @@ import { createServerClient } from "@supabase/ssr";
 import { cookies } from "next/headers";
 import { supabaseEnv } from "./env";
 
-export async function createClient() {
+import type { SupabaseClient } from "@supabase/supabase-js";
+import { FIXTURE, fixtureDb } from "@/lib/dev/fixture";
+
+export async function createClient(): Promise<SupabaseClient> {
+  if (FIXTURE) return fixtureDb() as unknown as SupabaseClient;
   const cookieStore = await cookies();
   const { url, key } = supabaseEnv();
   return createServerClient(url, key, {
