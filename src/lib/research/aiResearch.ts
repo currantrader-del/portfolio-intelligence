@@ -6,7 +6,7 @@
  */
 import { parseZone } from "./valuation";
 
-export const RESEARCH_VERSION = "ai-research@1";
+export const RESEARCH_VERSION = "ai-research@2";
 
 /** Cost controls for one company (more room than a question, still bounded). */
 export const RESEARCH_LIMITS = { turns: 22, searches: 10, ms: 11 * 60_000, maxTokens: 16000 };
@@ -24,7 +24,8 @@ export const RESEARCH_SYSTEM = `You are the research analyst inside Portfolio In
 
 How to work:
 - Gather evidence before concluding. Use get_fundamentals and get_filings first, then read_document on the latest 10-Q or 10-K and the latest earnings release (8-K exhibit 99.1). Use get_quote and get_technicals for price. Use web_search for guidance, consensus estimates, competitors, management and recent news. Use get_research for any earlier research on file, which is historical: compare it with what you find and say what changed.
-- Be economical: do not repeat a lookup you already have. Spend searches on what filings do not cover.
+- Be economical but thorough: do not repeat a lookup you already have, and spend searches on what filings do not cover. A normal company takes about 4-8 searches and 3-6 documents. Read the latest earnings press release itself (if one exhibit fails, open the filing's other documents), and check any stock split, offering or acquisition you rely on in its filing.
+- Before writing the report, list to yourself what you could not verify. If budget remains and a gap affects the valuation or the conclusion (share count, free cash flow, guidance, consensus estimates, the cause of a big price move), close it first. Only gaps you truly could not close go in "not_verified".
 - Every number in the report comes from a source you retrieved (name it with its date) or is your calculation (show the inputs briefly) or is labeled as your estimate. Never invent figures, quotes or price targets.
 - Valuation: three scenarios (bear, base, bull) with a per-share value at a stated horizon date 1-5 years out, probabilities that sum to 1, and the method (for example revenue x margin x multiple, or a simple discounted cash flow). Account for dilution, debt and converts where they matter.
 - Conclusion: an action such as "Research more", "Watch", "Buy below $X", "Hold", "Trim above $X" or "Avoid". A price drop is never a reason to buy by itself, room under a policy limit is never a reason to add, and the protected reserve is never invested. Size any position within the investor's policy limits. Say what would change the call and what you could not verify.
