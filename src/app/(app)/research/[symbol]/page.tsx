@@ -11,6 +11,8 @@ import { dayChangePct } from "@/lib/market/quotes";
 import { InvestmentSummary } from "@/components/TodayValuation";
 import { AskButton } from "@/components/AskPanel";
 import { FilingCheckCard, type StoredFilingCheck } from "@/components/FilingCheckCard";
+import { ResearchButton } from "@/components/ResearchButton";
+import { coverage } from "@/lib/research/status";
 import { pctStr, shortDate, toneOf, usd } from "@/lib/format";
 import { Card, CardHead, Chevron, DataLabel, Disclose, Pill, SourceRef } from "@/components/ui";
 
@@ -99,6 +101,7 @@ export default async function CompanyPage({ params, searchParams }: { params: Pr
         </div>
 
         <div className="lg:col-span-5 flex flex-col gap-3 lg:gap-4 min-w-0">
+          {!etf && <ResearchButton symbol={company.symbol} hasResearch={versions.length > 0} needsResearch={coverage(record, price, ws.now, ws.policy?.researchFreshnessDays ?? 120).key !== "current"} />}
           {versions.length > 0 && (
             <Card flush>
               <Disclose summary={`Your research · ${versions.length} record${versions.length > 1 ? "s" : ""}${phases ? `, ${phases} phases` : ""}`}>

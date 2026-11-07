@@ -8,6 +8,7 @@ import { createClient } from "@supabase/supabase-js";
 import { desksSettled, dispatchJob, runDeskJob, runSynthesisJob } from "../../src/lib/intel/jobs";
 import { DESKS, type DeskKey } from "../../src/lib/intel/desks";
 import { runAskJob } from "../../src/lib/assistant/jobs";
+import { runResearchJob } from "../../src/lib/research/aiResearchJob";
 import { runMorning } from "../../src/lib/intel/start";
 
 /**
@@ -57,6 +58,9 @@ export default async (req: Request) => {
     if (body.job === "ask" && body.requestId) {
       const id = await runAskJob(db, body.requestId);
       console.log(`intel job: answer saved ${id}`);
+    } else if (body.job === "research" && body.requestId) {
+      const id = await runResearchJob(db, body.requestId);
+      console.log(`intel job: research result saved ${id}`);
     } else if (body.job === "desk" && body.snapshotId && DESKS.some((d) => d.key === body.desk)) {
       const id = await runDeskJob(db, body.snapshotId, body.desk as DeskKey);
       console.log(`intel job: desk ${body.desk} saved ${id}`);
