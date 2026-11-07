@@ -24,6 +24,11 @@ export type Trade = {
   taken: { at: string; price: number | null; quantity: number | null; note: string } | null;
 };
 
+/** At least two price/trend lookups and one web search: the minimum for a decision worth recording. */
+export function researched(steps: { tool: string }[], searches: number) {
+  return steps.filter((s) => s.tool === "get_quote" || s.tool === "get_technicals").length >= 2 && searches >= 1;
+}
+
 export async function scanStatus(db: SupabaseClient) {
   const { data: req } = await db.from("model_runs").select("id, computed_at").eq("kind", "trade_request").order("computed_at", { ascending: false }).limit(1).maybeSingle();
   const { data: scan } = await db.from("model_runs").select("id, computed_at, inputs, outputs").eq("kind", "trade_scan").order("computed_at", { ascending: false }).limit(1).maybeSingle();
@@ -53,8 +58,16 @@ export async function runTradeScan(db: SupabaseClient, requestId: string, notify
   const ws = await buildWorkspace(db);
   const now = new Date();
   try {
-    const ans = await runAgent(db, ws, { question: tradeQuestion(etDay(now), focus), system: TRADE_SYSTEM, limits: TRADE_LIMITS, page: "/trades", symbol: focus });
-    const meta = { costUsd: ans.costUsd, ms: ans.ms, searches: ans.searches, model: ans.model };
+    const question = tradeQuestion(etDay(now), focus);
+    let ans = await runAgent(db, ws, { question, system: TRADE_SYSTEM, limits: TRADE_LIMITS, page: "/trades", symbol: focus });
+    let spent = { costUsd: ans.costUsd, ms: ans.ms };
+    // An answer that skipped the research is sent back once with the steps it missed.
+    if (!researched(ans.steps, ans.searches)) {
+      ans = await runAgent(db, ws, { question: "You answered without doing the research. Do steps 1-4 now with the tools (quotes and technicals for each candidate, a web search for the catalyst and its date), then reply with the JSON.", history: [{ role: "user", content: question }, { role: "assistant", content: ans.answer || "(no answer)" }], system: TRADE_SYSTEM, limits: TRADE_LIMITS, page: "/trades", symbol: focus });
+      spent = { costUsd: spent.costUsd + ans.costUsd, ms: spent.ms + ans.ms };
+    }
+    const meta = { ...spent, searches: ans.searches, model: ans.model };
+    if (!researched(ans.steps, ans.searches)) return out({ ok: false, error: "The search did not research any candidates; nothing was decided. Try again.", ideaIds: [], rejected: [], noneReason: null, ...meta });
     const json = extractJson(ans.answer) as { ideas?: unknown[]; none_reason?: string | null } | null;
     if (!json || !Array.isArray(json.ideas)) return out({ ok: false, error: `The answer was not in the expected format${ans.stopped ? ` (stopped: ${ans.stopped})` : ""}`, ideaIds: [], rejected: [], noneReason: null, ...meta });
     const raws = json.ideas.slice(0, 2);
@@ -71,7 +84,7 @@ export async function runTradeScan(db: SupabaseClient, requestId: string, notify
       ideaIds.push(id);
       made.push({ id, at: entry.at, idea: v.idea, entry, close: null, taken: null });
     }
-    const id = await out({ ok: true, ideaIds, rejected, noneReason: typeof json.none_reason === "string" ? json.none_reason.slice(0, 600) : null, ...meta });
+    const id = await out({ ok: true, ideaIds, rejected, noneReason: typeof json.none_reason === "string" ? json.none_reason.slice(0, 1500) : null, ...meta });
     if (made.length && notify) await notify(made).catch((e) => console.error(`trades: notify failed: ${(e as Error).message}`));
     return id;
   } catch (e) {
