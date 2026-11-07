@@ -3,6 +3,7 @@
 import { redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
+import { save } from "@/lib/intel/jobs";
 
 /**
  * Makes one rule the approved rule for its subject. Every other live rule for that subject becomes
@@ -63,4 +64,13 @@ export async function addRule(formData: FormData) {
   fd.set("rule_id", data.id);
   fd.set("note", reason);
   return approveRule(fd);
+}
+
+/** Saves the investor's profile as a new version (earlier versions are kept). */
+export async function saveProfile(formData: FormData) {
+  const text = String(formData.get("text") ?? "").trim().slice(0, 3000);
+  const db = await createClient();
+  await save(db, "investor_profile", "profile@1", {}, { text });
+  revalidatePath("/policy");
+  redirect("/policy?saved=profile#profile");
 }

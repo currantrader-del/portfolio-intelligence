@@ -2,7 +2,9 @@ import Link from "next/link";
 import { getWorkspace } from "@/lib/workspace";
 import { Tag } from "@/components/Tag";
 import type { PolicyRuleRow, SubjectAudit } from "@/lib/policy/rules";
-import { addRule, approveRule } from "./actions";
+import { addRule, approveRule, saveProfile } from "./actions";
+import { createClient } from "@/lib/supabase/server";
+import { loadProfile } from "@/lib/profile";
 
 const p = (v: number | string | null) => (v === null || v === undefined ? "—" : `${+(Number(v) * 100).toFixed(2)}%`);
 const rng = (lo: number | string | null, hi: number | string | null) => (lo === null || hi === null ? "—" : `${p(lo)}–${p(hi)}`);
@@ -54,7 +56,7 @@ function ConflictCard({ s }: { s: SubjectAudit }) {
 
 export default async function PolicyPage({ searchParams }: { searchParams: Promise<{ saved?: string }> }) {
   const sp = await searchParams;
-  const ws = await getWorkspace();
+  const [ws, profile] = await Promise.all([getWorkspace(), createClient().then(loadProfile)]);
   const audit = ws.policy?.audit;
   if (!audit) {
     return <section className="bg-surface border border-line rounded-2xl p-6"><h1 className="h1">Policy</h1><p className="text-ink-2 mt-2">No versioned rules loaded yet.</p></section>;
@@ -70,7 +72,16 @@ export default async function PolicyPage({ searchParams }: { searchParams: Promi
         <h1 className="h1 mt-1">Investment policy</h1>
         <p className="text-muted text-sm">Every limit from every version of your policy and research, with its source and status. Nothing is deleted; changes supersede.</p>
       </div>
-      {sp.saved && <p className="rounded-xl bg-accent-soft px-4 py-2 text-sm">Saved. {sp.saved} now uses the rule you approved.</p>}
+      {sp.saved && <p className="rounded-xl bg-accent-soft px-4 py-2 text-sm">{sp.saved === "profile" ? "Saved. Every AI answer, research and plan now reads your updated profile." : `Saved. ${sp.saved} now uses the rule you approved.`}</p>}
+
+      <section id="profile" aria-labelledby="p-h" className="bg-surface border border-line rounded-2xl p-5 flex flex-col gap-3">
+        <h2 id="p-h" className="text-lg font-semibold">About you and your goals</h2>
+        <p className="text-sm text-muted">In your own words: your situation, what you are trying to beat, how much risk you accept, and how you want to trade. The assistant, research and plan read this every time.{profile.updatedAt ? ` Last changed ${profile.updatedAt.slice(0, 10)}.` : ""}</p>
+        <form action={saveProfile} className="flex flex-col gap-2">
+          <textarea name="text" defaultValue={profile.text} rows={9} maxLength={3000} className="w-full rounded-[12px] bg-surface-2 border border-line px-3 py-2 text-[15px] leading-relaxed" placeholder="Age, work and income, goals, what you compare against, how often you want to trade..." />
+          <div><button className="btn btn-sm btn-primary">Save</button></div>
+        </form>
+      </section>
 
       <section aria-labelledby="c-h" className="flex flex-col gap-3">
         <h2 id="c-h" className="text-lg font-semibold">{audit.conflicts.length ? `${audit.conflicts.length} unresolved conflict${audit.conflicts.length > 1 ? "s" : ""}` : "No unresolved conflicts"}</h2>
