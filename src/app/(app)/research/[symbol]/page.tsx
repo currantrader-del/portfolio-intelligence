@@ -62,11 +62,16 @@ export default async function CompanyPage({ params, searchParams }: { params: Pr
     return (
       <div className="flex flex-col gap-3 lg:gap-4 max-w-3xl">
         <Header symbol={symbol} name={null} kicker={`${symbol} · not in your research yet`} price={price} day={day} />
-        <form action={addToPipeline} className="card">
-          <input type="hidden" name="symbol" value={symbol} />
-          <label className="field">Why it is interesting (optional)<input name="note" maxLength={300} className="input" /></label>
-          <button className="btn btn-primary self-start">Add to pipeline</button>
-        </form>
+        {!etf && <ResearchButton symbol={symbol} hasResearch={false} needsResearch />}
+        <Card flush>
+          <Disclose summary={<span className="t-sm">Add to your list without researching</span>}>
+            <form action={addToPipeline} className="flex flex-col gap-2">
+              <input type="hidden" name="symbol" value={symbol} />
+              <label className="field">Why it is interesting (optional)<input name="note" maxLength={300} className="input" /></label>
+              <button className="btn btn-sm self-start">Add to pipeline</button>
+            </form>
+          </Disclose>
+        </Card>
         {!etf && <Suspense fallback={<FeedSkeleton title="Reported financials" />}><FundamentalsCard symbol={symbol} /></Suspense>}
         {feeds(null)}
       </div>
@@ -140,7 +145,13 @@ export default async function CompanyPage({ params, searchParams }: { params: Pr
           {record && !etf && (
             <ResearchSummary r={record} held={held} price={price} now={ws.now} freshDays={ws.policy?.researchFreshnessDays ?? 120} error={sp.error ? ERRORS[sp.error] : undefined} />
           )}
-          {!etf && versions.length > 0 && <FilingCheckCard symbol={company.symbol} run={(lastCheck as StoredFilingCheck | null) ?? null} />}
+          {!etf && versions.length > 0 && (
+            <Card flush>
+              <Disclose summary={<span className="t-sm">SEC filing check <span className="t-xs">· optional, AI research covers it</span></span>}>
+                <FilingCheckCard symbol={company.symbol} run={(lastCheck as StoredFilingCheck | null) ?? null} />
+              </Disclose>
+            </Card>
+          )}
           {feeds(company.name)}
           <div className="flex gap-2">
             <AskButton question={`What has to be true for ${company.symbol} to reach the base case, and what would break the thesis?`} className="btn flex-1">Ask about the thesis</AskButton>

@@ -23,10 +23,9 @@ export function ResearchSummary({ r, held, price, now, freshDays, error }: { r: 
   const sc = r.pipeline.screen as ScreenResult | null;
 
   const next: string[] = [];
-  if (!sc) next.push("Run the screen to check the basics from SEC data.");
-  else if (sc.verdict === "Weak on screen" && !held) next.push("The screen is weak: consider passing, or note why it is still worth research.");
-  if (!v) next.push(sc?.verdict === "Worth researching" ? "Start full research (business, moat, financials, valuation, risks)." : "Research is needed before this can be compared for new money.");
-  else if (cov.key !== "current") next.push("Refresh the research before relying on its price ranges.");
+  if (sc?.verdict === "Weak on screen" && !held) next.push("The screen is weak: consider passing, or note why it is still worth research.");
+  if (!v) next.push("Run AI research before this can be compared for new money.");
+  else if (cov.key !== "current") next.push("Refresh the research with AI before relying on its price ranges.");
   else if (stage === "researching") next.push("Research is current: you can mark it Ready for decision.");
 
   return (
@@ -35,7 +34,7 @@ export function ResearchSummary({ r, held, price, now, freshDays, error }: { r: 
       {error && <p role="alert" className="t-sm rounded-[12px] bg-warn-bg text-warn-ink px-3 py-2">{error}</p>}
       <div className="flex flex-col gap-1.5 t-sm">
         <div className="flex justify-between gap-3"><span>Stage</span><span className="text-ink text-right">{stageLabel}{r.pipeline.stageUpdatedAt ? <span className="t-xs"> · since {shortDate(r.pipeline.stageUpdatedAt)}</span> : null}</span></div>
-        <div className="flex justify-between gap-3"><span>Screen</span><span className="text-right">{sc ? <Pill small tone={VERDICT_TONE[sc.verdict]}>{sc.verdict}</Pill> : <span className="text-ink">Not run yet</span>}</span></div>
+        <div className="flex justify-between gap-3"><span>Screen</span><span className="text-right">{sc ? <Pill small tone={VERDICT_TONE[sc.verdict]}>{sc.verdict}</Pill> : <span className="text-ink">Runs with AI research</span>}</span></div>
         {r.pipeline.note && <p className="t-xs">{r.pipeline.note}</p>}
       </div>
       {next.length > 0 && <p className="t-sm"><span className="text-ink font-semibold">Next: </span>{next.join(" ")}</p>}
@@ -56,30 +55,32 @@ export function ResearchSummary({ r, held, price, now, freshDays, error }: { r: 
               <div className="t-sm"><div className="text-ink font-semibold mb-1">To verify in research</div><ul className="list-disc pl-5 flex flex-col gap-0.5">{sc.toVerify.map((t) => <li key={t}>{t}</li>)}</ul></div>
             )}
             <p className="t-xs">At {sc.price != null ? usd(sc.price, 2) : "—"} · SEC data through {sc.dataThrough ? shortDate(sc.dataThrough) : "—"} · screened {shortDate(r.pipeline.screenedAt)}. Screening defaults, not your policy: revenue growth 10%+, positive operating profit and free cash flow, debt below cash, share count up no more than 2%, price to sales up to 10×. A screen decides what to research; it is never a buy signal.</p>
+            <form action={runScreen}>
+              <input type="hidden" name="symbol" value={r.symbol} />
+              <button className="btn btn-sm">Screen again</button>
+            </form>
           </Disclose>
         </div>
       )}
 
-      <div className="flex flex-col gap-2.5 border-t border-line pt-3">
-        <form action={runScreen}>
-          <input type="hidden" name="symbol" value={r.symbol} />
-          <button className="btn btn-sm">{sc ? "Screen again" : "Run screen"}</button>
-        </form>
-        {!held && (
-          <form action={setStage} className="flex flex-col gap-2">
-            <input type="hidden" name="symbol" value={r.symbol} />
-            <div className="grid grid-cols-2 gap-2">
-              <label className="field">Move to
-                <select name="stage" defaultValue={stage} className="input">
-                  {STAGES.filter((s) => s.key !== "owned").map((s) => <option key={s.key} value={s.key}>{s.label}</option>)}
-                </select>
-              </label>
-              <label className="field">Note (needed to pass)<input name="note" maxLength={500} className="input" /></label>
-            </div>
-            <button className="btn btn-sm self-start">Save stage</button>
-          </form>
-        )}
-      </div>
+      {!held && (
+        <div className="border-t border-line">
+          <Disclose summary={<span className="t-sm">Change stage</span>}>
+            <form action={setStage} className="flex flex-col gap-2">
+              <input type="hidden" name="symbol" value={r.symbol} />
+              <div className="grid grid-cols-2 gap-2">
+                <label className="field">Move to
+                  <select name="stage" defaultValue={stage} className="input">
+                    {STAGES.filter((s) => s.key !== "owned").map((s) => <option key={s.key} value={s.key}>{s.label}</option>)}
+                  </select>
+                </label>
+                <label className="field">Note (needed to pass)<input name="note" maxLength={500} className="input" /></label>
+              </div>
+              <button className="btn btn-sm self-start">Save stage</button>
+            </form>
+          </Disclose>
+        </div>
+      )}
     </Card>
   );
 }
