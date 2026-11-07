@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { toResearchRecord } from "./records";
-import { coverage } from "./status";
+import { coverage, suggestStage } from "./status";
 
 // Synthetic data only.
 const now = new Date("2026-11-06T16:00:00Z");
@@ -33,5 +33,25 @@ describe("research coverage label", () => {
   });
   it("reports no research when nothing is on file", () => {
     expect(coverage(undefined, 100, now, 120).key).toBe("none");
+  });
+});
+
+describe("suggested stage", () => {
+  const base = { stage: "researching", held: false, coverageKey: "current" as const, hasResearch: true, action: "Watch below $60", screenVerdict: "Mixed" };
+  it("suggests Ready when research is complete and current", () => {
+    expect(suggestStage(base)?.stage).toBe("ready");
+    expect(suggestStage({ ...base, stage: "ready" })).toBeNull();
+  });
+  it("suggests Passed when the research says avoid, with the reason", () => {
+    expect(suggestStage({ ...base, action: "Avoid at this price" })).toMatchObject({ stage: "passed", reason: "The research says: Avoid at this price" });
+  });
+  it("keeps stale research in Researching and moves screened ideas along", () => {
+    expect(suggestStage({ ...base, stage: "ready", coverageKey: "refresh" })?.stage).toBe("researching");
+    expect(suggestStage({ ...base, stage: "idea", hasResearch: false, coverageKey: "none" })?.stage).toBe("screening");
+    expect(suggestStage({ ...base, stage: "idea", hasResearch: false, coverageKey: "none", screenVerdict: "Weak on screen" })?.stage).toBe("passed");
+  });
+  it("never second-guesses holdings or a pass", () => {
+    expect(suggestStage({ ...base, held: true })).toBeNull();
+    expect(suggestStage({ ...base, stage: "passed" })).toBeNull();
   });
 });
