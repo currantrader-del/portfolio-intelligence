@@ -44,7 +44,7 @@ export async function spentToday(db: SupabaseClient, now = new Date()) {
 }
 
 /** Daily cost controls (US dollars). */
-export const DAILY_CAP = { answers: 3, total: 5 };
+export const DAILY_CAP = { answers: 15, total: 20 };
 
 /**
  * The scheduled morning run: today's briefing first, then the assistant's answer to MORNING_QUESTION,
