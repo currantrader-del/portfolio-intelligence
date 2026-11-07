@@ -8,6 +8,7 @@ export const SECTIONS = [
 ] as const;
 
 export const MORE = [
+  { href: "/plan", label: "Portfolio plan" },
   { href: "/assistant", label: "Your questions" },
   { href: "/markets", label: "Markets briefing" },
   { href: "/brief", label: "Daily brief" },
@@ -25,6 +26,7 @@ const TITLES: [RegExp, string][] = [
   [/^\/brief/, "Brief"],
   [/^\/markets/, "Markets"],
   [/^\/policy/, "Policy"],
+  [/^\/plan/, "Plan"],
   [/^\/import/, "Import"],
 ];
 

@@ -9,6 +9,7 @@ import { desksSettled, dispatchJob, runDeskJob, runSynthesisJob } from "../../sr
 import { DESKS, type DeskKey } from "../../src/lib/intel/desks";
 import { runAskJob } from "../../src/lib/assistant/jobs";
 import { runResearchJob } from "../../src/lib/research/aiResearchJob";
+import { runPlanJob, startPlan } from "../../src/lib/plan/job";
 import { runMorning } from "../../src/lib/intel/start";
 
 /**
@@ -61,6 +62,12 @@ export default async (req: Request) => {
     } else if (body.job === "research" && body.requestId) {
       const id = await runResearchJob(db, body.requestId);
       console.log(`intel job: research result saved ${id}`);
+      // New research changes the plan: rebuild it (skipped when a rebuild is already running).
+      const { data: r } = await db.from("model_runs").select("outputs->>ok").eq("id", id).maybeSingle();
+      if ((r as { ok?: string } | null)?.ok === "true") await startPlan(db, origin, body.token, "research").catch((e) => console.error(`intel job: plan did not start: ${(e as Error).message}`));
+    } else if (body.job === "plan" && body.requestId) {
+      const id = await runPlanJob(db, body.requestId);
+      console.log(`intel job: plan saved ${id}`);
     } else if (body.job === "desk" && body.snapshotId && DESKS.some((d) => d.key === body.desk)) {
       const id = await runDeskJob(db, body.snapshotId, body.desk as DeskKey);
       console.log(`intel job: desk ${body.desk} saved ${id}`);

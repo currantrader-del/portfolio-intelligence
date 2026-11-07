@@ -157,6 +157,22 @@ function tables(): Record<string, Record<string, unknown>[]> {
       { id: "d1", kind: "historical", symbol: "ACME", decided_at: ago(60) + "T15:00:00Z", recommendation: { action: "HOLD / NO ADD", summary: "Hold; add only below the research band.", prices_at_decision: { ACME: 150, SPY: 640 } }, user_action: null, user_note: null, status: null, research_as_of: ago(60), imported_at: ago(2) + "T10:00:00Z", execution: null },
       { id: "d2", kind: "new_capital", symbol: null, decided_at: ago(9) + "T15:00:00Z", recommendation: { action: "WAIT / REVIEW", summary: "Two checks open; kept in cash.", prices_at_decision: { VOO: 600, SPY: 655 }, to_verify: ["Enter savings balance"] }, user_action: "deferred", user_note: "Waiting for savings figure", status: "wait_review", research_as_of: null, imported_at: null, execution: null },
     ],
+    model_runs: [
+      { id: "plan-1", kind: "portfolio_plan", computed_at: ago(1) + "T14:05:00Z", inputs: { request_id: "pr-1", trigger: "research" }, outputs: { ok: true, trigger: "research", costUsd: 0.31, ms: 70000, searches: 0, model: "sample", plan: {
+        summary: "Keep the index core and hold the stocks you own. CRWN is above its limit, so let new cash go to the index until it drifts back. ACME is the one idea worth adding, but only below $40.",
+        market: { stance: "Neutral", shortTerm: "Breadth is mixed and volatility is low; no strong signal.", longTerm: "Earnings growth is intact; valuations are full." },
+        positions: [
+          { symbol: "CRWN", status: "held", currentPct: 10.8, targetPct: 10, maxPct: 12, action: "Hold, no add", priority: 1, reason: "Near its limit after a strong run; research is 41 days old.", researchAsOf: ago(41), flags: [] },
+          { symbol: "VOO", status: "held", currentPct: 52.3, targetPct: 55, maxPct: null, action: "Default home for new cash", priority: 1, reason: "Core holding; no company research needed.", researchAsOf: null, flags: [] },
+          { symbol: "ACME", status: "idea", currentPct: 0, targetPct: 3, maxPct: 5, action: "Add below $40", priority: 2, reason: "Good business, fairly priced today.", researchAsOf: ago(3), flags: [] },
+          { symbol: "BOLT", status: "held", currentPct: 4.1, targetPct: null, maxPct: 7, action: "Refresh research first", priority: 2, reason: "Price is 22% below the research reference.", researchAsOf: ago(70), flags: [] },
+        ],
+        cash: { deployable: 1956, now: "Put $1,000 into VOO; keep the rest for ACME below $40.", waitFor: "ACME below $40, or BOLT research refreshed." },
+        stale: [{ symbol: "BOLT", why: "Price moved 22% from its research reference" }],
+        nextActions: ["Refresh BOLT research", "Move $1,000 of cash into VOO", "Set a watch for ACME at $40"],
+        problems: [],
+      } } },
+    ],
     portfolio_daily: [
       { as_of: ago(2), investable: 31800, invested: 29900, cash: 1956, net_worth_tracked: 41800, spy_close: 660, quality: "estimated", holdings_as_of: old },
       { as_of: ago(1), investable: 32050, invested: 30100, cash: 1956, net_worth_tracked: 42050, spy_close: 664.9, quality: "estimated", holdings_as_of: old },
