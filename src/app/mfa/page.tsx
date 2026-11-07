@@ -37,7 +37,7 @@ export default function MfaPage() {
   return (
     <main className="min-h-screen grid place-items-center px-4">
       <form onSubmit={onSubmit} className="w-full max-w-sm bg-surface border border-line rounded-2xl p-8 flex flex-col gap-4">
-        <h1 className="font-serif text-2xl font-semibold">Two-factor verification</h1>
+        <h1 className="h1">Two-factor verification</h1>
         {mode.kind === "verify" && <p className="text-sm text-muted">Enter the 6-digit code from your authenticator app.</p>}
         {mode.kind === "loading" && !error && <p className="text-sm text-muted">Loading…</p>}
         <label className="flex flex-col gap-1 text-sm">

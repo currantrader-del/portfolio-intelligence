@@ -25,7 +25,7 @@ export default function LoginPage() {
   return (
     <main className="min-h-screen grid place-items-center px-4">
       <form onSubmit={onSubmit} className="w-full max-w-sm bg-surface border border-line rounded-2xl p-8 flex flex-col gap-4">
-        <h1 className="font-serif text-2xl font-semibold">Portfolio Intelligence</h1>
+        <h1 className="h1">Portfolio Intelligence</h1>
         <p className="text-sm text-muted">Sign in to continue.</p>
         <label className="flex flex-col gap-1 text-sm">
           Email

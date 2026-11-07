@@ -1,20 +1,27 @@
-import { AppHeader } from "@/components/AppHeader";
-import { FreshnessDot } from "@/components/FreshnessDot";
-import { createClient } from "@/lib/supabase/server";
-import { ageLabel, freshness } from "@/lib/freshness";
+import { Suspense } from "react";
+import { Sidebar, TabBar, TopBar } from "@/components/shell/Shell";
+import { Status } from "@/components/shell/Status";
+import { AskPanel } from "@/components/AskPanel";
 
-export default async function AppLayout({ children }: { children: React.ReactNode }) {
-  const supabase = await createClient();
-  const { data } = await supabase.from("holding_snapshots").select("as_of").order("as_of", { ascending: false }).limit(1);
-  const asOf = data?.[0]?.as_of ? new Date(data[0].as_of) : null;
-  const now = new Date();
-  const state = freshness("holdings", asOf, now);
-  const label = asOf ? `Holdings ${ageLabel(asOf, now)} · prices not connected yet` : "No holdings connected yet";
+export const dynamic = "force-dynamic";
 
+/**
+ * The shell renders immediately: nothing here waits for data. The price status streams in,
+ * and each page shows its own loading skeleton while its data arrives.
+ */
+export default function AppLayout({ children }: { children: React.ReactNode }) {
+  const status = <Suspense fallback={null}><Status /></Suspense>;
   return (
-    <>
-      <AppHeader freshness={<FreshnessDot state={state} label={label} />} />
-      <main className="mx-auto max-w-[1280px] px-4 sm:px-8 py-7">{children}</main>
-    </>
+    <div className="flex min-h-dvh">
+      <Sidebar status={status} />
+      <div className="flex-1 min-w-0 flex flex-col">
+        <TopBar status={status} />
+        <main className="w-full max-w-[1200px] mx-auto px-4 lg:px-8 pt-4 lg:pt-6 pb-[calc(var(--tabbar-h)+env(safe-area-inset-bottom)+88px)] lg:pb-10">
+          {children}
+        </main>
+      </div>
+      <TabBar />
+      <AskPanel />
+    </div>
   );
 }

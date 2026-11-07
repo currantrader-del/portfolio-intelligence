@@ -4,3 +4,8 @@
 
 [build.environment]
   NODE_VERSION = "22"
+
+# Our own functions (the briefing's background job) live here, next to the Next.js runtime.
+[functions]
+  directory = "netlify/functions"
+  node_bundler = "esbuild"
