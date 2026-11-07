@@ -8,19 +8,22 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import type { Workspace } from "@/lib/workspace-core";
 import { researchAgeDays } from "@/lib/research/records";
 import type { Briefing } from "@/lib/intel/jobs";
+import { loadProfile } from "@/lib/profile";
 
 const pct = (x: number | null | undefined, d = 1) => (x == null ? "n/a" : `${(x * 100).toFixed(d)}%`);
 const usd = (x: number | null | undefined) => (x == null ? "not entered" : `$${Math.round(x).toLocaleString("en-US")}`);
 
 export async function investorContext(ws: Workspace, db: SupabaseClient): Promise<{ text: string; briefingId: string | null }> {
   const p = ws.portfolio;
-  const [{ data: decisions }, { data: brief }] = await Promise.all([
+  const [{ data: decisions }, { data: brief }, profile] = await Promise.all([
     db.from("decisions").select("kind, symbol, decided_at, status, user_action, recommendation").order("decided_at", { ascending: false }).limit(8),
     db.from("model_runs").select("id, computed_at, outputs").eq("kind", "market_briefing").order("computed_at", { ascending: false }).limit(1).maybeSingle(),
+    loadProfile(db),
   ]);
   const c = p.cashDetail;
   const lines: string[] = [];
   lines.push(`Now: ${ws.now.toISOString()} (US market ${ws.marketOpen ? "open" : "closed"}).`);
+  if (profile.text) lines.push(`\nINVESTOR PROFILE AND GOALS (their own words; judge every recommendation against these)\n${profile.text.slice(0, 3000)}`);
   lines.push(`\nPORTFOLIO (${p.quality.status === "verified" ? "verified holdings" : `ESTIMATED: ${p.quality.headline}`})`);
   lines.push(`Investable capital ${usd(p.total)}. Cash: brokerage ${usd(c.brokerage)}; savings ${usd(c.savings)}; protected reserve ${usd(c.protectedReserve)} (never invest it; excluded from percentages). Today ${pct(p.dayPct, 2)} (${usd(p.dayDollar)}).`);
   lines.push(`Accounts: ${p.accounts.map((a) => `${a.name} (${a.role ?? "role not set"}; statement ${a.asOf}, ${a.ageDays} days old${a.tradesAfter ? `, ${a.tradesAfter} trades recorded since` : ""})`).join("; ")}.`);
