@@ -2,6 +2,7 @@
  * Starting a briefing: market snapshot (code), the desk plan, and the desk jobs. Used by the
  * Markets page (signed-in user) and by the morning schedule (intel-cron), so both run the same steps.
  */
+import { startPlan } from "@/lib/plan/job";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { buildWorkspace } from "@/lib/workspace-core";
 import { takeSnapshot } from "./snapshot";
@@ -32,7 +33,7 @@ export async function startBriefing(db: SupabaseClient, token: string, origin: s
 /** What has been spent today (UTC) on briefings, and on assistant answers plus company research (one shared bucket), from the stored rows. */
 export async function spentToday(db: SupabaseClient, now = new Date()) {
   const since = `${now.toISOString().slice(0, 10)}T00:00:00Z`;
-  const { data } = await db.from("model_runs").select("kind, outputs->>costUsd").in("kind", ["market_briefing", "assistant_answer", "research_result"]).gte("computed_at", since);
+  const { data } = await db.from("model_runs").select("kind, outputs->>costUsd").in("kind", ["market_briefing", "assistant_answer", "research_result", "portfolio_plan"]).gte("computed_at", since);
   let briefings = 0, answers = 0;
   for (const r of (data ?? []) as { kind: string; costUsd: string | null }[]) {
     const c = Number(r.costUsd ?? 0) || 0;
@@ -59,7 +60,12 @@ export async function runMorning(db: SupabaseClient, token: string, origin: stri
   }
   const requestId = await save(db, "assistant_request", AGENT_VERSION, { question: MORNING_QUESTION, mode: "app", purpose: "morning" }, {});
   const answerId = await ask(requestId);
-  return { briefing: "error" in b ? null : b.snapshotId, requestId, answerId };
+  // The portfolio plan is rebuilt weekly (Mondays), after the briefing it reads.
+  let plan: string | null = null;
+  if (new Intl.DateTimeFormat("en-US", { timeZone: "America/New_York", weekday: "short" }).format(new Date()) === "Mon") {
+    plan = await startPlan(db, origin, token, "weekly").catch((e) => { console.error(`morning: plan did not start: ${(e as Error).message}`); return null; });
+  }
+  return { briefing: "error" in b ? null : b.snapshotId, requestId, answerId, plan };
 }
 
 export const MORNING_QUESTION ="Morning briefing. Using today's market briefing and my portfolio: what happened in markets and the world, and why it matters; where short-term and long-term conditions appear to be heading and what changed in that view; what changed for my specific holdings (filings, results, research that needs reassessment); what deserves my attention; what actions, if any, are justified (including holding cash); and which opportunities warrant more research. Lead with the conclusions in a few lines, then the explanation.";

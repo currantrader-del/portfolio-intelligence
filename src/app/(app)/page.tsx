@@ -58,7 +58,8 @@ export default async function TodayPage() {
     <div className="flex flex-col gap-3 lg:gap-4">
       <PageHeader kicker={dateLabel} title="Today" actions={
         <>
-          <Link href="/brief?period=week" className="btn btn-sm lg:min-h-11 lg:px-4 lg:text-[15px]">Weekly brief</Link>
+          <Link href="/plan" className="btn btn-sm lg:min-h-11 lg:px-4 lg:text-[15px]">Your plan</Link>
+          <Link href="/brief?period=week" className="btn btn-sm lg:min-h-11 lg:px-4 lg:text-[15px] max-lg:hidden">Weekly brief</Link>
           <Link href="/brief" className="btn btn-sm lg:min-h-11 lg:px-4 lg:text-[15px] max-lg:hidden">Daily brief</Link>
         </>
       } />
