@@ -46,6 +46,33 @@ export default async function PlanPage() {
             )}
           </Card>
 
+          {(plan.opportunities?.length ?? 0) > 0 && (
+            <Card labelledBy="pl-opp" className="!gap-0" flush>
+              <div className="px-4 pt-4 pb-2 lg:px-5"><CardHead id="pl-opp" title="Opportunities" right={<span className="t-xs">Ready for decision, vs VOO</span>} /></div>
+              <ul className="flex flex-col">
+                {plan.opportunities.map((o) => (
+                  <li key={o.symbol} className="border-t border-line">
+                    <Disclose summary={
+                      <span className="flex items-center justify-between gap-2 w-full min-w-0">
+                        <span className="flex items-center gap-2 min-w-0">
+                          <span className="text-ink font-semibold">{o.symbol}</span>
+                          <Pill small tone={o.verdict === "Buy now" ? "gain" : o.verdict === "Wait for price" ? "warn" : "neutral"}>{o.verdict}</Pill>
+                        </span>
+                        <span className="t-sm num shrink-0">{o.verdict === "Buy now" && o.amountUsd ? money(o.amountUsd) : o.buyBelow ? `below $${o.buyBelow}` : ""}</span>
+                      </span>
+                    }>
+                      <div className="flex flex-col gap-1.5 t-sm">
+                        <p>{o.reason}</p>
+                        {(o.expectedReturn || o.vsVoo) && <p className="t-xs">{o.expectedReturn ? `Expected ${o.expectedReturn}` : ""}{o.expectedReturn && o.vsVoo ? " · " : ""}{o.vsVoo ? `vs VOO: ${o.vsVoo}` : ""}{o.buyBelow ? ` · buy below $${o.buyBelow}` : ""}</p>}
+                        <Link href={`/research/${o.symbol}`} className="t-sm">Open {o.symbol}</Link>
+                      </div>
+                    </Disclose>
+                  </li>
+                ))}
+              </ul>
+            </Card>
+          )}
+
           <Card labelledBy="pl-pos" className="!gap-0" flush>
             <div className="px-4 pt-4 pb-2 lg:px-5"><CardHead id="pl-pos" title="Positions" right={<span className="t-xs">now → target</span>} /></div>
             <ul className="flex flex-col">

@@ -177,6 +177,7 @@ function tables(): Record<string, Record<string, unknown>[]> {
           { symbol: "ACME", status: "idea", currentPct: 0, targetPct: 3, maxPct: 5, action: "Add below $40", priority: 2, reason: "Good business, fairly priced today.", researchAsOf: ago(3), flags: [] },
           { symbol: "BOLT", status: "held", currentPct: 4.1, targetPct: null, maxPct: 7, action: "Refresh research first", priority: 2, reason: "Price is 22% below the research reference.", researchAsOf: ago(70), flags: [] },
         ],
+        opportunities: [{ symbol: "ACME", verdict: "Wait for price", buyBelow: 40, amountUsd: 750, expectedReturn: "about 11% a year", vsVoo: "+4 pts if bought below $40; even at today's price", reason: "Good business, fairly priced today; the research only beats VOO with a margin below $40." }],
         cash: { deployable: 1956, now: "Put $1,000 into VOO; keep the rest for ACME below $40.", waitFor: "ACME below $40, or BOLT research refreshed." },
         stale: [{ symbol: "BOLT", why: "Price moved 22% from its research reference" }],
         nextActions: ["Refresh BOLT research", "Move $1,000 of cash into VOO", "Set a watch for ACME at $40"],
