@@ -36,13 +36,13 @@ async function saveRun(db: Awaited<ReturnType<typeof createClient>>, kind: strin
 }
 
 /** Re-runs the calculation on the server (never trusts numbers from the form) and records what the person chose. */
-export async function recordNewCapital(formData: FormData) {
+export async function recordNewCapital(formData: FormData): Promise<ActionResult> {
   const amount = Number(formData.get("amount"));
   const source = formData.get("source") === "existing" ? "existing" : "new";
   const action = String(formData.get("user_action")) as UserAction;
   const note = String(formData.get("note") ?? "").slice(0, 2000) || null;
   const execution = String(formData.get("execution") ?? "").trim().slice(0, 500);
-  if (!(amount > 0) || !ACTIONS.includes(action)) throw new Error("Choose what you decided");
+  if (!(amount > 0) || !ACTIONS.includes(action)) return fail("Choose what you decided first.");
 
   const db = await createClient();
   const ws = await buildWorkspace(db);
