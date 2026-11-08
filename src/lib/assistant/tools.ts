@@ -2,6 +2,10 @@
  * Tools the assistant may call. Every number it can cite comes from one of these,
  * and each result carries its source and timestamp.
  */
+import { ALTERNATIVES } from "@/lib/policy/evidence";
+import { RETIRED_WHY } from "@/lib/policy/rules";
+import { AGE_REMINDER_DAYS } from "@/lib/policy/limits";
+import { loadDecisionFilings } from "@/lib/alerts/events";
 import type Anthropic from "@anthropic-ai/sdk";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { Workspace } from "@/lib/workspace-core";
@@ -38,7 +42,7 @@ export const TOOLS: Anthropic.Beta.BetaTool[] = [
   },
   {
     name: "simulate_new_capital",
-    description: "Runs the deterministic new-capital engine for an amount in dollars. Compares researched holdings, ETFs, researched new positions, holding cash and trims; checks evidence gates (current holdings, known cash, approved limits, chosen assumptions, current research). Returns status actionable or wait_review, the gates, what to verify, labelled alternatives, and a split that is illustrative when status is wait_review.",
+    description: "Runs the deterministic new-capital engine for an amount in dollars. Compares researched holdings, ETFs, researched new positions, holding cash and trims; checks current holdings, known cash, approved limits and current research. Returns status recommend, recommend_with_checks (best answer on the evidence, with checks to confirm first) or wait (cash not known), the checks, what to verify, labelled alternatives with each stock's comparison against VOO and Treasuries, and the recommended split.",
     input_schema: { type: "object", properties: { amount: { type: "number", description: "Dollars" }, source: { type: "string", enum: ["new", "existing"], description: "new = money coming in; existing = cash already held" } }, required: ["amount", "source"], additionalProperties: false },
     strict: true,
   },
@@ -140,7 +144,7 @@ export async function runTool(name: string, input: Record<string, unknown>, ws: 
       const h = p.holdings.find((x) => x.symbol === sym);
       const q = h ? null : await getQuote(sym);
       const price = h?.price ?? q?.price ?? null;
-      const check = v ? repriceCheck(v.parsed, price, researchAgeDays(r, ws.now), ws.policy?.researchFreshnessDays ?? 120) : null;
+      const check = v ? repriceCheck(v.parsed, price, researchAgeDays(r, ws.now), AGE_REMINDER_DAYS) : null;
       return {
         layer: "research_conclusion",
         symbol: sym,
@@ -180,7 +184,8 @@ export async function runTool(name: string, input: Record<string, unknown>, ws: 
       const amount = Number(input.amount);
       if (!(amount > 0)) return { error: "amount must be positive" };
       const source = input.source === "existing" ? "existing" : "new";
-      return { layer: "model_output", ...newCapital({ amount, source, portfolio: p, research: ws.research, policy: ws.policy, now: ws.now, quotes: ws.quotes }) };
+      const filings = await loadDecisionFilings(ws);
+      return { layer: "model_output", ...newCapital({ amount, source, portfolio: p, research: ws.research, policy: ws.policy, now: ws.now, quotes: ws.quotes, filings }) };
     }
     case "get_policy": {
       const a = ws.policy?.audit;
@@ -189,7 +194,12 @@ export async function runTool(name: string, input: Record<string, unknown>, ws: 
       return {
         layer: "policy",
         conflicts: a.conflicts.map((c) => ({ subject: c.subject, differences: c.differences, using_meanwhile: rule(c.used), candidates: c.candidates.map(rule) })),
-        subjects: a.subjects.map((s) => ({ scope: s.scope, subject: s.subject, status: s.status, in_use: rule(s.used), superseded: s.history.map(rule) })),
+        subjects: a.subjects.map((s) => ({ scope: s.scope, subject: s.subject, status: s.status, authority: s.authority, in_use: rule(s.used), superseded: s.history.map(rule) })),
+        open_decisions: a.decisions.map((s) => s.subject),
+        imported_not_confirmed: a.imported.map((s) => s.subject),
+        alternatives: ALTERNATIVES.map((x) => ({ symbol: x.symbol, forecasts: x.forecasts.map((f) => ({ firm: f.firm, asset: f.asset, low: f.low, high: f.high, kind: f.kind, horizon_years: f.horizonYears, as_of: f.asOf, method: f.method })) })),
+        retired: a.retired.map((r) => ({ subject: r.subject, why: RETIRED_WHY[r.subject] ?? null })),
+        note: "authority 'you' = approved by the investor in the app; 'imported' = marked approved in the old archive only. Companies without their own limit get no new money.",
       };
     }
     case "get_alerts":

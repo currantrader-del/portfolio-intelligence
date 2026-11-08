@@ -3,15 +3,16 @@
  * policy limits and tax visibility. Deterministic; the AI may explain it but not change the numbers.
  */
 import type { Workspace } from "@/lib/workspace";
-import { BIG_MOVE, DEFAULT_ASSUMPTIONS } from "./newCapital";
-import { expectedReturnAt, repriceCheck, scenarioReturnsAt, zoneFor } from "@/lib/research/valuation";
+import { scenarioReturnsAt, zoneFor } from "@/lib/research/valuation";
 import { researchAgeDays } from "@/lib/research/records";
+import type { FilingsResult } from "@/lib/market/sec";
+import { assessVsAlternatives, refreshState, riskFreeFor, zoneKind } from "@/lib/policy/evidence";
 
-export const REVIEW_CODE_VERSION = "position-review@1";
+export const REVIEW_CODE_VERSION = "position-review@3";
 
 export type ReviewOption = { key: "add" | "hold" | "trim" | "exit"; label: string; dollars: number; weightAfter: number; tax: string; available: boolean; note: string };
 
-export function reviewPosition(ws: Workspace, symbol: string) {
+export function reviewPosition(ws: Workspace, symbol: string, filings?: FilingsResult | null) {
   const p = ws.portfolio;
   const h = p.holdings.find((x) => x.symbol === symbol);
   if (!h) return null;
@@ -20,14 +21,18 @@ export function reviewPosition(ws: Workspace, symbol: string) {
   const exp = p.exposures.find((e) => e.symbol === symbol);
   const lim = ws.policy?.companies[symbol];
   const max = exp?.max ?? 0.1;
+  const hasLimit = exp?.hasLimit ?? false;
   const weight = exp?.total ?? h.weight;
   const age = r ? researchAgeDays(r, ws.now) : null;
-  const freshDays = ws.policy?.researchFreshnessDays ?? 120;
-  const check = v ? repriceCheck(v.parsed, h.price, age, freshDays) : null;
-  const er = v && check?.ok ? expectedReturnAt(v.parsed, h.price, ws.now) : null;
+  const st = v ? refreshState({ asOf: v.research_as_of, pc: v.parsed, price: h.price, filings: filings ?? null }) : null;
+  const years = v?.parsed.horizonDate ? Math.max(0.25, (new Date(v.parsed.horizonDate).getTime() - ws.now.getTime()) / (365.25 * 864e5)) : 10;
+  const cmp = v ? assessVsAlternatives(v.parsed, h.price, ws.now, {
+    riskFree: riskFreeFor(years, ws.yields ?? { y2: null, y10: null }), weightNow: weight,
+    limit: hasLimit ? { normalHigh: lim?.normal?.high ?? null, hcHigh: lim?.highConviction?.high ?? null, max } : null, completeness: v.completeness, confidence: v.parsed.confidence,
+  }) : null;
+  const favourable = cmp?.judgment === "favourable";
+  const er = st?.status === "refresh" ? null : cmp?.expected ?? null;
   const zone = v ? zoneFor(v.parsed.zones, h.price) : null;
-  const hurdle = ws.policy?.audit?.assumptions.hurdle.value ?? ws.policy?.hurdleOverEtfPoints ?? DEFAULT_ASSUMPTIONS.hurdlePoints;
-  const etf = ws.policy?.audit?.assumptions.etfExpectedReturn.value ?? DEFAULT_ASSUMPTIONS.etfExpectedReturn;
 
   // Taxable share of the position (retirement accounts carry no tax on sale).
   const taxable = p.accounts.filter((a) => a.role === "taxable_brokerage").map((a) => a.name);
@@ -43,7 +48,7 @@ export function reviewPosition(ws: Workspace, symbol: string) {
   const trimTarget = lim?.normal?.low ?? null;
   const trimDollars = trimTarget !== null ? Math.max(0, h.value - trimTarget * p.total) : 0;
   const options: ReviewOption[] = [
-    { key: "add", label: "Add", dollars: Math.round(addDollars), weightAfter: max, tax: "No tax on a purchase", available: addDollars > 1, note: addDollars > 1 ? `Up to your ${(max * 100).toFixed(0)}% maximum` : "At its maximum" },
+    { key: "add", label: "Add", dollars: Math.round(addDollars), weightAfter: max, tax: "No tax on a purchase", available: hasLimit && addDollars > 1, note: !hasLimit ? "No company limit of its own yet, so no room to add" : addDollars > 1 ? `Up to your ${(max * 100).toFixed(0)}% maximum` : "At its maximum" },
     { key: "hold", label: "Hold", dollars: 0, weightAfter: weight, tax: "None", available: true, note: `Stay at ${(weight * 100).toFixed(1)}%` },
     { key: "trim", label: "Trim", dollars: Math.round(trimDollars), weightAfter: trimTarget ?? weight, tax: taxText(trimDollars), available: trimDollars > 1, note: trimTarget !== null ? `To the ${(trimTarget * 100).toFixed(0)}% low end of its normal range` : "No normal range in policy" },
     { key: "exit", label: "Exit", dollars: Math.round(h.value), weightAfter: 0, tax: taxText(h.value), available: true, note: "Sell the whole position" },
@@ -55,23 +60,23 @@ export function reviewPosition(ws: Workspace, symbol: string) {
     suggestion = { key: "hold", label: "Hold. Research first.", reason: r?.conflict ? "The stored research conflicts, so no sizing change is supported until a targeted refresh." : "There is no stored research to support adding or selling.", confidence: 3 };
   } else if (weight > max) {
     suggestion = { key: "hold", label: "Review. Don't add.", reason: `It is above its ${(max * 100).toFixed(0)}% maximum. Your policy treats that as a review trigger, not an automatic sale.`, confidence: 5 };
-  } else if (v.parsed.referencePrice && Math.abs(h.price / v.parsed.referencePrice - 1) > BIG_MOVE) {
-    const move = h.price / v.parsed.referencePrice - 1;
+  } else if (st?.status === "refresh") {
     suggestion = {
       key: "hold",
       label: "Hold. Refresh the research first.",
-      reason: `The price is ${Math.round(Math.abs(move) * 100)}% ${move < 0 ? "below" : "above"} the $${v.parsed.referencePrice} the research was set at. The old scenarios are not re-priced at this price: a move that large can change the probabilities, financing and cash-flow assumptions. A targeted update (what changed, and does it touch the thesis?) comes before sizing anything.`,
+      reason: `Something has happened since the research (${st.triggers.filter((t) => t.kind !== "unverified").map((t) => t.detail).join("; ")}). The old scenarios are not relied on until a targeted update says whether it touches the thesis. A lower price alone is never a reason to add.`,
       confidence: 4,
     };
-  } else if (er !== null && er >= etf + hurdle && addDollars > 1 && v.completeness === "complete" && (age ?? 0) <= freshDays) {
-    reasons.push(`Expected return at $${h.price.toFixed(2)} is about ${(er * 100).toFixed(1)}% a year, above the ${((etf + hurdle) * 100).toFixed(0)}% bar.`);
+  } else if (cmp && favourable && hasLimit && addDollars > 1 && v.completeness === "complete" && (!zone || zoneKind(zone.action) === "buy") && st?.status === "current") {
+    reasons.push(cmp.summary);
     if (zone) reasons.push(`The price is in the research's "${zone.label}" band (${zone.action}).`);
-    reasons.push("Before adding, check whether anything new (filings, financing, guidance) changes the scenarios. A lower price alone doesn't.");
-    suggestion = { key: "add", label: "Consider adding, after a news check", reason: reasons.join(" "), confidence: /specul/i.test(v.parsed.classification ?? "") ? 5 : 6 };
-  } else if (er !== null && er < etf) {
-    suggestion = { key: "hold", label: "Hold. Don't add.", reason: `Expected return at today's price (${(er * 100).toFixed(1)}%) is below the ${(etf * 100).toFixed(0)}% ETF assumption.`, confidence: 5 };
+    suggestion = { key: "add", label: "Consider adding", reason: reasons.join(" "), confidence: /specul/i.test(v.parsed.classification ?? "") ? 5 : 6 };
+  } else if (cmp && !favourable) {
+    suggestion = { key: "hold", label: cmp.judgment === "unfavourable" ? "Hold. Don't add." : "Hold", reason: `${cmp.summary} Holding is not the same as selling: a trim needs its own reason (limit, thesis or a clearly worse outlook than VOO).`, confidence: 5 };
   } else {
-    suggestion = { key: "hold", label: "Hold", reason: v.completeness !== "complete" ? "Research is partial, so it doesn't support a sizing change." : "Nothing in the numbers calls for a change.", confidence: 5 };
+    suggestion = { key: "hold", label: "Hold", reason: v.completeness !== "complete" ? "Research is partial, so it doesn't support a sizing change."
+      : st?.status === "unverified" ? "SEC filings could not be checked, so the research can't be confirmed current. No change until it is."
+      : !hasLimit ? "No company limit of its own, so no room to add." : zone && zoneKind(zone.action) !== "buy" ? `The research's own zone at this price says: ${zone.action}.` : "Nothing in the numbers calls for a change.", confidence: 5 };
   }
 
   return {
@@ -83,8 +88,9 @@ export function reviewPosition(ws: Workspace, symbol: string) {
     weight,
     max,
     expectedReturn: er,
-    scenarios: v && check?.ok ? scenarioReturnsAt(v.parsed, h.price, ws.now) : [],
-    repriceNote: check?.reason ?? null,
+    scenarios: v && st?.status !== "refresh" ? scenarioReturnsAt(v.parsed, h.price, ws.now) : [],
+    repriceNote: st && st.status !== "current" ? st.triggers.map((t) => t.detail).join("; ") : null,
+    comparison: cmp,
     zone,
     researchVersionId: v?.id ?? null,
     researchAsOf: v?.research_as_of ?? null,

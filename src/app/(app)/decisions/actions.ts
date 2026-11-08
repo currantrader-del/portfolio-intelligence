@@ -8,6 +8,7 @@ import { createClient } from "@/lib/supabase/server";
 import { buildWorkspace } from "@/lib/workspace";
 import { CODE_VERSION, newCapital } from "@/lib/decision/newCapital";
 import { reviewPosition, REVIEW_CODE_VERSION } from "@/lib/decision/review";
+import { loadDecisionFilings } from "@/lib/alerts/events";
 
 const ACTIONS = ["followed", "partially_followed", "declined", "deferred", "dismissed"] as const;
 type UserAction = (typeof ACTIONS)[number];
@@ -45,7 +46,8 @@ export async function recordNewCapital(formData: FormData) {
 
   const db = await createClient();
   const ws = await buildWorkspace(db);
-  const result = newCapital({ amount, source, portfolio: ws.portfolio, research: ws.research, policy: ws.policy, now: ws.now, quotes: ws.quotes });
+  const filings = await loadDecisionFilings(ws);
+  const result = newCapital({ amount, source, portfolio: ws.portfolio, research: ws.research, policy: ws.policy, now: ws.now, quotes: ws.quotes, filings, yields: ws.yields });
   const symbols = result.options.map((o) => o.symbol).filter((s) => s !== "CASH");
   // Everything the result depended on, with timestamps and sources, so the decision can be audited later.
   const inputs = {
@@ -85,7 +87,7 @@ export async function recordReview(formData: FormData): Promise<ActionResult> {
   const note = String(formData.get("note") ?? "").slice(0, 2000) || null;
   const db = await createClient();
   const ws = await buildWorkspace(db);
-  const review = reviewPosition(ws, symbol);
+  const review = reviewPosition(ws, symbol, (await loadDecisionFilings({ ...ws, research: [] , portfolio: { holdings: [{ symbol }] } })).get(symbol) ?? null);
   if (!review) return fail(`${symbol || "This position"} is no longer in your portfolio. Reload the page.`);
   const option = review.options.find((o) => o.key === chosen);
   if (!option) return fail("Choose one of the options first.");

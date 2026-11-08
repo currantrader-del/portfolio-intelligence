@@ -5,19 +5,25 @@
 import type { Bucket } from "@/lib/portfolio/classify";
 
 export type Range = { low: number; high: number } | null;
-export type LimitStatus = "approved" | "conflict" | "proposed" | "none";
+export type LimitStatus = "approved" | "imported" | "conflict" | "proposed" | "none";
 export type BucketLimit = { bucket: Bucket; normal: Range; hardMax: number | null; status?: LimitStatus };
-export type CompanyLimit = { symbol: string; role: string | null; normal: Range; highConviction: Range; hardMax: number | null; action: string | null; researchStatus: string | null; status?: LimitStatus; source?: string; provisional?: boolean };
+export type CompanyLimit = { symbol: string; role: string | null; normal: Range; highConviction: Range; hardMax: number | null; action: string | null; researchStatus: string | null; status?: LimitStatus; source?: string; provisional?: boolean; authority?: import("./rules").Authority; conditions?: string | null };
 export type Policy = {
   version: string;
   buckets: BucketLimit[];
   companies: Record<string, CompanyLimit>;
-  genericCompanyHardMax: number | null;
+  /** Absolute ceiling for any single company. Never a company's own limit: see companyLimit(). */
+  portfolioCeiling: number | null;
   protectedSavingsFloor: number;
-  researchFreshnessDays: number;
-  hurdleOverEtfPoints: number | null;
   audit?: import("./rules").PolicyAudit;
 };
+
+/**
+ * Days after which the app reminds you to check what has happened since the research. A reminder only:
+ * research is refreshed because of events (results, financings, material filings, a move into another
+ * action zone), never because a counter ran out. See refreshState() in ./evidence.
+ */
+export const AGE_REMINDER_DAYS = 120;
 
 /** "25-40%" -> {0.25, 0.40}; "~3-5%" -> {0.03,0.05}; "TBD" -> null */
 export function parseRange(s: unknown): Range {
@@ -60,10 +66,10 @@ export function readPolicy(version: string, rules: Rules): Policy {
 
   const scf = ((rules.single_company_frameworks ?? {}) as Record<string, unknown>).latest_approved_v2_revised as Record<string, Record<string, unknown>> | undefined;
   const companies: Record<string, CompanyLimit> = {};
-  let genericCompanyHardMax: number | null = null;
+  let portfolioCeiling: number | null = null;
   for (const [key, v] of Object.entries(scf ?? {})) {
     if (key.startsWith("generic")) {
-      genericCompanyHardMax = parsePct(v.hard_boundary);
+      portfolioCeiling = parsePct(v.hard_boundary);
       continue;
     }
     companies[key] = {
@@ -80,14 +86,24 @@ export function readPolicy(version: string, rules: Rules): Policy {
     version,
     buckets,
     companies,
-    genericCompanyHardMax,
-    protectedSavingsFloor: Number(rules.protected_savings_floor_usd ?? 10000),
-    researchFreshnessDays: Number(rules.research_freshness_days ?? 120),
-    hurdleOverEtfPoints: typeof rules.hurdle_over_etf_points === "number" ? rules.hurdle_over_etf_points : null,
+    portfolioCeiling,
+    protectedSavingsFloor: Number(rules.protected_savings_floor_usd ?? 3000),
   };
 }
 
-/** The largest weight a company may reach: its own maximum, else the generic boundary, else 10%. */
+/**
+ * A company's limit. Only a company-specific rule gives room for new money; a company without one
+ * (unresearched, or researched but no limit set) gets none. `monitorMax` is the line used to flag an
+ * existing holding: its own maximum, else the absolute portfolio ceiling.
+ */
+export function companyLimit(p: Policy | null, symbol: string): { hasLimit: boolean; newMoneyMax: number; monitorMax: number } {
+  const own = p?.companies[symbol]?.hardMax ?? null;
+  const ceiling = p?.portfolioCeiling ?? null;
+  if (own !== null) return { hasLimit: true, newMoneyMax: ceiling !== null ? Math.min(own, ceiling) : own, monitorMax: ceiling !== null ? Math.min(own, ceiling) : own };
+  return { hasLimit: false, newMoneyMax: 0, monitorMax: ceiling ?? 0.1 };
+}
+
+/** The line an existing holding is measured against (see companyLimit). */
 export function companyMax(p: Policy | null, symbol: string): number {
-  return p?.companies[symbol]?.hardMax ?? p?.genericCompanyHardMax ?? 0.1;
+  return companyLimit(p, symbol).monitorMax;
 }

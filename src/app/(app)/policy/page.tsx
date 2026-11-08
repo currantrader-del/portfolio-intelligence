@@ -1,56 +1,134 @@
 import Link from "next/link";
 import { getWorkspace } from "@/lib/workspace";
 import { Tag } from "@/components/Tag";
-import type { PolicyRuleRow, SubjectAudit } from "@/lib/policy/rules";
-import { addRule, approveRule, saveProfile } from "./actions";
+import { Card, CardHead, Disclose } from "@/components/ui";
+import { AUTHORITY_LABEL, RECOMMEND_PREFIX, RETIRED_WHY, isRecommended, isRejected, type PolicyRuleRow, type SubjectAudit } from "@/lib/policy/rules";
+import { ALTERNATIVES } from "@/lib/policy/evidence";
+import { reviewImported, type ImportReviewItem } from "@/lib/policy/importReview";
+import { addRule, approveRule, confirmImported, rejectRule, reviseImported, saveProfile } from "./actions";
 import { createClient } from "@/lib/supabase/server";
 import { loadProfile } from "@/lib/profile";
 
-const p = (v: number | string | null) => (v === null || v === undefined ? "—" : `${+(Number(v) * 100).toFixed(2)}%`);
-const rng = (lo: number | string | null, hi: number | string | null) => (lo === null || hi === null ? "—" : `${p(lo)}–${p(hi)}`);
-const STATUS = {
-  approved: { tone: "accent", label: "Approved" },
-  conflict: { tone: "alert", label: "Conflict" },
-  proposed: { tone: "warn", label: "Placeholder" },
-  none: { tone: "neutral", label: "No rule" },
-} as const;
+const p = (v: number | string | null | undefined, d = 2) => (v === null || v === undefined ? "—" : `${+(Number(v) * 100).toFixed(d)}%`);
+const rng = (lo: number | string | null, hi: number | string | null) => (lo === null || hi === null ? null : `${p(lo)}–${p(hi)}`);
 
-function RuleLine({ r }: { r: PolicyRuleRow }) {
+/** One line of numbers for a rule, in plain words. */
+function numbers(r: PolicyRuleRow): string {
+  if (r.scope === "portfolio" && r.subject === "protected_reserve") return `$${Number(r.value).toLocaleString()} kept in savings, never invested`;
+  if (r.scope === "assumption" && r.subject === "benchmark_return") return `U.S. stocks ${rng(r.normal_low, r.normal_high)} a year (shown middle ${p(r.value, 1)}: the average of Vanguard's 5.8% midpoint and J.P. Morgan's 7.5%, not the middle of the range)`;
+  if (r.scope === "assumption" && r.subject === "risk_margin_factor") return `${Number(r.value)} x each stock's scenario spread`;
+  if (r.scope === "assumption") return String(r.value);
+  const parts = [rng(r.normal_low, r.normal_high) && `normal ${rng(r.normal_low, r.normal_high)}`, rng(r.high_conviction_low, r.high_conviction_high) && `high conviction ${rng(r.high_conviction_low, r.high_conviction_high)}`, r.hard_max !== null && `max ${p(r.hard_max)}`].filter(Boolean);
+  return parts.join(" · ") || "no numbers";
+}
+
+const SUBJECT: Record<string, string> = {
+  protected_reserve: "Protected savings reserve",
+  benchmark_return: "Index return to beat",
+  risk_margin_factor: "Extra return for a riskier stock",
+  generic: "Any company without its own limit",
+};
+const subjectName = (s: { scope: string; subject: string }) => SUBJECT[s.subject] ?? s.subject;
+
+function Who({ s }: { s: SubjectAudit }) {
+  const u = s.used;
+  if (!u) return <Tag>{s.status === "proposed" ? "Nothing in control" : "No rule"}</Tag>;
+  if (s.authority === "you") return <Tag tone="accent">Approved by you {u.approved_at?.slice(0, 10)}</Tag>;
+  if (s.authority === "imported") return <Tag>Imported · not confirmed</Tag>;
+  if (s.authority === "provisional") return <Tag tone="warn">Provisional · not approved</Tag>;
+  return <Tag tone="alert">Temporary safety limit</Tag>;
+}
+
+const src = (r: PolicyRuleRow) => `${r.source_label}${r.source_date ? `, ${r.source_date}` : ", undated"}`;
+const why = (r: PolicyRuleRow | null) => (r?.approval_note?.startsWith(RECOMMEND_PREFIX) ? r.approval_note.slice(RECOMMEND_PREFIX.length).split(" | ")[0].trim() : null);
+
+function DecisionCard({ s }: { s: SubjectAudit }) {
+  const open = s.candidates.filter((c) => c.approval === "unresolved" || c.approval === "proposed");
+  const rec = s.recommended;
   return (
-    <div className="text-sm">
-      <div className="font-medium">{r.source_label} <span className="text-muted font-normal">· {r.source_date ?? "undated"} · source says {r.source_status.replace(/_/g, " ")}</span></div>
-      {r.scope === "assumption" || r.scope === "portfolio"
-        ? <div className="font-mono">{r.subject === "research_freshness_days" || r.scope === "portfolio" ? Number(r.value).toLocaleString() : p(r.value)}</div>
-        : <div className="font-mono text-[13px]">normal {rng(r.normal_low, r.normal_high)} · high conviction {rng(r.high_conviction_low, r.high_conviction_high)} · max {p(r.hard_max)}</div>}
-      {r.conditions && <div className="text-xs text-ink-2 mt-0.5">{r.conditions}</div>}
-      {r.approval_note && <div className="text-xs text-muted mt-0.5">{r.approval_note}</div>}
-    </div>
+    <Card labelledBy={`d-${s.scope}-${s.subject}`}>
+      <CardHead id={`d-${s.scope}-${s.subject}`} title={subjectName(s)} right={s.status === "conflict" ? <Tag tone="alert">Sources disagree</Tag> : <Tag tone="warn">Proposal · not in effect</Tag>} />
+      <dl className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-1.5 text-sm">
+        <dt className="text-muted">In control now</dt>
+        <dd>{s.used ? <><span className="font-mono">{numbers(s.used)}</span> <span className="text-muted">· {src(s.used)} · {AUTHORITY_LABEL[s.authority]}</span></> : <span className="text-muted">Nothing. A proposal is not in effect until you approve it{s.scope === "company" ? ", so this company gets no new money meanwhile" : ""}.</span>}</dd>
+        {open.map((c) => (
+          <div key={c.id} className="contents">
+            <dt className="text-muted">{isRecommended(c) ? "Proposed · Claude recommends" : "Proposed · alternative"}</dt>
+            <dd><span className="font-mono">{numbers(c)}</span> <span className="text-muted">· {src(c)} · not in effect</span></dd>
+          </div>
+        ))}
+      </dl>
+      {why(rec) && <p className="text-sm"><span className="font-semibold">Why:</span> {why(rec)}</p>}
+      <Disclose summary="Evidence">
+        <ul className="list-disc pl-5 text-sm flex flex-col gap-1">
+          {s.differences.map((d) => <li key={d}>{d}</li>)}
+          {[s.used, ...open].filter((r, i, a): r is PolicyRuleRow => !!r?.conditions && a.findIndex((x) => x?.id === r.id) === i).map((r) => <li key={`c-${r.id}`}><span className="text-muted">{r.source_label}:</span> {r.conditions}</li>)}
+        </ul>
+      </Disclose>
+      <div className="flex flex-col gap-2">
+        {open.map((c) => (
+          <form key={c.id} className="flex flex-wrap items-center gap-2">
+            <input type="hidden" name="rule_id" value={c.id} />
+            <label className="sr-only" htmlFor={`n-${c.id}`}>Note (optional)</label>
+            <input id={`n-${c.id}`} name="note" placeholder="Note (optional)" className="flex-1 min-w-36 rounded-lg border border-line-strong bg-ground px-3 min-h-10 text-sm" />
+            <button formAction={approveRule} className="btn btn-sm btn-primary">Approve{open.length > 1 ? ` ${c.source_label.split(" (")[0]}` : ""}</button>
+            <button formAction={rejectRule} className="btn btn-sm">Reject</button>
+          </form>
+        ))}
+        <p className="text-xs text-muted">Approve makes it the controlling rule; the current one is kept in history. Reject keeps what controls now and records your choice.</p>
+      </div>
+    </Card>
   );
 }
 
-function ConflictCard({ s }: { s: SubjectAudit }) {
+const VERDICT: Record<ImportReviewItem["verdict"], { tag: string; tone?: "warn" | "accent" | "alert" }> = {
+  retain: { tag: "Retain" },
+  interim: { tag: "Keep as interim ceiling", tone: "warn" },
+  revise: { tag: "Revise", tone: "alert" },
+};
+
+function ImportedReview({ retain, exceptions }: { retain: ImportReviewItem[]; exceptions: ImportReviewItem[] }) {
+  const total = retain.length + exceptions.length;
+  const interim = exceptions.filter((x) => x.verdict === "interim");
+  const revise = exceptions.filter((x) => x.verdict === "revise");
   return (
-    <div className="bg-surface border border-alert-ink/40 rounded-2xl p-4 flex flex-col gap-3">
-      <div className="flex items-center justify-between gap-2">
-        <h3 className="font-semibold"><span className="font-mono">{s.subject}</span> limits disagree</h3>
-        <Tag tone="alert">Your choice needed</Tag>
-      </div>
-      <ul className="text-sm text-ink-2 list-disc pl-5">{s.differences.map((d) => <li key={d}>{d}</li>)}</ul>
-      <p className="text-sm">{s.provisional
-        ? <>Until you approve one, the app uses the provisional {p(s.used?.hard_max ?? null)} maximum from {s.used?.source_label} as you instructed. It is not approved, so new-cash recommendations stay on wait for this company.</>
-        : <>Until you choose, the app uses the stricter one ({p(s.used?.hard_max ?? null)} maximum) and will not size purchases above it. It did not assume the larger limit is approved.</>}</p>
-      <div className="grid gap-2 sm:grid-cols-2">
-        {s.candidates.map((r) => (
-          <form key={r.id} action={approveRule} className="border border-line rounded-xl p-3 flex flex-col gap-2">
-            <input type="hidden" name="rule_id" value={r.id} />
-            <RuleLine r={r} />
-            <label className="text-xs text-muted" htmlFor={`note-${r.id}`}>Why (optional)</label>
-            <input id={`note-${r.id}`} name="note" className="rounded-lg border border-line-strong bg-ground px-3 min-h-10 text-sm" />
-            <button className="min-h-10 px-3 rounded-lg bg-ink text-ground text-sm font-medium">Make this the approved rule</button>
-          </form>
+    <Card labelledBy="imp-h">
+      <CardHead id="imp-h" title={`Review of ${total} imported rules`} right={<Tag>Not approved by you</Tag>} />
+      <p className="text-sm">These came from the old archive marked &quot;approved&quot;, which is not your approval. I checked each against your current method (beat simply owning VOO; limits from each company&apos;s own research; a limit is a ceiling, not a reason to buy). Until you act they stay in control as ceilings, labelled imported, and they lower the confidence of a recommendation rather than block it.</p>
+      <p className="text-sm font-medium">Retain {retain.length}, keep {interim.length} as interim ceilings, revise {revise.length}.</p>
+      <Disclose summary={`Retain (${retain.length})`}>
+        <ul className="text-sm flex flex-col divide-y divide-line">
+          {retain.map((x) => <li key={x.row.id} className="py-1.5 flex flex-col gap-0.5"><span className="flex flex-wrap justify-between gap-x-3"><span>{subjectName(x)}</span><span className="font-mono text-[13px]">{numbers(x.row)}</span></span><span className="text-xs text-muted">{x.reason}</span></li>)}
+        </ul>
+      </Disclose>
+      <form action={confirmImported} className="flex gap-2">
+        {retain.map((x) => <input key={x.row.id} type="hidden" name="rule_id" value={x.row.id} />)}
+        <button className="btn btn-sm btn-primary">Confirm the {retain.length} retained rules as mine</button>
+      </form>
+      <h3 className="text-sm font-semibold mt-1">Exceptions</h3>
+      <ul className="flex flex-col gap-3">
+        {exceptions.map((x) => (
+          <li key={x.row.id} className="flex flex-col gap-1.5 border-t border-line pt-2.5">
+            <div className="flex items-center justify-between gap-2"><span className="font-medium">{subjectName(x)}</span><Tag tone={VERDICT[x.verdict].tone}>{VERDICT[x.verdict].tag}</Tag></div>
+            <span className="text-sm"><span className="text-muted">Imported, in control now:</span> <span className="font-mono text-[13px]">{numbers(x.row)}</span></span>
+            {x.revised && <span className="text-sm"><span className="text-muted">Proposed, not in effect:</span> <span className="font-mono text-[13px]">{numbers({ ...x.row, ...x.revised })}</span></span>}
+            <p className="text-xs text-muted">{x.reason}</p>
+            <form className="flex flex-wrap gap-2">
+              <input type="hidden" name="rule_id" value={x.row.id} />
+              {x.revised ? (
+                <>
+                  <button formAction={reviseImported} className="btn btn-sm btn-primary">Approve revision</button>
+                  <button formAction={confirmImported} className="btn btn-sm">Keep the imported rule instead</button>
+                </>
+              ) : (
+                <button formAction={confirmImported} className="btn btn-sm btn-primary">Confirm as interim ceiling</button>
+              )}
+            </form>
+          </li>
         ))}
-      </div>
-    </div>
+      </ul>
+      <p className="text-xs text-muted">Leaving any of these alone changes nothing. Every earlier version stays in history.</p>
+    </Card>
   );
 }
 
@@ -59,120 +137,112 @@ export default async function PolicyPage({ searchParams }: { searchParams: Promi
   const [ws, profile] = await Promise.all([getWorkspace(), createClient().then(loadProfile)]);
   const audit = ws.policy?.audit;
   if (!audit) {
-    return <section className="bg-surface border border-line rounded-2xl p-6"><h1 className="h1">Policy</h1><p className="text-ink-2 mt-2">No versioned rules loaded yet.</p></section>;
+    return <section className="card"><h1 className="h1">Policy</h1><p className="text-ink-2 mt-2">No versioned rules loaded yet.</p></section>;
   }
-  const by = (scope: string) => audit.subjects.filter((s) => s.scope === scope);
-  const assumptionRows = by("assumption");
-  const history = audit.subjects.flatMap((s) => s.history);
+  const controlling = (scope: string) => audit.subjects.filter((s) => s.scope === scope && s.used);
+  const imported = audit.imported;
+  const history = [...audit.subjects.flatMap((s) => s.history), ...audit.retired].sort((a, b) => a.subject.localeCompare(b.subject));
+  const saved = sp.saved?.split(":");
 
   return (
-    <div className="flex flex-col gap-6">
+    <div className="flex flex-col gap-5 max-w-3xl">
       <div>
         <Link href="/portfolio" className="text-sm no-underline max-lg:hidden">← Portfolio</Link>
-        <h1 className="h1 mt-1">Investment policy</h1>
-        <p className="text-muted text-sm">Every limit from every version of your policy and research, with its source and status. Nothing is deleted; changes supersede.</p>
+        <h1 className="h1 mt-1">Policy</h1>
+        <p className="text-muted text-sm">What controls your decisions, what needs your call, and why. Nothing is ever deleted: older versions stay in history with their sources.</p>
       </div>
-      {sp.saved && <p className="rounded-xl bg-accent-soft px-4 py-2 text-sm">{sp.saved === "profile" ? "Saved. Every AI answer, research and plan now reads your updated profile." : `Saved. ${sp.saved} now uses the rule you approved.`}</p>}
+      {saved && <p className="rounded-xl bg-accent-soft px-4 py-2 text-sm">{saved[0] === "profile" ? "Saved. Every AI answer, research and plan now reads your updated profile." : saved[0] === "approved" ? `Approved. ${saved[1]} now uses the rule you chose.` : saved[0] === "rejected" ? `Rejected. ${saved[1]} keeps the rule that was in control.` : `Confirmed ${saved[1]} imported rules as yours.`}</p>}
 
-      <section id="profile" aria-labelledby="p-h" className="bg-surface border border-line rounded-2xl p-5 flex flex-col gap-3">
-        <h2 id="p-h" className="text-lg font-semibold">About you and your goals</h2>
-        <p className="text-sm text-muted">In your own words: your situation, what you are trying to beat, how much risk you accept, and how you want to trade. The assistant, research and plan read this every time.{profile.updatedAt ? ` Last changed ${profile.updatedAt.slice(0, 10)}.` : ""}</p>
-        <form action={saveProfile} className="flex flex-col gap-2">
-          <textarea name="text" defaultValue={profile.text} rows={9} maxLength={3000} className="w-full rounded-[12px] bg-surface-2 border border-line px-3 py-2 text-[15px] leading-relaxed" placeholder="Age, work and income, goals, what you compare against, how often you want to trade..." />
-          <div><button className="btn btn-sm btn-primary">Save</button></div>
-        </form>
+      <section aria-labelledby="dec-h" className="flex flex-col gap-3">
+        <h2 id="dec-h" className="h2">{audit.decisions.length + (imported.length ? 1 : 0) ? "For your review" : "Nothing waiting for you"}</h2>
+        {audit.decisions.map((s) => <DecisionCard key={`${s.scope}|${s.subject}`} s={s} />)}
+        {imported.length > 0 && <ImportedReview {...reviewImported(audit, (sym) => ws.portfolio.exposures.find((e) => e.symbol === sym)?.total ?? null)} />}
       </section>
 
-      <section aria-labelledby="c-h" className="flex flex-col gap-3">
-        <h2 id="c-h" className="text-lg font-semibold">{audit.conflicts.length ? `${audit.conflicts.length} unresolved conflict${audit.conflicts.length > 1 ? "s" : ""}` : "No unresolved conflicts"}</h2>
-        {audit.conflicts.map((s) => <ConflictCard key={s.subject} s={s} />)}
-      </section>
-
-      <section aria-labelledby="a-h" className="bg-surface border border-line rounded-2xl p-5 flex flex-col gap-3">
-        <h2 id="a-h" className="font-semibold">Decision assumptions</h2>
-        <p className="text-sm text-ink-2">The new-cash engine will not call a result actionable while these are app placeholders.</p>
-        <ul className="flex flex-col divide-y divide-line">
-          {assumptionRows.map((s) => (
-            <li key={s.subject} className="py-2.5 flex flex-col gap-1.5">
-              <div className="flex items-center justify-between gap-2"><span className="font-medium">{LABELS[s.subject] ?? s.subject}</span><Tag tone={STATUS[s.status].tone}>{STATUS[s.status].label}</Tag></div>
-              {s.used && <RuleLine r={s.used} />}
-              <form action={addRule} className="flex flex-wrap gap-2 items-center">
-                <input type="hidden" name="scope" value="assumption" /><input type="hidden" name="subject" value={s.subject} />
-                <label className="sr-only" htmlFor={`v-${s.subject}`}>New value</label>
-                <input id={`v-${s.subject}`} name="value" placeholder={s.subject === "research_freshness_days" ? "days" : "%"} inputMode="decimal" className="w-24 rounded-lg border border-line-strong bg-ground px-3 min-h-10 font-mono text-sm" />
-                <label className="sr-only" htmlFor={`r-${s.subject}`}>Reason</label>
-                <input id={`r-${s.subject}`} name="reason" placeholder="Why this number" className="flex-1 min-w-40 rounded-lg border border-line-strong bg-ground px-3 min-h-10 text-sm" />
-                <button className="min-h-10 px-3 rounded-lg border border-line-strong text-sm font-medium">{s.status === "approved" ? "Change" : "Set my value"}</button>
-                {s.status === "proposed" && s.used && <button formAction={approveRule} name="rule_id" value={s.used.id} className="min-h-10 px-3 rounded-lg border border-line-strong text-sm">Keep the placeholder</button>}
-              </form>
+      <Card labelledBy="ctl-h">
+        <CardHead id="ctl-h" title="Rules in control" />
+        <ul className="flex flex-col divide-y divide-line text-sm">
+          {[...controlling("portfolio"), ...controlling("company"), ...controlling("generic_company")].map((s) => (
+            <li key={`${s.scope}|${s.subject}`} className="py-2 flex flex-col gap-0.5">
+              <div className="flex items-center justify-between gap-2"><span className="font-medium">{subjectName(s)}</span><Who s={s} /></div>
+              <span className="font-mono text-[13px]">{s.scope === "generic_company" ? `no new money; ${p(s.used!.hard_max)} only as an absolute ceiling` : numbers(s.used!)}</span>
+              <span className="text-xs text-muted">{src(s.used!)}</span>
             </li>
           ))}
         </ul>
-      </section>
+        <Disclose summary={`Allocation buckets (${controlling("bucket").length})`}>
+          <ul className="flex flex-col divide-y divide-line text-sm">
+            {controlling("bucket").map((s) => (
+              <li key={s.subject} className="py-1.5 flex flex-wrap items-center justify-between gap-x-3"><span>{s.subject}</span><span className="font-mono text-[13px]">{numbers(s.used!)}</span><Who s={s} /></li>
+            ))}
+          </ul>
+        </Disclose>
+      </Card>
 
-      <section aria-labelledby="co-h" className="bg-surface border border-line rounded-2xl p-5 flex flex-col gap-2">
-        <h2 id="co-h" className="font-semibold">Company limits in use</h2>
-        <p className="text-xs text-muted">Percent of investable capital, including ETF look-through. The protected reserve is excluded.</p>
-        <ul className="flex flex-col divide-y divide-line">
-          {[...by("company"), ...by("generic_company")].map((s) => (
-            <li key={s.subject} className="py-2.5 flex flex-col gap-1">
-              <div className="flex items-center justify-between gap-2"><span className="font-mono font-medium">{s.subject === "generic" ? "Any other company" : s.subject}</span><Tag tone={STATUS[s.status].tone}>{STATUS[s.status].label}</Tag></div>
-              {s.used && <RuleLine r={s.used} />}
-            </li>
-          ))}
-        </ul>
-      </section>
+      <Card labelledBy="how-h">
+        <CardHead id="how-h" title="How a recommendation is made" />
+        <ol className="list-decimal pl-5 text-sm flex flex-col gap-1.5">
+          <li><span className="font-medium">Portfolio limit.</span> Only a company&apos;s own limit gives room; a company without one gets no new money. New cash fills to the top of the normal range, or to the top of the high-conviction range when you approved that range and the case below is favourable and current.</li>
+          <li><span className="font-medium">Valuation against the alternatives.</span> The research&apos;s own price zone must allow adding. Its scenarios at today&apos;s price are compared with VOO&apos;s published forecasts (each shown separately, never averaged), a Treasury for the same horizon, the odds of a loss, the spread of outcomes and concentration. Favourable only when the expected return is above every VOO forecast and the research&apos;s own odds favour beating the lowest one. No fixed hurdle or premium.</li>
+          <li><span className="font-medium">Research is current.</span> Refresh is triggered by events: new results, a financing or share issuance, another material filing, or the price moving into a different action zone of the research. Age alone only prompts a filings check.</li>
+        </ol>
+        <p className="text-xs text-muted">The three are assessed and shown separately. The app always gives its best recommendation on the evidence, with anything still to confirm listed beside it; it waits only when your cash is not known. Holding cash is always allowed.</p>
+        <Disclose summary="The alternatives and their published forecasts">
+          <ul className="text-sm flex flex-col gap-2">
+            {ALTERNATIVES.map((alt) => (
+              <li key={alt.symbol} className="flex flex-col gap-1">
+                <span className="font-medium">{alt.label}</span>
+                <span className="text-xs text-muted">{alt.note}</span>
+                <ul className="list-disc pl-5 flex flex-col gap-1">
+                  {alt.forecasts.map((f) => (
+                    <li key={`${f.firm}-${f.asset}`}><a href={f.url} target="_blank" rel="noreferrer">{f.firm}</a>, {f.asset}: <span className="font-mono">{f.kind === "range" ? `${p(f.low, 1)}–${p(f.high, 1)}` : p(f.low, 1)}</span> a year over {f.horizonYears[0] === f.horizonYears[1] ? f.horizonYears[0] : f.horizonYears.join("–")} years, as of {f.asOf}. <span className="text-xs text-muted">{f.method}</span></li>
+                  ))}
+                </ul>
+              </li>
+            ))}
+            <li className="flex flex-col gap-1"><span className="font-medium">Treasuries (no stock risk)</span><span className="text-xs text-muted">{ws.yields.y2 && ws.yields.y10 ? `2-year ${ws.yields.y2.value.toFixed(2)}%, 10-year ${ws.yields.y10.value.toFixed(2)}% (FRED, ${ws.yields.y10.date}). Each stock is compared with the yield interpolated to its research horizon.` : "Yields not loaded yet."}</span></li>
+          </ul>
+        </Disclose>
+      </Card>
 
-      <section aria-labelledby="b-h" className="bg-surface border border-line rounded-2xl p-5 flex flex-col gap-2">
-        <h2 id="b-h" className="font-semibold">Allocation buckets in use</h2>
-        <ul className="flex flex-col divide-y divide-line">
-          {by("bucket").map((s) => (
-            <li key={s.subject} className="py-2.5 flex flex-col gap-1">
-              <div className="flex items-center justify-between gap-2"><span className="font-medium">{s.subject}</span><Tag tone={STATUS[s.status].tone}>{STATUS[s.status].label}</Tag></div>
-              {s.used && <RuleLine r={s.used} />}
-            </li>
-          ))}
-          {by("portfolio").map((s) => (
-            <li key={s.subject} className="py-2.5 flex flex-col gap-1">
-              <div className="flex items-center justify-between gap-2"><span className="font-medium">Protected savings reserve</span><Tag tone={STATUS[s.status].tone}>{STATUS[s.status].label}</Tag></div>
-              {s.used && <RuleLine r={s.used} />}
-            </li>
-          ))}
-        </ul>
-      </section>
-
-      <section aria-labelledby="n-h" className="bg-surface border border-line rounded-2xl p-5 flex flex-col gap-3">
-        <h2 id="n-h" className="font-semibold">Change a limit</h2>
-        <p className="text-sm text-ink-2">Your new rule becomes the approved one. The previous rule is kept as superseded, with your reason.</p>
+      <Disclose summary="Change a limit" className="card">
+        <p className="text-sm text-ink-2">Your new rule becomes the controlling one. The previous rule stays in history, with your reason.</p>
         <form action={addRule} className="grid gap-2 sm:grid-cols-2">
-          <label className="text-sm flex flex-col gap-1">Applies to
-            <select name="scope" className="rounded-lg border border-line-strong bg-ground px-3 min-h-10"><option value="company">A company</option><option value="bucket">A bucket</option></select>
-          </label>
-          <label className="text-sm flex flex-col gap-1">Ticker or bucket name<input name="subject" required className="rounded-lg border border-line-strong bg-ground px-3 min-h-10" /></label>
-          <label className="text-sm flex flex-col gap-1">Normal range low %<input name="normal_low" inputMode="decimal" className="rounded-lg border border-line-strong bg-ground px-3 min-h-10 font-mono" /></label>
-          <label className="text-sm flex flex-col gap-1">Normal range high %<input name="normal_high" inputMode="decimal" className="rounded-lg border border-line-strong bg-ground px-3 min-h-10 font-mono" /></label>
-          <label className="text-sm flex flex-col gap-1">High conviction low %<input name="hc_low" inputMode="decimal" className="rounded-lg border border-line-strong bg-ground px-3 min-h-10 font-mono" /></label>
-          <label className="text-sm flex flex-col gap-1">High conviction high %<input name="hc_high" inputMode="decimal" className="rounded-lg border border-line-strong bg-ground px-3 min-h-10 font-mono" /></label>
-          <label className="text-sm flex flex-col gap-1">Maximum %<input name="hard_max" inputMode="decimal" className="rounded-lg border border-line-strong bg-ground px-3 min-h-10 font-mono" /></label>
-          <label className="text-sm flex flex-col gap-1">Reason (required)<input name="reason" required className="rounded-lg border border-line-strong bg-ground px-3 min-h-10" /></label>
-          <button className="sm:col-span-2 min-h-11 px-4 rounded-lg bg-ink text-ground font-medium">Save and approve</button>
+          <label className="field">Applies to<select name="scope" className="input"><option value="company">A company</option><option value="bucket">A bucket</option></select></label>
+          <label className="field">Ticker or bucket name<input name="subject" required className="input" /></label>
+          <label className="field">Normal low %<input name="normal_low" inputMode="decimal" className="input font-mono" /></label>
+          <label className="field">Normal high %<input name="normal_high" inputMode="decimal" className="input font-mono" /></label>
+          <label className="field">High conviction low %<input name="hc_low" inputMode="decimal" className="input font-mono" /></label>
+          <label className="field">High conviction high %<input name="hc_high" inputMode="decimal" className="input font-mono" /></label>
+          <label className="field">Maximum %<input name="hard_max" inputMode="decimal" className="input font-mono" /></label>
+          <label className="field">Reason (required)<input name="reason" required className="input" /></label>
+          <button className="sm:col-span-2 btn btn-primary">Save and approve</button>
         </form>
-      </section>
+      </Disclose>
 
-      <details className="bg-surface border border-line rounded-2xl p-5">
-        <summary className="font-semibold cursor-pointer">Superseded rules ({history.length})</summary>
-        <ul className="flex flex-col divide-y divide-line mt-2">
+      <Disclose summary={`History and sources (${history.length} earlier versions)`} className="card">
+        <ul className="flex flex-col divide-y divide-line">
           {history.map((r) => (
-            <li key={r.id} className="py-2"><div className="font-mono text-sm font-medium">{r.subject}</div><RuleLine r={r} /></li>
+            <li key={r.id} className="py-2 text-sm flex flex-col gap-0.5">
+              <div className="flex items-center justify-between gap-2"><span className="font-medium">{subjectName(r)}</span><Tag>{isRejected(r) ? "Rejected" : audit.retired.includes(r) ? "Retired" : "Superseded"}</Tag></div>
+              {audit.retired.includes(r) && RETIRED_WHY[r.subject] && <span className="text-xs">{RETIRED_WHY[r.subject]}</span>}
+              <span className="font-mono text-[13px]">{numbers(r)}</span>
+              <span className="text-xs text-muted">{src(r)} · source said: {r.source_status.replace(/_/g, " ")}</span>
+              {r.approval_note && <span className="text-xs text-muted">{r.approval_note}</span>}
+            </li>
           ))}
         </ul>
-      </details>
+      </Disclose>
+
+      <Disclose summary="About you and your goals" className="card">
+        <div id="profile" className="flex flex-col gap-2">
+          <p className="text-sm text-muted">In your own words. The assistant, research and plan read this every time.{profile.updatedAt ? ` Last changed ${profile.updatedAt.slice(0, 10)}.` : ""}</p>
+          <form action={saveProfile} className="flex flex-col gap-2">
+            <textarea name="text" defaultValue={profile.text} rows={8} maxLength={3000} className="input py-2 leading-relaxed" />
+            <div><button className="btn btn-sm btn-primary">Save</button></div>
+          </form>
+        </div>
+      </Disclose>
     </div>
   );
 }
-
-const LABELS: Record<string, string> = {
-  etf_expected_return: "ETF expected annual return",
-  hurdle_over_etf: "Hurdle a stock must beat the ETF by",
-  research_freshness_days: "Research freshness limit (days)",
-};

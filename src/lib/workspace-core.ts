@@ -3,7 +3,7 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import { BENCHMARKS, dayChangePct, getQuotes, type Quote } from "@/lib/market/quotes";
 import { isMarketOpen } from "@/lib/market/hours";
 import { buildPortfolio, type LedgerEntry, type PortfolioView, type SnapshotInput } from "@/lib/portfolio/engine";
-import { readPolicy, type Policy } from "@/lib/policy/limits";
+import { readPolicy, type Policy , AGE_REMINDER_DAYS } from "@/lib/policy/limits";
 import { policyFromRules, type PolicyRuleRow } from "@/lib/policy/rules";
 import { toResearchRecord, type ResearchRecord, type VersionRow } from "@/lib/research/records";
 import { evaluateAlerts, type Alert } from "@/lib/alerts/rules";
@@ -19,7 +19,21 @@ export type Workspace = {
   alerts: Alert[];
   userId: string | null;
   ledger: LedgerEntry[];
+  /** Latest 2- and 10-year Treasury yields (FRED, from the last market snapshot): the risk-free alternative. */
+  yields: Yields;
 };
+
+export type Yields = { y2: { value: number; date: string } | null; y10: { value: number; date: string } | null };
+
+export async function loadYields(db: SupabaseClient): Promise<Yields> {
+  const { data } = await db.from("model_runs").select("outputs, computed_at").eq("kind", "market_snapshot").order("computed_at", { ascending: false }).limit(1);
+  const macro = (data?.[0]?.outputs as { macro?: { id: string; value: number | null; date: string }[] } | undefined)?.macro ?? [];
+  const pick = (id: string) => {
+    const m = Array.isArray(macro) ? macro.find((x) => x.id === id) : undefined;
+    return m && typeof m.value === "number" ? { value: m.value, date: m.date } : null;
+  };
+  return { y2: pick("DGS2"), y10: pick("DGS10") };
+}
 
 /** Latest snapshot per account, with positions. */
 export async function loadSnapshots(db: SupabaseClient): Promise<SnapshotInput[]> {
@@ -98,15 +112,15 @@ export async function loadLedger(db: SupabaseClient): Promise<LedgerEntry[]> {
 }
 
 export async function buildWorkspace(db: SupabaseClient, now = new Date()): Promise<Workspace> {
-  const [{ data: auth }, snapshots, research, policy, ledger] = await Promise.all([db.auth.getClaims(), loadSnapshots(db), loadResearch(db), loadPolicy(db), loadLedger(db)]);
+  const [{ data: auth }, snapshots, research, policy, ledger, yields] = await Promise.all([db.auth.getClaims(), loadSnapshots(db), loadResearch(db), loadPolicy(db), loadLedger(db), loadYields(db).catch(() => ({ y2: null, y10: null }))]);
   const symbols = [...new Set([...snapshots.flatMap((s) => s.positions.map((p) => p.symbol.toUpperCase())), ...ledger.filter((t) => t.symbol).map((t) => t.symbol!.toUpperCase())])];
   const quotes = await getQuotes([...symbols, ...BENCHMARKS.map((b) => b.symbol)]);
   const roles: Record<string, string | null> = Object.fromEntries(Object.values(policy?.companies ?? {}).map((c) => [c.symbol, c.role]));
   const classifications = { ...roles, ...Object.fromEntries(research.filter((r) => r.current?.parsed.classification).map((r) => [r.symbol, r.current!.parsed.classification])) };
   const portfolio = buildPortfolio(snapshots, quotes, policy, classifications, ledger, now);
   const benchmarks = BENCHMARKS.map((b) => ({ ...b, dayPct: dayChangePct(quotes.get(b.symbol)) }));
-  const alerts = evaluateAlerts({ portfolio, research, marketDayPct: benchmarks[0].dayPct, now, freshnessDays: policy?.researchFreshnessDays, policy });
-  return { now, marketOpen: isMarketOpen(now), quotes, benchmarks, portfolio, research, policy, alerts, userId: auth?.claims?.sub ?? null, ledger };
+  const alerts = evaluateAlerts({ portfolio, research, marketDayPct: benchmarks[0].dayPct, now, freshnessDays: AGE_REMINDER_DAYS, policy });
+  return { now, marketOpen: isMarketOpen(now), quotes, benchmarks, portfolio, research, policy, alerts, userId: auth?.claims?.sub ?? null, ledger, yields };
 }
 
 

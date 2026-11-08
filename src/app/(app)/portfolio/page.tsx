@@ -1,3 +1,4 @@
+import { AGE_REMINDER_DAYS } from "@/lib/policy/limits";
 import Link from "next/link";
 import { getWorkspace } from "@/lib/workspace";
 import { isEtf, LOOKTHROUGH_AS_OF } from "@/lib/portfolio/classify";
@@ -40,7 +41,7 @@ export default async function PortfolioPage({ searchParams }: { searchParams: Pr
   const session = ws.marketOpen ? "today" : "last session";
   const verified = p.quality.status === "verified";
   const conflicts = new Set(ws.policy?.audit?.conflicts.map((x) => x.subject) ?? []);
-  const freshDays = ws.policy?.researchFreshnessDays ?? 120;
+  const freshDays = AGE_REMINDER_DAYS;
   const name = (s: string) => ws.research.find((r) => r.symbol === s)?.name ?? null;
   const exposure = new Map(p.exposures.map((e) => [e.symbol, e]));
   const sorted = [...p.holdings].sort((a, b) =>

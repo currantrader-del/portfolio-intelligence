@@ -1,5 +1,6 @@
 "use server";
 
+import { AGE_REMINDER_DAYS } from "@/lib/policy/limits";
 import { createHash } from "node:crypto";
 import { redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
@@ -95,7 +96,7 @@ export async function checkLatestFiling(formData: FormData): Promise<ActionResul
   const h = ws.portfolio.holdings.find((x) => x.symbol === symbol);
   const price = q?.price ?? h?.price ?? null;
   const priceAsOf = q?.asOf ?? h?.priceAsOf ?? null;
-  const freshDays = ws.policy?.researchFreshnessDays ?? 120;
+  const freshDays = AGE_REMINDER_DAYS;
   const { check, basis } = await runFilingCheck({ record: record!, price, priceAsOf, now: ws.now, freshDays });
   const inputs = { symbol, at: ws.now.toISOString(), research_version: basis.versionId, research_as_of: basis.researchAsOf, price, price_as_of: priceAsOf, price_source: q ? q.provider : h ? h.priceSource : null, fresh_days: freshDays, sources: check.sources.map((s) => s.url) };
   const { error } = await db.from("model_runs").insert({ kind: "research_filing_check", code_version: FILING_CHECK_VERSION, inputs, inputs_sha256: createHash("sha256").update(JSON.stringify(inputs)).digest("hex"), outputs: check });
