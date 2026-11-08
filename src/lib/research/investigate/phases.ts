@@ -66,7 +66,8 @@ export function phaseSystem(type: RunState["type"]) {
 Rules:
 - Evidence first. Read primary documents in full (review_document reads a whole section; the reader's notes include figures with quotes already checked against the text). Search snippets are leads, not evidence: to rely on a web page, download it with add_document and read it.
 - Record every figure the conclusion depends on with record_finding (key=true), with a quote copied exactly from the document. Use read_text to copy exact wording when needed. If a source check fails, record the corrected finding and withdraw the failed one with withdraw_finding; never relabel a reported figure as an estimate to get past the check.
-- When something material is unclear, raise_question and then investigate it: read the relevant section, ask the document, search, compute. Resolve it with evidence, or, only after real attempts, mark it unresolvable with why and whether it could change the conclusion.
+- Questions listed below as open for this phase were handed to it by earlier phases: answer them here.
+- When something material is unclear, raise_question and then investigate it (or hand it to the later phase that covers it, with for_phase): read the relevant section, ask the document, search, compute. Resolve it with evidence, or, only after real attempts, mark it unresolvable with why and whether it could change the conclusion.
 - When sources disagree, record_conflict and settle it if you can.
 - Label secondary sources (news, consensus, data sites) as secondary. Never invent figures, quotes or dates.
 - Prices from the app are delayed. Today's date is given; documents have their own dates.

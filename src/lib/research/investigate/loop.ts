@@ -37,11 +37,11 @@ export async function runLoop(a: {
       messages.push({ role: "user", content: "Time for this step is nearly used up. Save what you have now: record findings and questions, then call the step's completion tool if the work is done. If it is not done, say what remains; the next step continues from your saved work." });
     }
     const t = Date.now();
-    const res = await client.beta.messages.create({
+    const res = await client.beta.messages.stream({
       model: a.model.id, max_tokens: 16000, system: [{ type: "text", text: a.system }], tools, messages,
       cache_control: { type: "ephemeral" },
       output_config: { effort: a.model.effort }, betas: ["server-side-fallback-2026-07-01"], fallbacks: "default",
-    });
+    }).finalMessage();
     usage = addUsage(usage, usageOf(res.model, res.usage, Date.now() - t));
     for (const b of res.content) {
       if (b.type === "server_tool_use" && b.name === "web_search") {
@@ -82,11 +82,13 @@ export async function runLoop(a: {
 export async function runOnce(a: { client?: Anthropic; model: { id: string; effort: "low" | "medium" | "high" | "xhigh" | "max" }; system: string; user: string; schema?: Record<string, unknown> }): Promise<{ text: string; usage: Usage; stop: string | null }> {
   const client = a.client ?? new Anthropic();
   const t = Date.now();
-  const res = await client.beta.messages.create({
+  // Streamed: the SDK refuses a non-streaming call whose max_tokens could run past 10 minutes (the
+  // skeptic on the high-effort model), which made every skeptical review fail.
+  const res = await client.beta.messages.stream({
     model: a.model.id, max_tokens: 24000, system: a.system, messages: [{ role: "user", content: a.user }],
     output_config: { effort: a.model.effort, ...(a.schema ? { format: { type: "json_schema" as const, schema: a.schema } } : {}) },
     betas: ["server-side-fallback-2026-07-01"], fallbacks: "default",
-  });
+  }).finalMessage();
   const text = res.content.filter((b): b is Anthropic.Beta.BetaTextBlock => b.type === "text").map((b) => b.text).join("").trim();
   return { text, usage: usageOf(res.model, res.usage, Date.now() - t), stop: res.stop_reason };
 }
