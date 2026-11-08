@@ -20,7 +20,7 @@ import { runLoop, runOnce } from "./loop";
 import { INV_MODELS } from "./models";
 import { FULL_PHASES, REFRESH_PHASES, phaseSystem, phaseUser, type PhaseDef } from "./phases";
 import { pendingParts, markReviewed, reviewPart } from "./reader";
-import { makeExec, T } from "./tools";
+import { makeExec, nextId, T } from "./tools";
 import { addUsage, emptyUsage, type InvDoc, type PhaseState, type ResearchType, type RunState } from "./types";
 
 export const INVESTIGATION_VERSION = "investigation@1";
@@ -64,7 +64,10 @@ export async function runInvestigationStep(db: SupabaseClient, requestId: string
   const input = req.inputs as { symbol: string; type: ResearchType; resume?: boolean };
   const cp = await latestCheckpoint(db, requestId);
   const s: RunState = cp?.state ?? initState(requestId, String(input.symbol).toUpperCase(), input.type);
+  repairIds(s);
   const seqAtStart = s.seq;
+  // Heartbeat: shows a step is in progress, so the status check can tell a long step from a lost one.
+  await save(db, "investigation_heartbeat", INVESTIGATION_VERSION, { request_id: requestId, seq: seqAtStart }, { step: s.steps[s.next] ?? null, note: "step started" }).catch(() => null);
   if (s.status === "finished" || s.status === "failed") return { more: false, step: null, status: s.status };
   if (s.status === "paused") s.status = "running";
 
@@ -99,6 +102,20 @@ export async function runInvestigationStep(db: SupabaseClient, requestId: string
   const stepUsage = { costUsd: Math.round((s.usage.costUsd - before.costUsd) * 10000) / 10000, ms: Date.now() - t0 };
   await save(db, "investigation_step", INVESTIGATION_VERSION, { request_id: requestId, step, seq: s.seq, symbol: s.symbol }, { state: s, step, costUsd: stepUsage.costUsd, ms: stepUsage.ms, status: s.status, symbol: s.symbol });
   return { more: s.status === "running", step, status: s.status };
+}
+
+/**
+ * Runs saved before the parallel-call fix could hold several findings (or questions, conflicts) under
+ * one id. Later duplicates get fresh ids so the gates and the model can tell them apart.
+ */
+export function repairIds(s: RunState) {
+  for (const [prefix, items] of [["F", s.findings], ["Q", s.questions], ["C", s.conflicts]] as const) {
+    const seen = new Set<string>();
+    for (const x of items as { id: string }[]) {
+      if (seen.has(x.id)) x.id = nextId(prefix, items as { id: string }[]);
+      seen.add(x.id);
+    }
+  }
 }
 
 function advance(s: RunState) { s.next++; s.attemptsAtStep = 0; }
@@ -313,7 +330,7 @@ ${s.phases.map((p) => `Phase ${p.n} ${p.title} [${p.status}]\n${p.summary.slice(
 VALUATION (computed by the app): ${v ? JSON.stringify({ horizon: v.horizon_date, revenue_basis: v.revenue_basis, result: v.result, assumptions: v.specs.map((x) => ({ name: x.name, p: x.probability, method: x.method, inputs: x.inputs, sources: x.sources, rationale: x.rationale })) }) : "none"}
 
 KEY FINDINGS:
-${s.findings.filter((f) => f.key).map((f) => `${f.id} ${f.claim}: ${f.value} ${f.unit} (${f.period}) [${f.source}, ${f.check.status}]`).join("\n")}
+${s.findings.filter((f) => f.key && !f.withdrawn).map((f) => `${f.id} ${f.claim}: ${f.value} ${f.unit} (${f.period}) [${f.source}, ${f.check.status}]`).join("\n")}
 
 QUESTIONS:
 ${s.questions.map((q) => `${q.id} [${q.status}, ${q.materiality}] ${q.question}${q.answer ? ` -> ${q.answer}` : ""}${q.why_unresolvable ? ` (unresolvable: ${q.why_unresolvable})` : ""}`).join("\n")}
@@ -416,13 +433,68 @@ export function statusOf(s: RunState, lastAt: string) {
   };
 }
 
+/** A step that started this long ago without saving is lost (Netlify stops a background function at 15 minutes). */
+const STEP_LOST_MS = 15.5 * 60_000;
+/** After a checkpoint the next step starts within seconds; this long with no heartbeat means the hand-off was lost. */
+const HANDOFF_LOST_MS = 3 * 60_000;
+
+async function latestHeartbeat(db: SupabaseClient, requestId: string): Promise<string | null> {
+  const { data } = await db.from("model_runs").select("computed_at").eq("kind", "investigation_heartbeat").eq("inputs->>request_id", requestId).order("computed_at", { ascending: false }).limit(1).maybeSingle();
+  return data?.computed_at ?? null;
+}
+
+/**
+ * Whether a running investigation has stopped moving. In progress = a heartbeat newer than the last
+ * checkpoint (a step is working; lost after 15.5 minutes). Between steps = the last checkpoint is newer
+ * (the next step should start at once; lost after 3 minutes).
+ */
+export function isStalled(p: { requestAt: string; checkpointAt: string | null; heartbeatAt: string | null; running: boolean }, now = Date.now()) {
+  if (!p.running) return false;
+  const cp = p.checkpointAt ? Date.parse(p.checkpointAt) : Date.parse(p.requestAt);
+  const hb = p.heartbeatAt ? Date.parse(p.heartbeatAt) : 0;
+  return hb > cp ? now - hb > STEP_LOST_MS : now - cp > HANDOFF_LOST_MS;
+}
+
 export async function investigationStatus(db: SupabaseClient, symbol: string) {
   const { data: req } = await db.from("model_runs").select("id, computed_at, inputs").eq("kind", "investigation_request").eq("inputs->>symbol", symbol).order("computed_at", { ascending: false }).limit(1).maybeSingle();
   if (!req) return { status: "none" as const };
-  const cp = await latestCheckpoint(db, req.id);
+  return statusForRequest(db, req);
+}
+
+async function statusForRequest(db: SupabaseClient, req: { id: string; computed_at: string; inputs: unknown }) {
+  const [cp, hb] = await Promise.all([latestCheckpoint(db, req.id), latestHeartbeat(db, req.id)]);
   const lastAt = cp?.at ?? req.computed_at;
-  const stalled = (!cp || cp.state.status === "running") && Date.now() - Date.parse(lastAt) > 16 * 60_000;
+  const stalled = isStalled({ requestAt: req.computed_at, checkpointAt: cp?.at ?? null, heartbeatAt: hb, running: !cp || cp.state.status === "running" });
   return { status: stalled ? ("stalled" as const) : cp ? (cp.state.status) : ("running" as const), requestId: req.id, type: (req.inputs as { type: ResearchType }).type, startedAt: req.computed_at, run: cp ? statusOf(cp.state, lastAt) : null };
+}
+
+/**
+ * Restarts a stalled run from its last checkpoint. The heartbeat is written first, so the run counts as
+ * in progress and a second caller (the page's polling, the scheduled sweep) does not start it twice.
+ * Returns true when a restart was sent.
+ */
+export const AUTO_RESTARTS = 3;
+export async function resumeIfStalled(db: SupabaseClient, requestId: string, dispatch: () => Promise<unknown>, manual = false) {
+  if (!manual) {
+    // Automatic restarts are capped: a step that keeps dying would otherwise be retried (and paid for) forever.
+    const { count } = await db.from("model_runs").select("id", { count: "exact", head: true }).eq("kind", "investigation_heartbeat").eq("inputs->>request_id", requestId).eq("outputs->>note", "restarted after a stall");
+    if ((count ?? 0) >= AUTO_RESTARTS) return false;
+  }
+  await save(db, "investigation_heartbeat", INVESTIGATION_VERSION, { request_id: requestId, seq: null }, { step: null, note: manual ? "resumed by you" : "restarted after a stall" });
+  await dispatch();
+  return true;
+}
+
+/** Investigations started in the last two days that have stalled (for the scheduled sweep). */
+export async function stalledInvestigations(db: SupabaseClient) {
+  const since = new Date(Date.now() - 2 * 86400_000).toISOString();
+  const { data } = await db.from("model_runs").select("id, computed_at, inputs").eq("kind", "investigation_request").gte("computed_at", since).order("computed_at", { ascending: false }).limit(20);
+  const out: { requestId: string; symbol: string }[] = [];
+  for (const req of data ?? []) {
+    const st = await statusForRequest(db, req);
+    if (st.status === "stalled") out.push({ requestId: req.id, symbol: String((req.inputs as { symbol?: string }).symbol ?? "") });
+  }
+  return out;
 }
 
 export async function loadState(db: SupabaseClient, requestId: string) {

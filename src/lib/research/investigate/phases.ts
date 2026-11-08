@@ -11,7 +11,7 @@ import type { ToolDef } from "./loop";
 
 export type PhaseDef = { n: number; title: string; tasks: string; tools: ToolDef[]; webSearches: number; high?: boolean };
 
-const BASE_TOOLS = [T.list_documents, T.review_document, T.ask_document, T.read_text, T.add_document, T.mark_unavailable, T.get_financials, T.record_finding, T.raise_question, T.resolve_question, T.record_conflict, T.complete_phase];
+const BASE_TOOLS = [T.list_documents, T.review_document, T.ask_document, T.read_text, T.add_document, T.mark_unavailable, T.get_financials, T.record_finding, T.withdraw_finding, T.raise_question, T.resolve_question, T.record_conflict, T.complete_phase];
 
 export const FULL_PHASES: PhaseDef[] = [
   { n: 1, title: "Business and thesis", webSearches: 4, tools: BASE_TOOLS, tasks: `Establish what the company actually does and why it could be a good investment.
@@ -65,7 +65,7 @@ export function phaseSystem(type: RunState["type"]) {
 
 Rules:
 - Evidence first. Read primary documents in full (review_document reads a whole section; the reader's notes include figures with quotes already checked against the text). Search snippets are leads, not evidence: to rely on a web page, download it with add_document and read it.
-- Record every figure the conclusion depends on with record_finding (key=true), with a quote copied exactly from the document. Use read_text to copy exact wording when needed. If a source check fails, fix it; never relabel a reported figure as an estimate to get past the check.
+- Record every figure the conclusion depends on with record_finding (key=true), with a quote copied exactly from the document. Use read_text to copy exact wording when needed. If a source check fails, record the corrected finding and withdraw the failed one with withdraw_finding; never relabel a reported figure as an estimate to get past the check.
 - When something material is unclear, raise_question and then investigate it: read the relevant section, ask the document, search, compute. Resolve it with evidence, or, only after real attempts, mark it unresolvable with why and whether it could change the conclusion.
 - When sources disagree, record_conflict and settle it if you can.
 - Label secondary sources (news, consensus, data sites) as secondary. Never invent figures, quotes or dates.
@@ -84,7 +84,7 @@ export function phaseUser(s: RunState, def: PhaseDef, extra: { prior: string | n
   const reviews = s.reviews.filter((r) => docs.some((d) => d.id === r.docId) && (def.n < 5 || !r.focus)).map((r) => reviewText(r, s.inventory.find((d) => d.id === r.docId)));
   const reviewBlock = def.n >= 5 ? reviews.map((r) => short(r, 2500)).join("\n\n") : reviews.join("\n\n");
   const questions = s.questions.map((q) => `${q.id} [${q.status}, ${q.materiality}] (phase ${q.phase}) ${q.question}${q.answer ? ` -> ${short(q.answer, 300)}` : ""}`).join("\n");
-  const findings = s.findings.map((f) => `${f.id} ${f.key ? "[key] " : ""}${f.claim}: ${f.value} ${f.unit} (${f.period}) — ${f.source}${f.doc_id ? ` ${f.doc_id}` : ""} [${f.check.status}]`).join("\n");
+  const findings = s.findings.filter((f) => !f.withdrawn).map((f) => `${f.id} ${f.key ? "[key] " : ""}${f.claim}: ${f.value} ${f.unit} (${f.period}) — ${f.source}${f.doc_id ? ` ${f.doc_id}` : ""} [${f.check.status}]`).join("\n");
   return `Company: ${s.symbol}${s.name ? ` (${s.name})` : ""}. Today: ${s.today}. App price: ${s.price.value ? `$${s.price.value} (${s.price.source}, ${s.price.asOf?.slice(0, 10) ?? "time unknown"})` : "none"}.
 Research type: ${s.type === "full_investigation" ? "full initial investigation" : `material-event refresh of the research dated ${s.base?.research_as_of}`}.
 

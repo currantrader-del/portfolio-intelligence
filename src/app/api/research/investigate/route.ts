@@ -3,13 +3,13 @@
  * material-event refresh, run as a chain of background steps.
  *   POST {symbol, type: "full" | "refresh"}  -> {requestId}
  *   POST {symbol, resume: true}              -> restarts a stalled or paused run from its last checkpoint
- *   GET ?symbol=<SYM>                         -> the latest run's status and checkpoints
+ *   GET ?symbol=<SYM>                         -> the latest run's status and checkpoints (restarts a stalled run, at most 3 times)
  */
 import { createClient } from "@/lib/supabase/server";
 import { dispatchJob } from "@/lib/intel/jobs";
 import { DAILY_CAP, spentToday } from "@/lib/intel/start";
 import { isEtf } from "@/lib/portfolio/classify";
-import { investigationStatus, startInvestigation } from "@/lib/research/investigate/run";
+import { investigationStatus, resumeIfStalled, startInvestigation } from "@/lib/research/investigate/run";
 
 export const runtime = "nodejs";
 export const maxDuration = 30;
@@ -31,7 +31,7 @@ export async function POST(req: Request) {
   const origin = new URL(req.url).origin;
   if (body?.resume) {
     if (st.status !== "stalled" && st.status !== "paused") return Response.json({ error: st.status === "running" ? "The research is still running." : "There is nothing to resume." }, { status: 409 });
-    await dispatchJob(origin, { job: "investigate", requestId: st.requestId!, token });
+    await resumeIfStalled(db, st.requestId!, () => dispatchJob(origin, { job: "investigate", requestId: st.requestId!, token }), true);
     return Response.json({ requestId: st.requestId });
   }
   if (st.status === "running") return Response.json({ error: "Research on this company is already running." }, { status: 409 });
@@ -60,5 +60,14 @@ export async function GET(req: Request) {
   if (!auth.user) return Response.json({ error: "Sign in first." }, { status: 401 });
   const symbol = clean(new URL(req.url).searchParams.get("symbol"));
   if (!symbol) return Response.json({ error: "Give symbol." }, { status: 400 });
-  return Response.json(await investigationStatus(db, symbol));
+  const st = await investigationStatus(db, symbol);
+  // A run whose hand-off between steps was lost is restarted from its last checkpoint when anyone
+  // looks at it (the scheduled sweep does the same when nobody is looking). Capped in resumeIfStalled.
+  if (st.status === "stalled" && process.env.ANTHROPIC_API_KEY) {
+    const { data: sess } = await db.auth.getSession();
+    const token = sess.session?.access_token;
+    const restarted = token ? await resumeIfStalled(db, st.requestId, () => dispatchJob(new URL(req.url).origin, { job: "investigate", requestId: st.requestId, token })).catch(() => false) : false;
+    if (restarted) return Response.json({ ...st, status: "running", autoResumed: true });
+  }
+  return Response.json(st);
 }

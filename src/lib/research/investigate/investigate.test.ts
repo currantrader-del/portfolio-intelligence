@@ -4,7 +4,9 @@ import { computeValuation, type ScenarioSpec } from "./valuationCalc";
 import { docStatus, finalGate, phaseGate } from "./gates";
 import { buildFinancials } from "./financials";
 import { usableVersion, toResearchRecord } from "../records";
-import { emptyUsage, type InvDoc, type RunState } from "./types";
+import { emptyUsage, type Finding, type InvDoc, type RunState } from "./types";
+import { nextId } from "./tools";
+import { isStalled, repairIds } from "./run";
 
 const filler = (n: number) => "lorem ipsum dolor sit amet ".repeat(n);
 
@@ -148,5 +150,42 @@ describe("research in use", () => {
     expect(r.current?.id).toBe("old");
     expect(r.latest?.id).toBe("old");
     expect(r.versions).toBe(1);
+  });
+});
+
+describe("fixes from the first NVDA run", () => {
+  const f = (id: string, over: Partial<Finding> = {}): Finding => ({ id, phase: 3, claim: "c", value: "1", unit: "", period: "", doc_id: "D1", quote: "q", source: "primary", key: true, check: { status: "verified", detail: "" }, ...over });
+
+  it("gives parallel findings distinct ids and repairs duplicates saved before the fix", () => {
+    expect(nextId("F", [f("F1"), f("F7"), f("F3")])).toBe("F8");
+    const s = state({ findings: [f("F16"), f("F16"), f("F17"), f("F16")] });
+    repairIds(s);
+    expect(s.findings.map((x) => x.id)).toEqual(["F16", "F18", "F17", "F19"]);
+  });
+
+  it("lets a withdrawn finding stop blocking the phase", () => {
+    const bad = f("F2", { check: { status: "quote_found_value_not_in_quote", detail: "x" } });
+    expect(phaseGate(state({ findings: [bad] }), 3, "y".repeat(500)).join(" ")).toMatch(/F2 failed/);
+    bad.withdrawn = { reason: "wrong figure", replaced_by: "F3" };
+    expect(phaseGate(state({ findings: [bad, f("F3")] }), 3, "y".repeat(500)).join(" ")).not.toMatch(/F2 failed/);
+  });
+
+  it("matches a date written differently in the quote", () => {
+    const doc = "NVIDIA will host a conference call on Tuesday, November 17, at 2 p.m. PT (5 p.m. ET)";
+    expect(checkQuote(doc, "NVIDIA will host a conference call on Tuesday, November 17, at 2 p.m. PT", "Nov 17, 2026").status).toBe("verified");
+    expect(checkQuote(doc, "NVIDIA will host a conference call on Tuesday, November 17, at 2 p.m. PT", "Nov 18, 2026").status).toBe("quote_found_value_not_in_quote");
+    expect(checkQuote("The meeting is on November 17, 2025 in the hall", "The meeting is on November 17, 2025", "Nov 17, 2026").status).toBe("quote_found_value_not_in_quote");
+  });
+
+  it("tells a long step from a lost hand-off", () => {
+    const t = Date.parse("2026-11-08T18:12:29Z");
+    const base = { requestAt: "2026-11-08T17:57:00Z", running: true };
+    // Checkpoint saved, no step started since: lost after 3 minutes.
+    expect(isStalled({ ...base, checkpointAt: "2026-11-08T18:12:29Z", heartbeatAt: "2026-11-08T18:10:13Z" }, t + 2 * 60_000)).toBe(false);
+    expect(isStalled({ ...base, checkpointAt: "2026-11-08T18:12:29Z", heartbeatAt: "2026-11-08T18:10:13Z" }, t + 4 * 60_000)).toBe(true);
+    // A step in progress (heartbeat after the checkpoint) is allowed its full 15 minutes.
+    expect(isStalled({ ...base, checkpointAt: "2026-11-08T18:12:29Z", heartbeatAt: "2026-11-08T18:12:30Z" }, t + 12 * 60_000)).toBe(false);
+    expect(isStalled({ ...base, checkpointAt: "2026-11-08T18:12:29Z", heartbeatAt: "2026-11-08T18:12:30Z" }, t + 17 * 60_000)).toBe(true);
+    expect(isStalled({ ...base, running: false, checkpointAt: "2026-11-08T18:12:29Z", heartbeatAt: null }, t + 60 * 60_000)).toBe(false);
   });
 });

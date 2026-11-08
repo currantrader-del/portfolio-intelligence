@@ -30,6 +30,7 @@ export const T = {
   mark_unavailable: tool("mark_unavailable", "Records that a document on the list cannot be obtained, with what was tried. Only after real attempts (searches, the company's investor-relations site, SEC exhibits).", { doc_id: S("Document id"), reason: S("Why it is unavailable"), attempts: { type: "array", items: { type: "string" }, description: "What was tried (queries, URLs)" } }, ["doc_id", "reason", "attempts"]),
   get_financials: tool("get_financials", "Multi-year reported financials from SEC XBRL (annual, year to date, trailing 12 months, latest quarter, balance sheet) with free cash flow and margins computed by the app. These figures count as verified primary data.", {}, []),
   record_finding: tool("record_finding", "Records a finding the research relies on. For a reported figure give the document id and a quote copied word for word from it; code checks that the quote and figure are in the document. source: primary (company document), xbrl (from get_financials), secondary (analyst consensus, news; cannot be verified against a primary document), calculation (your arithmetic: put the inputs in 'quote'), estimate (your judgment). key=true for figures the conclusion depends on.", { claim: S("What the finding says"), value: S("The figure as written, e.g. '35,082' or '61.2%'; empty if none"), unit: S("e.g. USD millions, %, shares"), period: S("e.g. Q2 FY27, FY ending 2026-01-25"), doc_id: S("Document id for primary findings; empty otherwise"), quote: S("Verbatim quote containing the figure (primary), the source and date (secondary), or the inputs (calculation)"), source: { type: "string", enum: ["primary", "xbrl", "secondary", "calculation", "estimate"] }, key: { type: "boolean" } }, ["claim", "value", "unit", "period", "quote", "source", "key"]),
+  withdraw_finding: tool("withdraw_finding", "Withdraws a finding that was recorded wrongly (a failed source check, a wrong figure or a duplicate). It stays in the audit trail marked withdrawn and no longer counts. Record the corrected finding first and pass its id as replaced_by.", { id: S("Finding id, e.g. F12"), reason: S("Why it is withdrawn"), replaced_by: S("Id of the corrected finding, or empty") }, ["id", "reason", "replaced_by"]),
   raise_question: tool("raise_question", "Records a question the research must answer, with how material it is to the conclusion. Then investigate it.", { question: S("The question"), materiality: { type: "string", enum: ["high", "medium", "low"] }, why: S("Why it matters to the conclusion") }, ["question", "materiality", "why"]),
   resolve_question: tool("resolve_question", "Closes a question. resolved: give the answer and the finding ids that support it. unresolvable: only after trying to answer it; list the attempts, why it cannot be answered with available information, whether it could change the conclusion, and its likely impact.", { id: S("Question id, e.g. Q2"), status: { type: "string", enum: ["resolved", "unresolvable"] }, answer: S("The answer, or the best current understanding"), evidence: { type: "array", items: { type: "string" }, description: "Finding ids" }, attempts: { type: "array", items: { type: "string" } }, why_unresolvable: S("For unresolvable"), could_change_conclusion: { type: "boolean" }, impact: S("How the answer could move the valuation or action") }, ["id", "status", "answer"]),
   record_conflict: tool("record_conflict", "Records evidence that conflicts (two sources or two figures that disagree, or management claims that the numbers do not support) and how it was resolved or why it remains open.", { description: S("What conflicts"), finding_ids: { type: "array", items: { type: "string" } }, resolution: S("Which is right and why, or why it cannot be settled"), status: { type: "string", enum: ["resolved", "unresolved"] } }, ["description", "finding_ids", "resolution", "status"]),
@@ -58,6 +59,9 @@ export const T = {
 };
 
 export type ToolCtx = { state: RunState; phase: number; db: SupabaseClient; ws: Workspace | null; done: { value: boolean } };
+
+/** Next free id with this prefix (max existing number + 1), so ids stay unique even if an earlier bug duplicated one. */
+export const nextId = (prefix: string, items: { id: string }[]) => `${prefix}${items.reduce((m, x) => Math.max(m, Number(x.id.slice(prefix.length)) || 0), 0) + 1}`;
 
 const findDoc = (s: RunState, id: unknown) => s.inventory.find((d) => d.id === String(id ?? "").trim().toUpperCase());
 const brief = (d: InvDoc) => ({ id: d.id, kind: d.kind, title: d.title, url: d.url || null, required: d.required, phases: d.phases, why: d.why, status: docStatus(d), unavailable_reason: d.unavailable_reason ?? undefined, chars: d.fetched?.chars, sections: d.sections?.map((x) => ({ key: x.key, label: x.label, chars: x.chars, material: x.material, read: `${x.reviewedParts.length}/${x.parts} parts` })) });
@@ -136,7 +140,7 @@ export function makeExec(ctx: ToolCtx) {
           if (placeholder) placeholder.attempts = [...(placeholder.attempts ?? []), `${url}: ${t.error}`];
           return { error: `Could not download: ${t.error}` };
         }
-        const d: InvDoc = placeholder ?? { id: `D${s.inventory.length + 1}`, kind, title: "", url, required: false, phases: [ctx.phase || 2], why: "", origin: /sec\.gov/.test(url) ? "sec" : "company", status: "retrieved" };
+        const d: InvDoc = placeholder ?? { id: nextId("D", s.inventory), kind, title: "", url, required: false, phases: [ctx.phase || 2], why: "", origin: /sec\.gov/.test(url) ? "sec" : "company", status: "retrieved" };
         d.url = url; d.title = String(input.title ?? url).slice(0, 200); d.why = String(input.why ?? d.why).slice(0, 300);
         d.origin = /sec\.gov/.test(url) ? "sec" : /seekingalpha|fool\.com|investing\.com|marketbeat|yahoo|nasdaq\.com|benzinga/.test(url) ? "web" : "company";
         d.attempts = [...(d.attempts ?? []), `${url}: downloaded`];
@@ -157,7 +161,10 @@ export function makeExec(ctx: ToolCtx) {
         return s.financials ? financialsText(s.financials) : { error: "XBRL financials could not be retrieved; use the filings' statements" };
       case "record_finding": {
         const src = String(input.source ?? "primary") as Finding["source"];
-        const f: Finding = { id: `F${s.findings.length + 1}`, phase: ctx.phase, claim: String(input.claim ?? "").slice(0, 500), value: String(input.value ?? "").slice(0, 60), unit: String(input.unit ?? "").slice(0, 40), period: String(input.period ?? "").slice(0, 60), doc_id: String(input.doc_id ?? "").trim().toUpperCase() || null, quote: String(input.quote ?? "").slice(0, 600), source: src, key: input.key === true, check: { status: "estimate", detail: "" } };
+        const f: Finding = { id: nextId("F", s.findings), phase: ctx.phase, claim: String(input.claim ?? "").slice(0, 500), value: String(input.value ?? "").slice(0, 60), unit: String(input.unit ?? "").slice(0, 40), period: String(input.period ?? "").slice(0, 60), doc_id: String(input.doc_id ?? "").trim().toUpperCase() || null, quote: String(input.quote ?? "").slice(0, 600), source: src, key: input.key === true, check: { status: "estimate", detail: "" } };
+        // Pushed before any await: the model often records several findings in one turn and the
+        // calls run in parallel, so the id must be taken synchronously.
+        s.findings.push(f);
         if (src === "primary") {
           const d = f.doc_id ? findDoc(s, f.doc_id) : undefined;
           if (!d) f.check = { status: "quote_not_found", detail: "A primary finding needs the id of the document it comes from" };
@@ -169,11 +176,21 @@ export function makeExec(ctx: ToolCtx) {
         else if (src === "secondary") f.check = { status: "secondary_unverifiable", detail: "Secondary source; not checkable against a primary document" };
         else if (src === "calculation") f.check = { status: "calculation", detail: "Calculation; inputs shown" };
         else f.check = { status: "estimate", detail: "Labelled as an estimate" };
-        s.findings.push(f);
-        return { id: f.id, check: f.check, ...(f.check.status.startsWith("quote") ? { fix: "Copy the quote exactly from read_text, or change the source to estimate/secondary." } : {}) };
+        return { id: f.id, check: f.check, ...(f.check.status.startsWith("quote") ? { fix: `Record a corrected finding (copy the quote exactly from read_text, with the figure inside the quote), then withdraw_finding ${f.id} with replaced_by. Do not relabel a reported figure as an estimate.` } : {}) };
+      }
+      case "withdraw_finding": {
+        const id = String(input.id ?? "").trim().toUpperCase();
+        const f = s.findings.find((x) => x.id === id && !x.withdrawn);
+        if (!f) return { error: `No active finding ${input.id}` };
+        const rep = String(input.replaced_by ?? "").trim().toUpperCase() || null;
+        if (rep && !s.findings.some((x) => x.id === rep && !x.withdrawn)) return { error: `Replacement ${rep} does not exist; record the corrected finding first` };
+        const reason = String(input.reason ?? "").trim();
+        if (!reason) return { error: "Give the reason" };
+        f.withdrawn = { reason: reason.slice(0, 400), replaced_by: rep };
+        return { ok: true, withdrawn: id };
       }
       case "raise_question": {
-        const q = { id: `Q${s.questions.length + 1}`, phase: ctx.phase, question: String(input.question ?? "").slice(0, 500), materiality: (["high", "medium", "low"].includes(String(input.materiality)) ? input.materiality : "medium") as "high" | "medium" | "low", why: String(input.why ?? "").slice(0, 500), status: "open" as const };
+        const q = { id: nextId("Q", s.questions), phase: ctx.phase, question: String(input.question ?? "").slice(0, 500), materiality: (["high", "medium", "low"].includes(String(input.materiality)) ? input.materiality : "medium") as "high" | "medium" | "low", why: String(input.why ?? "").slice(0, 500), status: "open" as const };
         s.questions.push(q);
         return { id: q.id, note: "Investigate it now (review or ask a document, search, compute), then resolve it." };
       }
@@ -189,7 +206,7 @@ export function makeExec(ctx: ToolCtx) {
         return { ok: true, question: q };
       }
       case "record_conflict": {
-        const c = { id: `C${s.conflicts.length + 1}`, phase: ctx.phase, description: String(input.description ?? "").slice(0, 800), finding_ids: Array.isArray(input.finding_ids) ? (input.finding_ids as unknown[]).map(String) : [], resolution: String(input.resolution ?? "").slice(0, 1200), status: input.status === "unresolved" ? "unresolved" as const : "resolved" as const };
+        const c = { id: nextId("C", s.conflicts), phase: ctx.phase, description: String(input.description ?? "").slice(0, 800), finding_ids: Array.isArray(input.finding_ids) ? (input.finding_ids as unknown[]).map(String) : [], resolution: String(input.resolution ?? "").slice(0, 1200), status: input.status === "unresolved" ? "unresolved" as const : "resolved" as const };
         s.conflicts.push(c);
         return { id: c.id };
       }

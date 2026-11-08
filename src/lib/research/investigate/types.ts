@@ -70,6 +70,8 @@ export type Finding = {
   source: FindingSource;
   key: boolean;
   check: { status: "verified" | "quote_found_value_not_in_quote" | "quote_not_found" | "xbrl" | "secondary_unverifiable" | "calculation" | "estimate" | "document_unreadable"; detail: string };
+  /** Set when the finding was withdrawn (wrong quote or figure, replaced by another finding); kept for the audit trail. */
+  withdrawn?: { reason: string; replaced_by: string | null };
 };
 
 export type Question = {

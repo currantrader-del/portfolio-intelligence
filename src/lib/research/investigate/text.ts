@@ -121,6 +121,8 @@ export function checkQuote(docText: string, quote: string, value: string | numbe
     from = i + p.length;
   }
   if (value === null || value === undefined || String(value).trim() === "") return { status: "verified", detail: "Quote found in the document." };
+  const date = dateMatch(String(value), quote);
+  if (date) return date;
   const want = digitsOf(String(value));
   if (!want.length) return { status: "verified", detail: "Quote found in the document." };
   const have = new Set(digitsOf(quote));
@@ -139,6 +141,25 @@ export function checkQuote(docText: string, quote: string, value: string | numbe
     });
   });
   return ok ? { status: "verified", detail: "Quote and figure found in the document." } : { status: "quote_found_value_not_in_quote", detail: `The quote is in the document but ${want.join(", ")} is not in it.` };
+}
+
+const MONTHS = ["jan", "feb", "mar", "apr", "may", "jun", "jul", "aug", "sep", "oct", "nov", "dec"];
+
+/**
+ * A date value ("Nov 17, 2026", "November 17") written differently in the quote ("Tuesday, November 17"):
+ * the month and day must be in the quote, and a year only has to match when the quote states one.
+ * Returns null when the value is not a month-day date, so the figure check runs instead.
+ */
+function dateMatch(value: string, quote: string): QuoteCheck | null {
+  const m = value.match(/\b(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*\.?\s+(\d{1,2})(?:st|nd|rd|th)?(?:,?\s+(\d{4}))?\b/i);
+  if (!m) return null;
+  const mon = MONTHS.indexOf(m[1].toLowerCase()), day = Number(m[2]), year = m[3] ? Number(m[3]) : null;
+  const q = quote.toLowerCase();
+  const found = [...q.matchAll(/\b(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*\.?\s+(\d{1,2})(?:st|nd|rd|th)?(?:,?\s+(\d{4}))?\b/g)]
+    .some((x) => MONTHS.indexOf(x[1]) === mon && Number(x[2]) === day && (!x[3] || year === null || Number(x[3]) === year));
+  if (!found) return { status: "quote_found_value_not_in_quote", detail: `The quote is in the document but the date ${value} is not in it.` };
+  const yearInQuote = /\b(19|20)\d{2}\b/.test(q);
+  return { status: "verified", detail: year !== null && !yearInQuote ? "Quote and date found in the document (the quote does not state the year)." : "Quote and date found in the document." };
 }
 
 /** sha-256 of text, as hex (Web Crypto, available in Node 20+ and Netlify functions). */

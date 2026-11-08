@@ -36,13 +36,14 @@ export function InvestigationReport({ symbol, v, sources }: { symbol: string; v:
   const snippets = sources.filter((s) => s.details?.review_status === "search_result_only");
   const count = (st: string) => docs.filter((d) => d.details.review_status === st).length;
   const findings = ev.findings ?? [];
-  const keyF = findings.filter((f) => f.key);
+  const keyF = findings.filter((f) => f.key && !f.withdrawn);
+  const withdrawn = findings.filter((f) => f.withdrawn);
   const val = ev.valuation;
 
   if (state === "running") {
     return (
       <Card labelledBy={`inv-${v.id}`} className="!gap-2">
-        <CardHead id={`inv-${v.id}`} title={`${type} · in progress`} right={<Pill small tone="copper" dot="solid">Running</Pill>} />
+        <CardHead id={`inv-${v.id}`} title={`${type} · in progress`} right={<Pill small tone="copper" dot="hollow">In progress</Pill>} />
         <p className="t-sm">Started {shortDate(v.research_as_of)}. Phase checkpoints appear below as each one is saved.</p>
         <Phases v={v} />
       </Card>
@@ -107,10 +108,10 @@ export function InvestigationReport({ symbol, v, sources }: { symbol: string; v:
         </Disclose>
         <Disclose summary={<span className="t-sm">Key numbers · {keyF.filter((f) => f.check.status === "verified" || f.check.status === "xbrl").length} of {keyF.length} verified against primary sources</span>}>
           <div className="flex flex-col gap-1.5 t-sm">
-            {[...keyF, ...findings.filter((f) => !f.key)].map((f) => (
-              <div key={f.id} className="flex flex-col">
+            {[...keyF, ...findings.filter((f) => !f.key && !f.withdrawn), ...withdrawn].map((f, i) => (
+              <div key={`${f.id}-${i}`} className={`flex flex-col ${f.withdrawn ? "opacity-60" : ""}`}>
                 <span className="text-ink">{f.id} · {f.claim}{f.value ? `: ${f.value} ${f.unit}` : ""} <span className="t-xs">({f.period})</span></span>
-                <span className={`t-xs ${f.check.status.startsWith("quote") ? "warn" : ""}`}>{CHECK_LABEL[f.check.status] ?? f.check.status}{f.doc_id ? ` · ${f.doc_id}` : ""}{f.key ? " · key" : ""}{f.quote && f.source === "primary" ? ` · “${f.quote.slice(0, 160)}${f.quote.length > 160 ? "…" : ""}”` : ""}</span>
+                <span className={`t-xs ${f.check.status.startsWith("quote") ? "warn" : ""}`}>{CHECK_LABEL[f.check.status] ?? f.check.status}{f.doc_id ? ` · ${f.doc_id}` : ""}{f.key ? " · key" : ""}{f.withdrawn ? ` · withdrawn: ${f.withdrawn.reason}${f.withdrawn.replaced_by ? ` (see ${f.withdrawn.replaced_by})` : ""}` : ""}{f.quote && f.source === "primary" ? ` · “${f.quote.slice(0, 160)}${f.quote.length > 160 ? "…" : ""}”` : ""}</span>
               </div>
             ))}
           </div>

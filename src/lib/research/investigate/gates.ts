@@ -32,7 +32,7 @@ export function phaseGate(s: RunState, n: number, summary: string): string[] {
     out.push(st === "unavailable" ? `${describeDoc(d)}: marked unavailable without a search attempt and a reason` : `${describeDoc(d)} is ${st.replace(/_/g, " ")}; review it in full (review_document) or show it is unavailable`);
   }
   for (const q of s.questions.filter((x) => x.phase === n && x.status === "open")) out.push(`Question ${q.id} is still open: investigate it, then resolve it or explain why it cannot be resolved`);
-  for (const f of s.findings.filter((x) => x.phase === n && x.key && (x.check.status === "quote_not_found" || x.check.status === "quote_found_value_not_in_quote" || x.check.status === "document_unreadable")))
+  for (const f of s.findings.filter((x) => x.phase === n && x.key && !x.withdrawn && (x.check.status === "quote_not_found" || x.check.status === "quote_found_value_not_in_quote" || x.check.status === "document_unreadable")))
     out.push(`Key finding ${f.id} failed the source check (${f.check.detail}); correct the quote or figure, or record it as an estimate`);
   for (const c of s.conflicts.filter((x) => x.phase === n && !x.resolution.trim())) out.push(`Conflict ${c.id} has no resolution or explanation`);
   if (n === 5 && !s.valuation?.result.ok) out.push(s.valuation ? `The valuation does not compute: ${s.valuation.result.errors.join("; ")}` : "No valuation set (use set_valuation)");
@@ -48,7 +48,7 @@ export function finalGate(s: RunState): { complete: boolean; reasons: string[] }
     if (q.status === "open") reasons.push(`Question ${q.id} is still open: ${q.question}`);
     else if (q.status === "unresolvable" && (q.could_change_conclusion || q.materiality === "high")) reasons.push(`Material question ${q.id} could not be resolved: ${q.question} (${q.why_unresolvable ?? "no reason given"})`);
   }
-  for (const f of s.findings.filter((x) => x.key && (x.check.status === "quote_not_found" || x.check.status === "quote_found_value_not_in_quote")))
+  for (const f of s.findings.filter((x) => x.key && !x.withdrawn && (x.check.status === "quote_not_found" || x.check.status === "quote_found_value_not_in_quote")))
     reasons.push(`Key finding ${f.id} did not match its source: ${f.claim}`);
   if (!s.valuation?.result.ok) reasons.push("The valuation did not compute cleanly");
   for (const o of s.objections) {
