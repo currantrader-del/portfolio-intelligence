@@ -13,6 +13,8 @@ import { runFilingCheck } from "@/lib/research/runFilingCheck";
 import { FILING_CHECK_VERSION } from "@/lib/research/filingCheck";
 import { fail, type ActionResult } from "@/lib/action-result";
 import { save } from "@/lib/intel/jobs";
+import { authorityOf, isAuthoritative } from "@/lib/research/standing";
+import type { VersionRow } from "@/lib/research/records";
 
 const cleanSymbol = (v: FormDataEntryValue | null) => String(v ?? "").trim().toUpperCase().replace(/[^A-Z0-9.\-]/g, "").slice(0, 10);
 
@@ -46,10 +48,10 @@ export async function setStage(formData: FormData): Promise<ActionResult> {
   if (!isStage(stage)) return fail("Choose a stage.");
   if (stage === "passed" && !note) return fail("Add a short reason before passing on a company.");
   const db = await createClient();
-  const { data: c } = await db.from("companies").select("id, stage_history, research_versions(completeness, is_current)").eq("symbol", symbol).single();
+  const { data: c } = await db.from("companies").select("id, stage_history, research_versions(id, research_as_of, created_at, origin, completeness, is_current, conclusion)").eq("symbol", symbol).single();
   if (!c) return fail(`${symbol} isn't in your list yet. Add it first.`);
-  if (stage === "ready" && !(c.research_versions ?? []).some((v: { completeness: string; is_current: boolean }) => v.is_current && v.completeness === "complete")) {
-    return fail("Ready for decision needs complete research marked current. Refresh or finish the research first.");
+  if (stage === "ready" && !(c.research_versions ?? []).some((v: VersionRow) => v.is_current && isAuthoritative(authorityOf(v)))) {
+    return fail("Ready for decision needs research you approved. Run a full investigation and approve it first.");
   }
   const at = new Date().toISOString();
   const label = STAGES.find((s) => s.key === stage)!.label;

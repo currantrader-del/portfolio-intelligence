@@ -13,6 +13,7 @@ import { getFilings, type Filing } from "../market/sec";
 import type { DeskResult, Item, Source } from "./desks";
 import { DESK_VERSION } from "./desks";
 import { usableVersion } from "../research/records";
+import { AUTHORITY_LABEL, authorityOf, isAuthoritative } from "../research/standing";
 import type { PortfolioContext } from "./synthesis";
 
 export const FILING_WINDOW_DAYS = 14;
@@ -63,7 +64,15 @@ export function researchItems(r: ResearchState, weight: number | null, now: Date
   const held = weight != null ? `Held at ${pct(weight)} of the portfolio. ` : "";
   const cur = r.current;
   const newest = r.newer[0] ?? null;
-  if (newest && !cur) {
+  const curAuthority = cur ? authorityOf({ ...cur, conclusion: cur.conclusion ?? {} }, now) : null;
+  if (cur && !isAuthoritative(curAuthority)) {
+    out.push({
+      headline: `${r.symbol}: no approved research (the record in use is ${AUTHORITY_LABEL[curAuthority!].toLowerCase()}, dated ${cur.research_as_of})`,
+      detail: `The record in use${action(cur) ? ` (${action(cur)})` : ""} was set automatically and the investor never approved it, so it is context only: no adds, buy zones or research-based targets come from it.${newest ? ` A newer version dated ${newest.research_as_of} (${newest.completeness}) is on file and also not approved yet.` : ""}`,
+      kind: "verified", significance: "medium", sources: [{ ...page, published: cur.research_as_of }], portfolio: `${held}${NOT_A_SIGNAL}`, unsourced: false, period: cur.research_as_of,
+      check: { status: "primary", url: page.url, found: [], missing: [], note: "read from the stored research versions", retrievedAt: now.toISOString() },
+    });
+  } else if (newest && !cur) {
     out.push({
       headline: `${r.symbol}: no approved research; latest version dated ${newest.research_as_of}${action(newest) ? ` (${action(newest)})` : ""}`,
       detail: `${r.versions ?? r.newer.length} research version(s) on file, none marked approved. The latest is ${newest.completeness}, dated ${newest.research_as_of}. Its conclusions are not an approved basis for decisions until one version is approved.`,

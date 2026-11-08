@@ -24,7 +24,8 @@ export function ideaAlerts(research: ResearchRecord[], held: Set<string>, quotes
     const p = r.current.parsed;
     const z = zoneFor(p.zones, q.price);
     const ref = p.referencePrice ? zoneFor(p.zones, p.referencePrice) : null;
-    if (z && ref && z.label !== ref.label && /add|buy/i.test(z.action)) {
+    // A buy band only alerts when it comes from research you approved; unapproved bands are context, not prompts.
+    if (r.authoritative !== false && z && ref && z.label !== ref.label && /add|buy/i.test(z.action)) {
       out.push({ id: `idea-zone:${r.symbol}:${z.label}`, severity: "medium", symbol: r.symbol, kind: "price_zone", title: `${r.symbol} at $${q.price.toFixed(2)} reached your "${z.label}" band`, detail: `Research action for this band: ${z.action}. Set at $${p.referencePrice} on ${p.referenceDate}.`, href: `/research/${r.symbol}` });
     }
     const day = q.prevClose ? q.price / q.prevClose - 1 : null;

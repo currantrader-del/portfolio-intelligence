@@ -1,6 +1,6 @@
 import { parseConclusion, type ParsedConclusion } from "./valuation";
 import type { ScreenResult, Stage } from "./screen";
-import { researchStanding } from "./standing";
+import { researchStanding, type Authority } from "./standing";
 
 export type PipelineInfo = { stage: Stage; note: string | null; stageUpdatedAt: string | null; screen: ScreenResult | null; screenedAt: string | null };
 
@@ -22,6 +22,10 @@ export type ResearchRecord = {
   filingCheck?: FilingCheckInfo | null;
   /** How the record in use came to be in use (approved, approved provisionally, or set automatically). */
   approval?: "approved" | "provisional" | "automatic" | null;
+  /** What the record in use is (approved, preliminary screen, historical...). Only approved research acts as the investment model. */
+  authority?: Authority | null;
+  /** True only when the record in use is research you approved (in full or provisionally). */
+  authoritative?: boolean;
   /** A newer investigation waiting for the investor's decision (not used for decisions until approved). */
   pendingReview?: { id: string; research_as_of: string; complete: boolean } | null;
 };
@@ -40,11 +44,11 @@ export function usableVersion(v: Pick<VersionRow, "is_current" | "conclusion">):
   return !["running", "awaiting_approval", "failed", "set_aside"].includes(String(c.review_state ?? ""));
 }
 
-export function toResearchRecord(symbol: string, name: string | null, watchlistStatus: string, versions: VersionRow[], pipeline: PipelineInfo = NO_PIPELINE, filingCheck: FilingCheckInfo | null = null): ResearchRecord {
+export function toResearchRecord(symbol: string, name: string | null, watchlistStatus: string, versions: VersionRow[], pipeline: PipelineInfo = NO_PIPELINE, filingCheck: FilingCheckInfo | null = null, now: Date = new Date()): ResearchRecord {
   const sorted = versions.filter(usableVersion).sort((a, b) => b.research_as_of.localeCompare(a.research_as_of));
   const cur = sorted.find((v) => v.is_current) ?? null;
   const latest = sorted[0] ?? null;
-  const st = researchStanding(versions);
+  const st = researchStanding(versions, now);
   return {
     symbol,
     name,
@@ -56,6 +60,8 @@ export function toResearchRecord(symbol: string, name: string | null, watchlistS
     pipeline,
     filingCheck,
     approval: st.inUse?.approval ?? null,
+    authority: st.inUse?.authority ?? null,
+    authoritative: st.authoritative,
     pendingReview: st.pending?.state === "awaiting_approval" ? { id: st.pending.v.id, research_as_of: st.pending.v.research_as_of, complete: st.pending.complete } : null,
   };
 }

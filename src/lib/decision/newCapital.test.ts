@@ -26,7 +26,7 @@ const legacy = readPolicy("v2", {
 });
 const research = (refPrice: string, completeness = "complete", asOf = "2026-10-20") => toResearchRecord("AAA", "AAA", "held", [{
   id: "v1", research_as_of: asOf, completeness, origin: "chatgpt_original", is_current: true,
-  conclusion: { action: "HOLD / NO ADD", classification: "Growth", reference_price: refPrice, reference_date: asOf,
+  conclusion: { review_state: "adopted", action: "HOLD / NO ADD", classification: "Growth", reference_price: refPrice, reference_date: asOf,
     valuation: { approx_holding_period_years: 4, bear_value: 20, base_value: 90, bull_value: 200, bear_probability: 0.3, base_probability: 0.5, bull_probability: 0.2 },
     price_framework: [{ price_zone: "< $35", action: "Add" }] },
 }]);
@@ -212,7 +212,7 @@ describe("new capital: event-driven refresh and independent verdicts", () => {
   });
   it("keeps the research's own 'hold' zone even when the return comparison clears", () => {
     const holdZone = toResearchRecord("AAA", "AAA", "held", [{ id: "v2", research_as_of: "2026-10-20", completeness: "complete", origin: "x", is_current: true,
-      conclusion: { action: "HOLD", reference_price: "$26", reference_date: "2026-10-20",
+      conclusion: { review_state: "adopted", action: "HOLD", reference_price: "$26", reference_date: "2026-10-20",
         valuation: { approx_holding_period_years: 4, bear_value: 20, base_value: 90, bull_value: 200, bear_probability: 0.3, base_probability: 0.5, bull_probability: 0.2 },
         price_framework: [{ price_zone: "< $20", action: "Add" }, { price_zone: "$20–$40", action: "Hold / no add" }] } }]);
     const aaa = newCapital({ amount: 400, portfolio: p, research: [holdZone], policy, now, filings: quiet }).options.find((o) => o.symbol === "AAA")!;
@@ -247,7 +247,7 @@ describe("new capital: event-driven refresh and independent verdicts", () => {
   });
   it("treats a conditional add in the research as no add until the condition is confirmed", () => {
     const cond = toResearchRecord("AAA", "AAA", "held", [{ id: "v3", research_as_of: "2026-10-20", completeness: "complete", origin: "x", is_current: true,
-      conclusion: { action: "Hold / no add", reference_price: "$26", reference_date: "2026-10-20",
+      conclusion: { review_state: "adopted", action: "Hold / no add", reference_price: "$26", reference_date: "2026-10-20",
         valuation: { approx_holding_period_years: 4, bear_value: 20, base_value: 90, bull_value: 200, bear_probability: 0.3, base_probability: 0.5, bull_probability: 0.2 },
         price_framework: [{ price_zone: "< $35", action: "Consider a small add only if Q4 results confirm the turnaround." }] } }]);
     const r = newCapital({ amount: 400, portfolio: p, research: [cond], policy, now, filings: quiet });
@@ -327,7 +327,7 @@ describe("new capital: research guides, but is reassessed when the evidence chan
   it("separates the old conclusion from today's recommendation when the re-priced valuation changed", () => {
     // Written at $60, where its own scenarios did not beat VOO; at $25 they do, inside the same hold zone.
     const hold = toResearchRecord("AAA", "AAA", "held", [{ id: "v4", research_as_of: "2026-10-20", completeness: "complete", origin: "x", is_current: true,
-      conclusion: { action: "Hold / no add", reference_price: "$60", reference_date: "2026-10-20",
+      conclusion: { review_state: "adopted", action: "Hold / no add", reference_price: "$60", reference_date: "2026-10-20",
         valuation: { approx_holding_period_years: 10, bear_value: 30, base_value: 80, bull_value: 140, bear_probability: 0.3, base_probability: 0.5, bull_probability: 0.2 },
         price_framework: [{ price_zone: "$10–$80", action: "Hold / no add" }] } }]);
     const aaa = newCapital({ amount: 400, portfolio: p, research: [hold], policy, now, filings: quiet }).options.find((o) => o.symbol === "AAA")!;

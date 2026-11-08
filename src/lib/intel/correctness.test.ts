@@ -109,7 +109,8 @@ describe("holdings desk", () => {
     expect(items[1].headline).toBe("ACME: 8-K filed 2026-11-05 (earnings results)");
     expect(items.every((i) => /not a buy or sell signal/.test(i.portfolio ?? ""))).toBe(true);
   });
-  const v = (id: string, asOf: string, current: boolean, action: string, completeness = "complete") => ({ id, research_as_of: asOf, completeness, origin: "test", is_current: current, conclusion: { action } });
+  // "current" records in these tests are research the investor approved; unapproved ones are tested separately.
+  const v = (id: string, asOf: string, current: boolean, action: string, completeness = "complete") => ({ id, research_as_of: asOf, completeness, origin: "test", is_current: current, conclusion: current ? { action, review_state: "adopted" } : { action } });
   it("shows a newer research version in progress instead of hiding it behind the approved one", () => {
     const r: ResearchState = { symbol: "ACME", name: "Acme", current: v("a", "2026-09-10", true, "HOLD / NO ADD"), newer: [v("b", "2026-11-06", false, "WAIT / REVIEW", "in_progress")], filingCheck: { id: "f", at: "2026-11-06T14:52:00Z", status: "WAIT / REVIEW", reason: "Refresh rules call for a full reassessment.", document: { form: "10-Q", filed: "2026-11-05", periodEnd: "2026-09-30", indexUrl: "https://www.sec.gov/x/index.json" }, material: [], refreshLevel: "full_reassessment" } };
     const items = researchItems(r, 0.03, now);
@@ -120,6 +121,12 @@ describe("holdings desk", () => {
   it("says plainly when no research version is approved", () => {
     const items = researchItems({ symbol: "ACME", name: null, current: null, newer: [v("a", "2026-09-12", false, "HOLD / NO ADD")], versions: 1, filingCheck: null }, null, now);
     expect(items[0].headline).toBe("ACME: no approved research; latest version dated 2026-09-12 (HOLD / NO ADD)");
+  });
+  it("never treats an automatically set record as approved (the Nov 7 preliminary screens)", () => {
+    const screen = { id: "s", research_as_of: "2026-11-07", completeness: "complete", origin: "claude_full", is_current: true, conclusion: { action: "Hold / no add", generated_by: "ai-research@2" } };
+    const items = researchItems({ symbol: "IREN", name: null, current: screen, newer: [], filingCheck: null }, 0.035, now);
+    expect(items[0].headline).toBe("IREN: no approved research (the record in use is preliminary screen (not approved), dated 2026-11-07)");
+    expect(items[0].detail).toMatch(/context only: no adds, buy zones or research-based targets/);
   });
   it("flags stale research when there is no newer version", () => {
     const items = researchItems({ symbol: "ACME", name: null, current: v("a", "2026-05-01", true, "HOLD"), newer: [], filingCheck: null }, null, now);

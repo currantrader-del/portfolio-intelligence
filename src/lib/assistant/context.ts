@@ -9,6 +9,7 @@ import { AGE_REMINDER_DAYS } from "@/lib/policy/limits";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { Workspace } from "@/lib/workspace-core";
 import { researchAgeDays } from "@/lib/research/records";
+import { AUTHORITY_LABEL } from "@/lib/research/standing";
 import type { Briefing } from "@/lib/intel/jobs";
 import { loadProfile } from "@/lib/profile";
 
@@ -47,7 +48,7 @@ export async function investorContext(ws: Workspace, db: SupabaseClient): Promis
     const newer = cur && last && last.id !== cur.id && last.research_as_of > cur.research_as_of ? last : null;
     const v = cur ?? last;
     const held = p.holdings.some((h) => h.symbol === r.symbol);
-    lines.push(`- ${r.symbol}${r.name ? ` (${r.name})` : ""}${held ? " [held]" : ` [${r.pipeline.stage}]`}: ${v ? `${cur ? "approved" : "NOT approved"} ${v.completeness} research dated ${v.research_as_of} (${age} days${age != null && age > fresh ? ", old: check filings since" : ""})${v.parsed.action ? `, call ${v.parsed.action}` : ""}${v.parsed.referencePrice ? `, reference price ${v.parsed.referencePrice}` : ""}` : "no research"}${newer ? `; NEWER VERSION IN PROGRESS dated ${newer.research_as_of} (${newer.parsed.action ?? newer.completeness}): treat the approved call as under review` : ""}`);
+    lines.push(`- ${r.symbol}${r.name ? ` (${r.name})` : ""}${held ? " [held]" : ` [${r.pipeline.stage}]`}: ${v ? `${r.authoritative ? `APPROVED${r.approval === "provisional" ? " (provisionally)" : ""}` : `NOT APPROVED (${r.authority ? AUTHORITY_LABEL[r.authority].toLowerCase() : "unapproved"}; context only, no adds, buy zones or targets from it)`} ${v.completeness} research dated ${v.research_as_of} (${age} days${age != null && age > fresh ? ", old: check filings since" : ""})${v.parsed.action ? `, call ${v.parsed.action}` : ""}${v.parsed.referencePrice ? `, reference price ${v.parsed.referencePrice}` : ""}` : "no research"}${newer ? `; NEWER VERSION IN PROGRESS dated ${newer.research_as_of} (${newer.parsed.action ?? newer.completeness}): an investigation awaits the investor's approval and is not used until approved` : ""}`);
   }
   const noResearch = p.holdings.filter((h) => !ws.research.some((r) => r.symbol === h.symbol) && !/ETF|fund|broad|International|Bonds|Small\/mid/i.test(h.bucket)).map((h) => h.symbol);
   if (noResearch.length) lines.push(`Held single companies with no research record: ${noResearch.join(", ")}.`);

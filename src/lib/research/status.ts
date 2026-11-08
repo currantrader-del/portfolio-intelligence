@@ -46,7 +46,9 @@ export function researchDepth(v: Pick<VersionRow, "research_as_of" | "completene
   return { level, label, automated, openQuestions, filings };
 }
 
-export type Coverage = { key: "current" | "incomplete" | "refresh" | "conflict" | "none"; label: string; tone: "gain" | "warn" | "neutral"; dot: "solid" | "hollow"; detail: string };
+export type Coverage = { key: "current" | "unapproved" | "incomplete" | "refresh" | "conflict" | "none"; label: string; tone: "gain" | "warn" | "neutral"; dot: "solid" | "hollow"; detail: string };
+
+const ageText = (age: number | null, reminderDays: number) => (age ?? 0) > reminderDays ? ` ${age} days old.` : "";
 
 export function coverage(r: ResearchRecord | undefined, price: number | null, now: Date, reminderDays: number): Coverage {
   if (!r || (!r.current && !r.latest)) return { key: "none", label: "Not researched", tone: "neutral", dot: "hollow", detail: "No research on file" };
@@ -55,6 +57,12 @@ export function coverage(r: ResearchRecord | undefined, price: number | null, no
   const complete = v.completeness === "complete";
   // No live price is a data gap, not a reason to redo the research: judge it on age alone then.
   const age = researchAgeDays(r, now);
+  // Only research you approved is an investment model. Anything else is context, however complete it looks.
+  if (r.authoritative === false) {
+    const what = r.authority === "preliminary_screen" ? "Preliminary screen" : r.authority === "historical" ? "Older research" : "Research";
+    return { key: "unapproved", label: r.pendingReview ? "Not approved · review waiting" : "Not approved", tone: "warn", dot: "hollow",
+      detail: `${what} you have not approved: context only, so no new money, buy zones or research-based targets.${r.pendingReview ? ` A finished investigation (${r.pendingReview.research_as_of}) is waiting for your decision.` : " Run a full investigation and approve it to use research for decisions."}${ageText(age, reminderDays)}` };
+  }
   const check = price ? repriceCheck(v.parsed, price, age, reminderDays) : { ok: true, reason: null, note: undefined };
   if (!check.ok) return { key: "refresh", label: "Refresh", tone: "warn", dot: "hollow", detail: check.reason ?? "Needs a refresh" };
   // A material new filing the research has not absorbed means it is not current, however complete it looks.
@@ -84,6 +92,7 @@ export function suggestStage(args: { stage: string; held: boolean; coverageKey: 
   let s: { stage: "screening" | "researching" | "ready" | "passed"; reason: string } | null = null;
   if (hasResearch && coverageKey === "current" && action && /\b(avoid|pass|do not (buy|own)|don't buy|sell|exit)\b/i.test(action)) s = { stage: "passed", reason: `The research says: ${action}` };
   else if (hasResearch && coverageKey === "current") s = { stage: "ready", reason: "Research is on file and current, so it can be compared for new money (automated research stays preliminary until its open questions are checked)." };
+  else if (hasResearch && coverageKey === "unapproved") s = { stage: "researching", reason: "Research is on file but you have not approved it, so it cannot be used for new money yet." };
   else if (hasResearch) s = { stage: "researching", reason: coverageKey === "incomplete" ? "Research is on file but incomplete." : "Research is on file but needs a refresh before it can be relied on." };
   else if (screenVerdict === "Weak on screen") s = { stage: "passed", reason: "Weak on the first screen and no research on file." };
   else if (screenVerdict) s = { stage: "screening", reason: `Screened: ${screenVerdict.toLowerCase()}. Next is AI research.` };

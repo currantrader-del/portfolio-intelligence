@@ -19,7 +19,11 @@ const kind = zoneKind;
 const FILL = { add: "#24332b", hold: "#2a2c31", trim: "#3a2a24" };
 const money = (n: number) => `$${n >= 100 ? Math.round(n) : n.toFixed(n >= 10 ? 0 : 2)}`;
 
-export function ZoneBar({ zones, price, held = true }: { zones: ZoneView[]; price: number | null; held?: boolean }) {
+/**
+ * `unapproved`: the bands come from research you have not approved (a preliminary screen or an older record).
+ * They are drawn in one neutral colour and labelled as context, so no band reads as a buy zone.
+ */
+export function ZoneBar({ zones, price, held = true, unapproved = false }: { zones: ZoneView[]; price: number | null; held?: boolean; unapproved?: boolean }) {
   const z = [...zones].sort((a, b) => a.low - b.low);
   if (!z.length) return null;
   // Equal-width segments; the marker sits proportionally inside the band that holds the price.
@@ -36,14 +40,14 @@ export function ZoneBar({ zones, price, held = true }: { zones: ZoneView[]; pric
   }
   const first = z[0];
   const last = z[z.length - 1];
-  const left = kind(first.action) === "add" && first.high ? `${held ? "Add research" : "Starter zone"} below ${money(first.high)}` : first.label;
-  const right = kind(last.action) === "trim" && last.low ? `Trim review above ${money(last.low)}` : last.label;
-  const label = `Research price bands: ${z.map((x) => `${x.label} ${x.action}`).join("; ")}${price !== null ? `. Today ${money(price)}` : ""}`;
+  const left = unapproved ? "Bands from unapproved research (context only)" : kind(first.action) === "add" && first.high ? `${held ? "Add research" : "Starter zone"} below ${money(first.high)}` : first.label;
+  const right = unapproved ? "" : kind(last.action) === "trim" && last.low ? `Trim review above ${money(last.low)}` : last.label;
+  const label = `${unapproved ? "Unapproved research, context only. " : ""}Research price bands: ${z.map((x) => `${x.label} ${x.action}`).join("; ")}${price !== null ? `. Today ${money(price)}` : ""}`;
   return (
     <div className="flex flex-col gap-1.5">
       <div className="relative h-2 flex gap-0.5" role="img" aria-label={label}>
         {z.map((x, i) => (
-          <span key={i} className={`flex-1 h-2 ${i === 0 ? "rounded-l-full" : ""} ${i === z.length - 1 ? "rounded-r-full" : ""}`} style={{ background: FILL[kind(x.action)] }} />
+          <span key={i} className={`flex-1 h-2 ${i === 0 ? "rounded-l-full" : ""} ${i === z.length - 1 ? "rounded-r-full" : ""}`} style={{ background: unapproved ? FILL.hold : FILL[kind(x.action)] }} />
         ))}
         {marker !== null && <span className="absolute -top-[3px] -bottom-[3px] w-[3px] rounded-sm bg-ink" style={{ left: `calc(${marker}% - 1.5px)` }} />}
       </div>

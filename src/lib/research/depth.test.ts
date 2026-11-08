@@ -9,17 +9,19 @@ const conclusion = (notVerified: string[] = []) => ({
   valuation: { terminal_date: "2028-12-31", bear_value: 60, base_value: 130, bull_value: 200, bear_probability: 0.3, base_probability: 0.5, bull_probability: 0.2 },
 });
 const rec = (o: { origin?: string; completeness?: string; notVerified?: string[]; fc?: FilingCheckInfo | null } = {}) =>
-  toResearchRecord("AAA", "AAA Corp", "held", [{ id: "v1", research_as_of: "2026-11-07", completeness: o.completeness ?? "complete", origin: o.origin ?? "claude_full", is_current: true, conclusion: conclusion(o.notVerified) }], undefined, o.fc ?? null);
+  toResearchRecord("AAA", "AAA Corp", "held", [{ id: "v1", research_as_of: "2026-11-07", completeness: o.completeness ?? "complete", origin: o.origin ?? "claude_full", is_current: true, conclusion: { ...conclusion(o.notVerified), ...((o.origin ?? "claude_full") === "claude_full" ? {} : { review_state: "adopted" }) } }], undefined, o.fc ?? null);
 const fc = (o: Partial<FilingCheckInfo> = {}): FilingCheckInfo => ({ at: "2026-11-08T12:00:00Z", status: "CURRENT", reason: "No material change found in the items checked.", document: { form: "10-Q", filed: "2026-08-01" }, material: [], ...o });
 
 describe("research depth: six AI sections are not verified research", () => {
   it("labels automated research preliminary, with its open questions, even when stored as complete", () => {
-    const c = coverage(rec({ notVerified: ["Q4 guidance", "share count after the convert"] }), 101, now, 120);
-    expect(c.key).toBe("current"); // still usable for comparison
-    expect(c.label).toBe("Preliminary · 2 open");
+    const r = rec({ notVerified: ["Q4 guidance", "share count after the convert"] });
+    expect(researchDepth(r.current!, null)).toMatchObject({ level: "preliminary", label: "Automated research (preliminary)", openQuestions: ["Q4 guidance", "share count after the convert"] });
+    // An automated screen you never approved is context only, never a basis for decisions.
+    const c = coverage(r, 101, now, 120);
+    expect(c.key).toBe("unapproved");
+    expect(c.label).toBe("Not approved");
     expect(c.tone).toBe("warn");
-    expect(c.detail).toMatch(/Automated research \(preliminary\): usable for comparison, not verified\. 2 questions it could not verify, e\.g\. Q4 guidance/);
-    expect(c.detail).toMatch(/has not checked SEC filings since this research/);
+    expect(c.detail).toMatch(/Preliminary screen you have not approved: context only, so no new money, buy zones or research-based targets/);
   });
   it("keeps non-automated research with open questions preliminary too", () => {
     expect(researchDepth(rec({ origin: "chatgpt_original", notVerified: ["margin"] }).current!, null).level).toBe("preliminary");

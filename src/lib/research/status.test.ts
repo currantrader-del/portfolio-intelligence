@@ -7,7 +7,7 @@ const now = new Date("2026-11-06T16:00:00Z");
 const rec = (o: { completeness?: string; asOf?: string; ref?: string; current?: boolean; versions?: number } = {}) =>
   toResearchRecord("AAA", "AAA Corp", "held", Array.from({ length: o.versions ?? 1 }, (_, i) => ({
     id: `v${i}`, research_as_of: o.asOf ?? "2026-10-20", completeness: o.completeness ?? "complete", origin: "chatgpt_original", is_current: o.current ?? true,
-    conclusion: { action: "HOLD", reference_price: o.ref ?? "$100", reference_date: o.asOf ?? "2026-10-20", valuation: { approx_holding_period_years: 3, bear_value: 60, base_value: 150, bull_value: 220, bear_probability: 0.25, base_probability: 0.5, bull_probability: 0.25 } },
+    conclusion: { review_state: "adopted", action: "HOLD", reference_price: o.ref ?? "$100", reference_date: o.asOf ?? "2026-10-20", valuation: { approx_holding_period_years: 3, bear_value: 60, base_value: 150, bull_value: 220, bear_probability: 0.25, base_probability: 0.5, bull_probability: 0.25 } },
   })));
 
 describe("research coverage label", () => {

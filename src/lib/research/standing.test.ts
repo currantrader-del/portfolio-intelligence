@@ -11,7 +11,9 @@ describe("research standing (the NVDA page)", () => {
   const s = researchStanding([nov7, stalled, inv]);
   it("says the Nov 7 record is in use but preliminary and never approved, not 'current and complete'", () => {
     expect(s.inUse?.v.id).toBe("c00b7fe1");
-    expect(s.inUse?.label).toBe("Preliminary (automated AI research), set automatically, not approved by you");
+    expect(s.inUse?.label).toBe("Preliminary screen (not approved): set automatically before approvals existed");
+    expect(s.inUse?.authority).toBe("preliminary_screen");
+    expect(s.authoritative).toBe(false);
     expect(s.inUse?.open).toHaveLength(7);
   });
   it("shows the newest investigation as waiting for a decision, with its open items, and the stalled run as history", () => {

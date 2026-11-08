@@ -27,6 +27,7 @@ export function ResearchSummary({ r, held, price, now, freshDays, error }: { r: 
   const next: string[] = [];
   if (sc?.verdict === "Weak on screen" && !held) next.push("The screen is weak: consider passing, or note why it is still worth research.");
   if (!v) next.push("Run AI research before this can be compared for new money.");
+  else if (cov.key === "unapproved") next.push("Approve a full investigation before relying on its price ranges or conclusion.");
   else if (cov.key !== "current") next.push("Refresh the research with AI before relying on its price ranges.");
 
   return (

@@ -45,6 +45,7 @@ export async function InvestmentSummary({ ws, symbol }: { ws: Workspace; symbol:
   return (
     <Card labelledBy="inv-h">
       <CardHead id="inv-h" cap="Investment summary" right={<span className="pill" style={{ color: cov.tone === "gain" ? "var(--gain)" : cov.tone === "warn" ? "var(--warn-ink)" : undefined, background: cov.tone === "warn" ? "var(--warn-bg)" : undefined }} title={cov.detail}><span className={`dot ${cov.dot === "hollow" ? "dot-hollow" : ""}`} aria-hidden="true" />Research in use: {cov.label.toLowerCase()}{r?.approval === "automatic" ? ", not approved" : r?.approval === "provisional" ? ", provisional" : ""}</span>} />
+      {r && r.authoritative === false && (r.current || r.latest) && <p className="t-sm rounded-[12px] bg-warn-bg text-warn-ink px-3 py-2">No approved research for {symbol}. The record below is {r.authority === "preliminary_screen" ? "a preliminary screen" : "research you have not approved"}, shown for context only: the app makes no add, buy-zone or target recommendation from it.</p>}
       {r?.pendingReview && <p className="t-xs warn">This uses the research in use. A newer investigation ({r.pendingReview.research_as_of}) is waiting for your decision and is not used until you approve it.</p>}
       {any ? (
         <div className="grid grid-cols-3 gap-2">
@@ -61,8 +62,8 @@ export async function InvestmentSummary({ ws, symbol }: { ws: Workspace; symbol:
           <div className="divider" />
           <div className="flex flex-col gap-2.5">
             <div className="flex items-center justify-between gap-3"><span className="t-sm">Valuation at today&apos;s price</span><DataLabel kind="model" /></div>
-            {v.parsed.zones.length > 0 && <ZoneBar zones={toZoneViews(v.parsed.zones)} price={price} />}
-            {zone && <span className="t-xs">Band today: {zone.label} · {zone.action}. A prompt to research, not a trade.</span>}
+            {v.parsed.zones.length > 0 && <ZoneBar zones={toZoneViews(v.parsed.zones)} price={price} unapproved={r?.authoritative === false} />}
+            {zone && <span className="t-xs">Band today: {zone.label} · {zone.action}. {r?.authoritative === false ? "From unapproved research: context only." : "A prompt to research, not a trade."}</span>}
             {check?.ok ? (
               <>
                 <div className="flex items-center justify-between gap-3"><span className="t-sm">Expected return</span><span className="num font-semibold">{er === null ? "—" : `≈ ${pctStr(er)} a year`}</span></div>

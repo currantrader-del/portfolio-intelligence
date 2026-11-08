@@ -1,3 +1,4 @@
+import { AUTHORITY_LABEL } from "@/lib/research/standing";
 /**
  * Tools the assistant may call. Every number it can cite comes from one of these,
  * and each result carries its source and timestamp.
@@ -226,6 +227,10 @@ export async function runTool(name: string, input: Record<string, unknown>, ws: 
         conflict: r.conflict,
         versions: r.versions,
         is_current: !!r.current,
+        authority: r.authority ? AUTHORITY_LABEL[r.authority] : "No research in use",
+        approved_by_investor: !!r.authoritative,
+        authority_rule: r.authoritative ? "Approved research: may be used as the investment model." : "NOT approved: context only. Do not recommend adding, a buy zone, a target above today's weight or a buy-below price from it. Say plainly that no approved research exists and that a full investigation the investor approves is needed.",
+        pending_investigation: r.pendingReview ?? null,
         research_as_of: v?.research_as_of ?? null,
         age_days: researchAgeDays(r, ws.now),
         completeness: v?.completeness ?? null,
