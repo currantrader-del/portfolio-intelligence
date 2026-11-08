@@ -18,6 +18,7 @@ import { InvestigationRunner } from "@/components/InvestigationRunner";
 import { InvestigationReport, type InvVersion, type SourceRow } from "@/components/InvestigationReport";
 import { getQuote } from "@/lib/market/quotes";
 import { coverage } from "@/lib/research/status";
+import { researchStanding, qualityOf, QUALITY_LABEL, approvalOf, type Standing } from "@/lib/research/standing";
 import { pctStr, shortDate, toneOf, usd } from "@/lib/format";
 import { Card, CardHead, Chevron, DataLabel, Disclose, Pill, SourceRef } from "@/components/ui";
 
@@ -36,7 +37,7 @@ const ERRORS: Record<string, string> = {
   ready: "Ready for decision needs complete research marked current. Refresh or finish the research first.",
   nofiling: "There is no stored research to check a filing against.",
 };
-const SAVED: Record<string, string> = { adopted: "The investigation is now your research in use. The earlier research stays on file.", stage: "Stage saved.", screen: "Screen updated.", filing: "SEC filing checked and the result stored." };
+const SAVED: Record<string, string> = { adopted: "Approved: the investigation is now your research in use. The earlier research stays on file.", provisional: "Approved provisionally: the investigation is in use with its open items listed, and no new money is suggested until they are resolved. The earlier research stays on file.", set_aside: "Kept your current research. The investigation stays on file, marked as set aside.", stage: "Stage saved.", screen: "Screen updated.", filing: "SEC filing checked and the result stored." };
 
 export default async function CompanyPage({ params, searchParams }: { params: Promise<{ symbol: string }>; searchParams: Promise<{ error?: string; saved?: string }> }) {
   const { symbol: raw } = await params;
@@ -95,7 +96,9 @@ export default async function CompanyPage({ params, searchParams }: { params: Pr
   const phases = versions.reduce((n, v) => n + (v.research_phases?.length ?? 0), 0);
   const isInv = (v: Version) => v.conclusion?.research_type === "full_investigation" || v.conclusion?.research_type === "material_event_refresh";
   const investigations = versions.filter(isInv).sort((a, b) => (b.created_at ?? b.research_as_of).localeCompare(a.created_at ?? a.research_as_of));
-  const latestInv = investigations[0] ?? null;
+  const standing = researchStanding(versions);
+  const shownInv = standing.pending?.v as Version | undefined ?? (standing.inUse && isInv(standing.inUse.v as Version) ? standing.inUse.v as Version : investigations[0]) ?? null;
+  const latestInv = shownInv;
 
   return (
     <div className="flex flex-col gap-3 lg:gap-4">
@@ -107,7 +110,8 @@ export default async function CompanyPage({ params, searchParams }: { params: Pr
 
       <div className="grid grid-cols-1 gap-3 lg:gap-4 lg:grid-cols-12 items-start">
         <div className="lg:col-span-7 flex flex-col gap-3 lg:gap-4 min-w-0">
-          {latestInv && <InvestigationReport symbol={company.symbol} v={latestInv as unknown as InvVersion} sources={latestInv.research_sources ?? []} />}
+          <ResearchStatus s={standing} />
+          {latestInv && <InvestigationReport symbol={company.symbol} v={latestInv as unknown as InvVersion} sources={latestInv.research_sources ?? []} inUse={standing.inUse && standing.inUse.v.id !== latestInv.id ? { research_as_of: standing.inUse.v.research_as_of, label: standing.inUse.label } : null} />}
           <InvestmentSummary ws={ws} symbol={company.symbol} />
           {thesis && (
             <Card labelledBy="th-h" className="!gap-2">
@@ -130,10 +134,12 @@ export default async function CompanyPage({ params, searchParams }: { params: Pr
                     <div key={v.id} className="flex flex-col gap-2 pb-3 border-b border-line last:border-b-0 last:pb-0">
                       <div className="flex flex-wrap items-center gap-1.5">
                         <span className="text-ink font-semibold mr-1">{shortDate(v.research_as_of)}</span>
-                        {v.is_current && <Pill small tone="gain" dot="solid">Current</Pill>}
-                        <Pill small tone={v.completeness === "complete" ? "neutral" : "warn"}>{v.completeness.replace("_", " ")}</Pill>
+                        {v.is_current && <Pill small tone={approvalOf(v) === "approved" ? "gain" : "warn"} dot="solid">{approvalOf(v) === "approved" ? "In use" : approvalOf(v) === "provisional" ? "In use, provisional" : "In use, not approved by you"}</Pill>}
+                        <Pill small tone={qualityOf(v) === "complete_investigation" || qualityOf(v) === "imported" ? "neutral" : "warn"}>{v.completeness === "in_progress" ? "In progress" : QUALITY_LABEL[qualityOf(v)]}</Pill>
                         <Pill small>{v.conclusion?.research_type === "preliminary_screen" ? "Preliminary screen" : v.conclusion?.research_type === "full_investigation" ? "Full investigation" : v.conclusion?.research_type === "material_event_refresh" ? "Material-event refresh" : ORIGIN_LABEL[v.origin] ?? v.origin}</Pill>
-                        {v.conclusion?.review_state === "awaiting_approval" && !v.is_current && <Pill small tone="copper">Awaiting approval</Pill>}
+                        {v.conclusion?.review_state === "awaiting_approval" && !v.is_current && <Pill small tone="copper">Awaiting your decision</Pill>}
+                        {v.conclusion?.review_state === "set_aside" && <Pill small>Set aside</Pill>}
+                        {!v.is_current && v !== standing.pending?.v && <Pill small>History</Pill>}
                       </div>
                       <div className="grid grid-cols-2 gap-x-4 gap-y-1 t-sm">
                         {(["action", "confidence", "classification", "reference_price"] as const).map((k) => (
@@ -174,6 +180,34 @@ export default async function CompanyPage({ params, searchParams }: { params: Pr
         </div>
       </div>
     </div>
+  );
+}
+
+/** Which research decisions use, what is waiting for you, what is history, and what is still open. */
+function ResearchStatus({ s }: { s: Standing }) {
+  if (!s.inUse && !s.pending) return null;
+  const gaps = [...(s.inUse?.open ?? []).map((x) => ({ x, from: "in use" })), ...(s.pending?.open ?? []).map((x) => ({ x, from: "new investigation" }))];
+  return (
+    <Card labelledBy="rs-h" className="!gap-2">
+      <CardHead id="rs-h" cap="Research status" />
+      <div className="flex flex-col gap-1.5 t-sm">
+        <div><span className="t-xs block">In use for decisions</span>
+          {s.inUse ? <span className="text-ink">{shortDate(s.inUse.v.research_as_of)} · {s.inUse.label}{s.inUse.open.length ? ` · ${s.inUse.open.length} open item${s.inUse.open.length === 1 ? "" : "s"}` : ""}</span> : <span className="text-ink">None</span>}
+        </div>
+        {s.pending && (
+          <div><span className="t-xs block">Latest investigation</span>
+            <span className="text-ink">{shortDate(s.pending.v.research_as_of)} · {s.pending.state === "running" ? "in progress" : `${s.pending.complete ? "complete" : s.pending.kind === "material_uncertainty" ? "incomplete: a material question has no reliable answer" : "incomplete"} · waiting for your decision (not used until you approve it)`}{s.pending.open.length ? ` · ${s.pending.open.length} open item${s.pending.open.length === 1 ? "" : "s"}` : ""}</span>
+          </div>
+        )}
+        {s.history.length > 0 && <div><span className="t-xs block">History</span><span>{s.history.length} earlier record{s.history.length === 1 ? "" : "s"}, kept unchanged (listed under Your research)</span></div>}
+        <p className={`t-xs ${s.inUse?.approval === "approved" && !s.pending ? "" : "warn"}`}>{s.decisions}</p>
+        {gaps.length > 0 && (
+          <Disclose summary={<span className="t-sm">Open evidence gaps · {gaps.length}</span>}>
+            <ul className="t-xs list-disc pl-4 flex flex-col gap-0.5">{gaps.slice(0, 20).map((g, i) => <li key={i}><span className="text-ink">{g.from}:</span> {g.x}</li>)}</ul>
+          </Disclose>
+        )}
+      </div>
+    </Card>
   );
 }
 

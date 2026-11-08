@@ -70,6 +70,8 @@ export type Finding = {
   source: FindingSource;
   key: boolean;
   check: { status: "verified" | "quote_found_value_not_in_quote" | "quote_not_found" | "xbrl" | "secondary_unverifiable" | "calculation" | "estimate" | "document_unreadable"; detail: string };
+  /** For a key figure not verified from a primary document: how it is treated (set in the evidence review). */
+  classification?: FindingClassification;
   /** Set when the finding was withdrawn (wrong quote or figure, replaced by another finding); kept for the audit trail. */
   withdrawn?: { reason: string; replaced_by: string | null };
 };
@@ -104,7 +106,28 @@ export type PhaseState = {
   carried_from?: string | null;
 };
 
-export type Objection = { id: string; objection: string; severity: "critical" | "major" | "minor"; evidence_to_check: string; response?: string; outcome?: "rebutted" | "accepted" | "partly_accepted" };
+export const CHALLENGE_AREAS = ["thesis", "valuation_assumptions", "probabilities", "projections", "competition", "portfolio_recommendation"] as const;
+export type ChallengeArea = (typeof CHALLENGE_AREAS)[number];
+/**
+ * One challenge from the skeptical review. Each names the claim it attacks and the test the reviewer
+ * actually ran (a document check, a stress test computed by the app, a comparison with the record),
+ * and the result of that test, so it is a tested objection rather than an opinion.
+ */
+export type Objection = {
+  id: string; objection: string; severity: "critical" | "major" | "minor"; evidence_to_check: string;
+  area?: ChallengeArea; claim?: string; test?: string; test_result?: string; test_kind?: "document" | "stress_test" | "record" | "reasoning"; finding_ids?: string[];
+  response?: string; outcome?: "rebutted" | "accepted" | "partly_accepted"; response_evidence?: string[];
+};
+/** The skeptic's verdict on whether the research's conclusions survive its challenges. */
+export type ReviewVerdict = {
+  thesis: "survives" | "survives_with_changes" | "fails"; valuation: "survives" | "survives_with_changes" | "fails"; recommendation: "survives" | "survives_with_changes" | "fails";
+  summary: string; required_changes: string[]; at: string;
+};
+/** How a key figure that is not verified from a primary document is treated. */
+export type EvidenceClass = "verified_primary" | "labeled_estimate" | "unresolved_not_material" | "unresolved_thesis_changing";
+export type FindingClassification = { cls: EvidenceClass; explanation: string; impact: string; replaced_by?: string | null };
+/** App-computed checks that the written conclusion matches the numbers and the portfolio. */
+export type ConsistencyCheck = { ok: boolean; issues: string[]; checks: { label: string; ok: boolean; detail: string }[] };
 
 export type Usage = { calls: number; input: number; cacheRead: number; cacheWrite: number; output: number; searches: number; costUsd: number; ms: number; byModel: Record<string, { calls: number; costUsd: number }> };
 
@@ -153,8 +176,22 @@ export type RunState = {
   phases: PhaseState[];
   valuation: { specs: ScenarioSpec[]; horizon_date: string; result: ValuationResult; revenue_basis: string } | null;
   objections: Objection[];
+  review?: ReviewVerdict | null;
+  /** Sensitivity results the app computed for the skeptic (kept for the audit trail). */
+  stress?: { label: string; weighted_value: number | null; annualized_return: number | null; note: string }[];
+  consistency?: ConsistencyCheck | null;
+  portfolioCheck?: { weight: number | null; direct: number | null; normalHigh: number | null; max: number | null; limitAuthority: string | null; headroomDollars: number | null } | null;
   summary: InvestmentSummary | null;
-  completeness: { complete: boolean; reasons: string[] } | null;
+  /** When the summary and the valuation were last set, to tell whether the conclusion was revisited after the review. */
+  summaryAt?: string | null;
+  valuationAt?: string | null;
+  /** The conclusion as it stood before the skeptical review, kept to show whether it survived. */
+  draft?: { action: string | null; confidence: string | null; headline: string | null; weighted_value: number | null; annualized_return: number | null; at: string } | null;
+  /**
+   * complete: every rule met. work_incomplete: work that could still be done is missing.
+   * material_uncertainty: the work was done but a material question has no reliable answer.
+   */
+  completeness: { complete: boolean; reasons: string[]; kind?: "complete" | "work_incomplete" | "material_uncertainty" } | null;
   usage: Usage;
   log: { at: string; step: string; note: string }[];
   refreshTriggers?: { rule: string; evidence: string }[];

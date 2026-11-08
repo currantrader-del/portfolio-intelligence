@@ -14,7 +14,8 @@ import { phaseGate, docStatus } from "./gates";
 import { markReviewed, pendingParts, reviewPart, reviewText } from "./reader";
 import { checkQuote } from "./text";
 import { computeValuation, type ScenarioSpec } from "./valuationCalc";
-import { addUsage, type DocKind, type Finding, type InvDoc, type Objection, type RunState } from "./types";
+import { consistencyCheck, customStress } from "./challenge";
+import { addUsage, CHALLENGE_AREAS, type ChallengeArea, type DocKind, type EvidenceClass, type Finding, type InvDoc, type Objection, type RunState } from "./types";
 import type { ToolDef } from "./loop";
 
 const S = (description: string) => ({ type: "string", description });
@@ -50,6 +51,11 @@ export const T = {
     allocation: { type: "object", properties: { target_pct: { type: ["number", "null"] }, max_pct: { type: ["number", "null"] }, note: S("") }, required: ["target_pct", "max_pct", "note"] },
     changes_vs_prior: S("What changed versus the earlier research on file and why"),
   }, ["headline", "business_quality", "valuation", "expected_return", "risks", "portfolio_fit", "action", "confidence", "would_change", "reasons", "classification", "thesis", "price_framework", "allocation", "changes_vs_prior"]),
+  stress_test: tool("stress_test", "Recomputes the valuation with changed assumptions (the app does the arithmetic). Each change applies to one scenario or 'all': multiply, add to, or set one input (revenue, multiple, operating_margin, ebitda_margin, fcf_margin, 'margin' for whichever margin the scenario uses, diluted_shares, net_debt, tax_rate, net_other_income), or set the probabilities. Returns the weighted value and annual return versus the research's.", { label: S("What this tests, e.g. 'base multiple at the 5-year median'"), changes: { type: "array", items: { type: "object", properties: { scenario: { type: "string", enum: ["all", "bear", "base", "bull"] }, input: S("Input name, or empty when only probabilities change"), multiply: N("Multiply the input by this"), add: N("Add this to the input (margins as fractions: -0.05 = 5 points)"), set: N("Set the input to this"), probabilities: { type: "object", properties: { bear: N(""), base: N(""), bull: N("") } } } } } }, ["label", "changes"]),
+  record_objection: tool("record_objection", "Records one tested challenge. Name the area, the exact claim attacked, the test you ran (a document check with ask_document/read_text, a stress_test, a comparison with the reported record or guidance) and what the test showed. An objection without a test is not accepted.", { area: { type: "string", enum: [...CHALLENGE_AREAS] }, claim: S("The research's claim or assumption being challenged, quoted or cited by id"), objection: S("The weakness"), test_kind: { type: "string", enum: ["document", "stress_test", "record", "reasoning"] }, test: S("What you checked or computed"), test_result: S("What it showed, with numbers"), severity: { type: "string", enum: ["critical", "major", "minor"] }, finding_ids: { type: "array", items: { type: "string" } }, evidence_to_check: S("What evidence would settle it") }, ["area", "claim", "objection", "test_kind", "test", "test_result", "severity", "finding_ids", "evidence_to_check"]),
+  finish_review: tool("finish_review", "Ends the skeptical review with the verdict: does the thesis survive, does the valuation survive, does the recommendation survive (survives, survives_with_changes, fails), and the changes the conclusion must make. Accepted when every area has at least one tested challenge and at least three challenges were tested against documents or with stress tests.", { thesis: { type: "string", enum: ["survives", "survives_with_changes", "fails"] }, valuation: { type: "string", enum: ["survives", "survives_with_changes", "fails"] }, recommendation: { type: "string", enum: ["survives", "survives_with_changes", "fails"] }, summary: S("2-4 sentences: what held up and what did not"), required_changes: { type: "array", items: { type: "string" } } }, ["thesis", "valuation", "recommendation", "summary", "required_changes"]),
+  classify_finding: tool("classify_finding", "Classifies a key figure that is not verified from a primary document: verified_primary (you found it in a primary document: record that finding first and give its id as replaced_by), labeled_estimate (an assumption, consensus or calculation, labelled as such), unresolved_not_material, or unresolved_thesis_changing. Explain what is uncertain and how it affects the conclusion.", { id: S("Finding id"), cls: { type: "string", enum: ["verified_primary", "labeled_estimate", "unresolved_not_material", "unresolved_thesis_changing"] }, explanation: S("What was checked and what remains uncertain"), impact: S("How it affects the valuation, the action or the confidence"), replaced_by: S("For verified_primary: the id of the verified finding") }, ["id", "cls", "explanation", "impact", "replaced_by"]),
+  finish_answers: tool("finish_answers", "Ends the answers to the skeptical review. Accepted when every objection is answered, the conclusion was revisited where the review required it, every unverified key figure is classified, and the summary matches the app's numbers and the position limits.", { account: S("What survived the review, what changed and why (cite objection ids)") }, ["account"]),
   get_quote: tool("get_quote", "Latest delayed quote for a ticker.", { symbol: S("") }, ["symbol"]),
   get_technicals: tool("get_technicals", "Price trend, returns and levels for a ticker.", { symbol: S("") }, ["symbol"]),
   get_portfolio: tool("get_portfolio", "The investor's holdings, weights, cash and single-company exposure including ETFs.", {}, []),
@@ -59,6 +65,9 @@ export const T = {
 };
 
 export type ToolCtx = { state: RunState; phase: number; db: SupabaseClient; ws: Workspace | null; done: { value: boolean } };
+
+/** Active key findings that are not verified from a primary source and not yet classified. */
+export const unclassified = (s: RunState) => s.findings.filter((f) => f.key && !f.withdrawn && f.check.status !== "verified" && f.check.status !== "xbrl" && !f.classification);
 
 /** Next free id with this prefix (max existing number + 1), so ids stay unique even if an earlier bug duplicated one. */
 export const nextId = (prefix: string, items: { id: string }[]) => `${prefix}${items.reduce((m, x) => Math.max(m, Number(x.id.slice(prefix.length)) || 0), 0) + 1}`;
@@ -231,11 +240,65 @@ export function makeExec(ctx: ToolCtx) {
         const result = computeValuation({ scenarios: specs, horizon_date: String(input.horizon_date ?? ""), price: s.price.value, today: s.today, trailing });
         if (sourceErrors.length) { result.errors.push(...sourceErrors); result.ok = false; }
         s.valuation = { specs, horizon_date: String(input.horizon_date ?? ""), result, revenue_basis: String(input.revenue_basis ?? "") };
+        s.valuationAt = new Date().toISOString();
         return { computed_by_app: result, note: result.ok ? "Use these computed figures in the phase summary. Explain any large gap between scenario assumptions and the reported trailing figures." : "Fix the errors and call set_valuation again." };
+      }
+      case "stress_test": {
+        const changes = (Array.isArray(input.changes) ? input.changes : []) as Parameters<typeof customStress>[1];
+        const r = customStress(s, changes);
+        if ("error" in r) return r;
+        s.stress = [...(s.stress ?? []), { label: `Skeptic: ${String(input.label ?? "test").slice(0, 160)}`, weighted_value: r.weighted_value, annualized_return: r.annualized_return, note: JSON.stringify(changes).slice(0, 400) }];
+        return r;
+      }
+      case "record_objection": {
+        const area = String(input.area ?? "") as ChallengeArea;
+        if (!CHALLENGE_AREAS.includes(area)) return { error: `area must be one of ${CHALLENGE_AREAS.join(", ")}` };
+        const test = String(input.test ?? "").trim(), result = String(input.test_result ?? "").trim();
+        if (test.length < 20 || result.length < 20) return { error: "Describe the test you ran and what it showed (with numbers); an untested objection is not recorded" };
+        const kind = String(input.test_kind ?? "reasoning") as Objection["test_kind"];
+        if (kind === "stress_test" && !(s.stress ?? []).some((x) => x.label.startsWith("Skeptic:"))) return { error: "Run stress_test first" };
+        const ids = (Array.isArray(input.finding_ids) ? input.finding_ids : []).map((x) => String(x).trim().toUpperCase()).filter(Boolean);
+        const bad = ids.filter((id) => !s.findings.some((f) => f.id === id));
+        if (bad.length) return { error: `Unknown finding ids: ${bad.join(", ")}` };
+        const sev = (["critical", "major", "minor"].includes(String(input.severity)) ? input.severity : "major") as Objection["severity"];
+        const o: Objection = { id: nextId("S", s.objections), area, claim: String(input.claim ?? "").slice(0, 600), objection: String(input.objection ?? "").slice(0, 1200), test_kind: kind, test: test.slice(0, 800), test_result: result.slice(0, 1000), severity: sev, finding_ids: ids, evidence_to_check: String(input.evidence_to_check ?? "").slice(0, 600) };
+        s.objections.push(o);
+        const covered = new Set(s.objections.map((x) => x.area));
+        return { id: o.id, areas_still_to_challenge: CHALLENGE_AREAS.filter((a) => !covered.has(a)) };
+      }
+      case "finish_review": {
+        const covered = new Set(s.objections.map((x) => x.area));
+        const missing: string[] = CHALLENGE_AREAS.filter((a) => !covered.has(a)).map((a) => `No tested challenge on ${a.replace(/_/g, " ")}`);
+        const tested = s.objections.filter((o) => o.test_kind === "document" || o.test_kind === "stress_test").length;
+        if (tested < 3) missing.push(`Only ${tested} challenge(s) tested against documents or with a stress test; at least 3 are needed`);
+        if (!s.objections.some((o) => o.test_kind === "stress_test")) missing.push("At least one challenge must test a valuation assumption with stress_test");
+        const verdict = (x: unknown) => (["survives", "survives_with_changes", "fails"].includes(String(x)) ? x : "survives_with_changes") as "survives" | "survives_with_changes" | "fails";
+        if (missing.length) return { accepted: false, missing };
+        s.review = { thesis: verdict(input.thesis), valuation: verdict(input.valuation), recommendation: verdict(input.recommendation), summary: String(input.summary ?? "").slice(0, 1500), required_changes: (Array.isArray(input.required_changes) ? input.required_changes : []).map(String).slice(0, 12), at: new Date().toISOString() };
+        ctx.done.value = true;
+        return { accepted: true };
+      }
+      case "classify_finding": {
+        const f = s.findings.find((x) => x.id === String(input.id ?? "").trim().toUpperCase() && !x.withdrawn);
+        if (!f) return { error: `No active finding ${input.id}` };
+        const cls = String(input.cls ?? "") as EvidenceClass;
+        if (!["verified_primary", "labeled_estimate", "unresolved_not_material", "unresolved_thesis_changing"].includes(cls)) return { error: "Unknown class" };
+        const rep = String(input.replaced_by ?? "").trim().toUpperCase() || null;
+        if (cls === "verified_primary") {
+          const r = rep ? s.findings.find((x) => x.id === rep && !x.withdrawn) : undefined;
+          if (!r || !(r.check.status === "verified" || r.check.status === "xbrl")) return { error: "verified_primary needs replaced_by: a finding whose quote and figure the app found in a primary document (record it first)" };
+        }
+        const explanation = String(input.explanation ?? "").trim(), impact = String(input.impact ?? "").trim();
+        if (explanation.length < 15 || impact.length < 15) return { error: "Explain what was checked and how it affects the conclusion" };
+        f.classification = { cls, explanation: explanation.slice(0, 800), impact: impact.slice(0, 800), replaced_by: rep };
+        return { ok: true, still_to_classify: unclassified(s).map((x) => x.id) };
       }
       case "respond_objection": {
         const o = s.objections.find((x) => x.id === String(input.id ?? "").trim().toUpperCase());
         if (!o) return { error: `No objection ${input.id}` };
+        const evidence = String(input.response ?? "").match(/\b[FQD]\d+\b|stress/gi) ?? [];
+        if (o.severity !== "minor" && !evidence.length) return { error: "Answer a critical or major objection with evidence: cite finding, question or document ids, or a stress test" };
+        o.response_evidence = [...new Set(evidence.map((x) => x.toUpperCase()))];
         o.response = String(input.response ?? "").slice(0, 1500);
         o.outcome = (["rebutted", "accepted", "partly_accepted"].includes(String(input.outcome)) ? input.outcome : "partly_accepted") as Objection["outcome"];
         return { ok: true, remaining: s.objections.filter((x) => !x.outcome).map((x) => x.id) };
@@ -245,6 +308,7 @@ export function makeExec(ctx: ToolCtx) {
         if (!sm?.action || !sm.headline || !Array.isArray(sm.reasons) || !sm.reasons.length) return { error: "The summary needs a headline, an action and the reasons" };
         if (!s.valuation?.result.ok) return { error: "Set a valuation that computes before the summary" };
         s.summary = sm;
+        s.summaryAt = new Date().toISOString();
         return { ok: true };
       }
       case "complete_phase": {
@@ -254,11 +318,36 @@ export function makeExec(ctx: ToolCtx) {
           const unanswered = s.objections.filter((o) => !o.outcome).map((o) => o.id);
           if (unanswered.length) gate.push(`Answer the skeptic's objections first: ${unanswered.join(", ")}`);
           if (!s.summary) gate.push("Submit the investment summary first (submit_summary)");
+          const open = unclassified(s);
+          if (open.length) gate.push(`Classify every key figure not verified from a primary document (classify_finding): ${open.map((f) => f.id).join(", ")}`);
+          if (s.summary) { const cc = consistencyCheck(s); if (!cc.ok) gate.push(...cc.issues); }
         }
         const p = s.phases.find((x) => x.n === ctx.phase)!;
         p.gate = gate;
         if (gate.length) return { accepted: false, missing: gate };
         p.status = "complete"; p.summary = summary.slice(0, 20000); p.key_points = (Array.isArray(input.key_points) ? input.key_points : []).map(String).slice(0, 10); p.at = new Date().toISOString();
+        ctx.done.value = true;
+        return { accepted: true };
+      }
+      case "finish_answers": {
+        const gate: string[] = [];
+        const unanswered = s.objections.filter((o) => !o.outcome).map((o) => o.id);
+        if (unanswered.length) gate.push(`Answer every objection: ${unanswered.join(", ")}`);
+        const mustRevisit = s.objections.some((o) => o.severity !== "minor" && (o.outcome === "accepted" || o.outcome === "partly_accepted")) || (!!s.review && (s.review.recommendation !== "survives" || s.review.valuation !== "survives"));
+        const after = s.review?.at ?? s.draft?.at ?? "";
+        if (mustRevisit && !(s.summaryAt && s.summaryAt > after)) gate.push("The review requires changes (or you accepted a critical or major objection): submit the summary again with the changes, even if the action stays the same");
+        if (s.valuationAt && s.summaryAt && s.valuationAt > s.summaryAt) gate.push("The valuation changed after the summary: submit the summary again with the new figures");
+        const open = unclassified(s);
+        if (open.length) gate.push(`Classify every key figure not verified from a primary document: ${open.map((f) => f.id).join(", ")}`);
+        const cc = consistencyCheck(s);
+        if (!cc.ok) gate.push(...cc.issues);
+        const account = String(input.account ?? "").trim();
+        if (account.length < 150) gate.push("Give a fuller account of what survived the review and what changed");
+        const p = s.phases.find((x) => x.n === 6)!;
+        p.gate = gate;
+        if (gate.length) return { accepted: false, missing: gate };
+        p.summary = `${p.summary}\n\n**Answer to the skeptical review**\n${account.slice(0, 6000)}`.slice(0, 26000);
+        p.at = new Date().toISOString();
         ctx.done.value = true;
         return { accepted: true };
       }

@@ -194,7 +194,9 @@ export function newCapital(args: {
     let fresh: Verdict;
     if (!r || (!v && !r.conflict)) { fresh = { ok: false, detail: "No current research on file" }; toVerify.push(`${symbol}: full research before it can be compared`); }
     else if (r.conflict) { fresh = { ok: false, detail: "Research records conflict and none is marked current" }; toVerify.push(`${symbol}: resolve which research record is current`); }
+    else if (r.approval === "provisional") { fresh = { ok: false, detail: "The research in use was approved provisionally, with material questions still open" }; toVerify.push(`${symbol}: resolve the open items in the provisionally approved research (a refresh) before new money`); }
     else if (v!.completeness !== "complete") { fresh = { ok: false, detail: `Research is ${v!.completeness}` }; toVerify.push(`${symbol}: complete the missing research phases`); }
+    else if (r.pendingReview) { fresh = { ok: false, detail: `A newer investigation (${r.pendingReview.research_as_of}) is waiting for your decision; it is not used until you approve it` }; toVerify.push(`${symbol}: approve or set aside the newer investigation`); }
     else {
       const st = refreshState({ asOf: v!.research_as_of, pc: v!.parsed, price, filings: args.filings?.get(symbol) ?? null });
       refreshFirst = st.status === "refresh";

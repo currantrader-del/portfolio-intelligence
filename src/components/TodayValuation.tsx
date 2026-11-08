@@ -44,7 +44,8 @@ export async function InvestmentSummary({ ws, symbol }: { ws: Workspace; symbol:
 
   return (
     <Card labelledBy="inv-h">
-      <CardHead id="inv-h" cap="Investment summary" right={<span className="pill" style={{ color: cov.tone === "gain" ? "var(--gain)" : cov.tone === "warn" ? "var(--warn-ink)" : undefined, background: cov.tone === "warn" ? "var(--warn-bg)" : undefined }} title={cov.detail}><span className={`dot ${cov.dot === "hollow" ? "dot-hollow" : ""}`} aria-hidden="true" />Research {cov.label.toLowerCase()}</span>} />
+      <CardHead id="inv-h" cap="Investment summary" right={<span className="pill" style={{ color: cov.tone === "gain" ? "var(--gain)" : cov.tone === "warn" ? "var(--warn-ink)" : undefined, background: cov.tone === "warn" ? "var(--warn-bg)" : undefined }} title={cov.detail}><span className={`dot ${cov.dot === "hollow" ? "dot-hollow" : ""}`} aria-hidden="true" />Research in use: {cov.label.toLowerCase()}{r?.approval === "automatic" ? ", not approved" : r?.approval === "provisional" ? ", provisional" : ""}</span>} />
+      {r?.pendingReview && <p className="t-xs warn">This uses the research in use. A newer investigation ({r.pendingReview.research_as_of}) is waiting for your decision and is not used until you approve it.</p>}
       {any ? (
         <div className="grid grid-cols-3 gap-2">
           <Metric label="Action" value={cap1(any.parsed.action)} />

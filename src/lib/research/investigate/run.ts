@@ -16,18 +16,19 @@ import { buildWorkspace } from "@/lib/workspace-core";
 import { attachText, buildInventory, fetchDocText } from "./documents";
 import { getFinancials } from "./financials";
 import { docStatus, finalGate } from "./gates";
-import { runLoop, runOnce } from "./loop";
+import { runLoop } from "./loop";
+import { consistencyCheck, portfolioCheckFrom, stressTests } from "./challenge";
 import { INV_MODELS } from "./models";
-import { FULL_PHASES, REFRESH_PHASES, phaseSystem, phaseUser, type PhaseDef } from "./phases";
+import { ANSWER_DEF, FULL_PHASES, REFRESH_PHASES, phaseSystem, phaseUser, type PhaseDef } from "./phases";
 import { pendingParts, markReviewed, reviewPart } from "./reader";
 import { makeExec, nextId, T } from "./tools";
 import { addUsage, emptyUsage, type InvDoc, type PhaseState, type ResearchType, type RunState } from "./types";
 
-export const INVESTIGATION_VERSION = "investigation@2";
+export const INVESTIGATION_VERSION = "investigation@3";
 /** A safety ceiling per run, not a target: a run that reaches it stops and is saved as incomplete. */
 export const RUN_CEILING_USD = 12;
 const STEP_MS = 11 * 60_000;
-const MAX_ATTEMPTS: Record<string, number> = { read: 6, discover: 2, skeptic: 2, inventory: 2, finalize: 2 };
+const MAX_ATTEMPTS: Record<string, number> = { read: 6, discover: 2, skeptic: 3, answer: 3, inventory: 2, finalize: 2 };
 const PHASE_ATTEMPTS = 3;
 
 const nyDate = (d = new Date()) => new Intl.DateTimeFormat("en-CA", { timeZone: "America/New_York" }).format(d);
@@ -43,8 +44,8 @@ async function latestCheckpoint(db: SupabaseClient, requestId: string): Promise<
 
 function initState(requestId: string, symbol: string, type: ResearchType): RunState {
   const steps = type === "full_investigation"
-    ? ["inventory", "discover", "read", "phase:1", "phase:2", "phase:3", "phase:4", "phase:5", "skeptic", "phase:6", "finalize"]
-    : ["inventory", "discover", "read", "phase:2", "phase:5", "skeptic", "phase:6", "finalize"];
+    ? ["inventory", "discover", "read", "phase:1", "phase:2", "phase:3", "phase:4", "phase:5", "phase:6", "skeptic", "answer", "finalize"]
+    : ["inventory", "discover", "read", "phase:2", "phase:5", "phase:6", "skeptic", "answer", "finalize"];
   const defs = type === "full_investigation" ? FULL_PHASES : FULL_PHASES; // titles; refresh re-titles phase 2 below
   const phases: PhaseState[] = defs.map((d) => ({ n: d.n, title: type === "material_event_refresh" && d.n === 2 ? REFRESH_PHASES[0].title : d.title, status: "pending", attempts: 0, summary: "", key_points: [], gate: [], usage: emptyUsage() }));
   return {
@@ -131,7 +132,8 @@ async function doStep(db: SupabaseClient, s: RunState, step: string) {
   if (step === "discover") return stepDiscover(db, s);
   if (step === "read") return stepRead(s);
   if (step.startsWith("phase:")) return stepPhase(db, s, Number(step.split(":")[1]));
-  if (step === "skeptic") return stepSkeptic(s);
+  if (step === "skeptic") return stepSkeptic(db, s);
+  if (step === "answer") return stepAnswer(db, s);
   if (step === "finalize") return stepFinalize(db, s);
   throw new Error(`Unknown step ${step}`);
 }
@@ -265,6 +267,7 @@ async function stepPhase(db: SupabaseClient, s: RunState, n: number) {
   p.status = "running"; p.attempts++;
   const done = { value: false };
   const ws = n >= 5 ? await buildWorkspace(db).catch(() => null) : null;
+  if (ws && n === 6) s.portfolioCheck = portfolioCheckFrom(ws, s.symbol);
   const exec = makeExec({ state: s, phase: n, db, ws, done });
   const objections = n === 6 && s.objections.length ? s.objections.map((o) => `${o.id} [${o.severity}] ${o.objection}${o.evidence_to_check ? ` (check: ${o.evidence_to_check})` : ""}${o.outcome ? ` -> answered: ${o.outcome}` : ""}`).join("\n") : undefined;
   const before = s.usage;
@@ -272,7 +275,8 @@ async function stepPhase(db: SupabaseClient, s: RunState, n: number) {
     model: def.high ? INV_MODELS.analystHigh : INV_MODELS.analyst,
     system: phaseSystem(s.type),
     user: phaseUser(s, def, { prior: s.base?.summary ?? null, attempt: p.attempts, objections }),
-    tools: def.tools, webSearches: def.webSearches, exec, isDone: () => done.value,
+    // A run saved by the previous version had the skeptic before phase 6, which then answered it.
+    tools: n === 6 && s.objections.some((o) => !o.outcome) ? [...def.tools, T.respond_objection] : def.tools, webSearches: def.webSearches, exec, isDone: () => done.value,
     missing: () => p.gate.join("\n") || "call complete_phase with the phase summary",
     limits: { turns: 40, ms: STEP_MS },
   });
@@ -316,54 +320,121 @@ async function savePhaseRow(db: SupabaseClient, s: RunState, n: number) {
 
 // ---------------------------------------------------------------- skeptic
 
-const SKEPTIC_SCHEMA = {
-  type: "object", additionalProperties: false, required: ["objections"],
-  properties: { objections: { type: "array", items: { type: "object", additionalProperties: false, required: ["objection", "severity", "evidence_to_check"], properties: { objection: { type: "string" }, severity: { type: "string", enum: ["critical", "major", "minor"] }, evidence_to_check: { type: "string" } } } } },
-};
+const pct = (x: number | null | undefined) => (x === null || x === undefined ? "?" : `${(x * 100).toFixed(1)}%`);
 
-async function stepSkeptic(s: RunState) {
-  const v = s.valuation;
-  const user = `Company ${s.symbol}${s.name ? ` (${s.name})` : ""}, price $${s.price.value ?? "?"} on ${s.today}.
+const SKEPTIC_SYSTEM = `You are the skeptical reviewer on an investment committee, independent of the analyst who wrote this research. Your job is to try to break the conclusion before any money depends on it, by testing it, not by restating it.
+
+Challenge each of these areas, with at least one tested challenge each (record_objection):
+- thesis: does the evidence in the documents actually support the thesis, or is it narrative, circular or secondary-sourced?
+- valuation_assumptions: revenue, margins, multiples, share count and net debt in each scenario versus the reported record (get_financials), guidance and consensus. Use stress_test to measure what a realistic change does.
+- probabilities: are the bear/base/bull weights justified by the evidence, or chosen to make the answer? Use the break-even results below.
+- projections: growth and margin paths versus history, guidance and capacity; what would have to be true.
+- competition: competitive threats, share loss, pricing pressure, customer concentration and in-house alternatives, with evidence.
+- portfolio_recommendation: does the action follow from the numbers, the evidence state and the investor's position and limits (get_portfolio, get_exposure, get_policy)? An attractive modeled return is not permission to add; check room under approved limits, concentration and what is unresolved.
+
+How to test: open the cited documents (ask_document, read_text) to check a claim or quote; run stress_test on the assumption you doubt; compare with the reported record (get_financials). Say exactly what you checked and what it showed, with numbers. Cite finding (F12), question (Q3) and document (D4) ids. Do not accept a figure because the analyst recorded it; do not invent figures. If an area holds up after testing, record that test as a minor objection that explains what you tried and why it held.
+
+Severity: critical (could reverse the action), major (could change the valuation or sizing materially), minor. Then finish_review with your verdict on whether the thesis, the valuation and the recommendation survive, and the changes the conclusion must make.`;
+
+function skepticUser(s: RunState) {
+  const v = s.valuation, sm = s.summary;
+  return `Company ${s.symbol}${s.name ? ` (${s.name})` : ""}, app price $${s.price.value ?? "?"} on ${s.today}.
+
+THE CONCLUSION UNDER REVIEW:
+${sm ? JSON.stringify({ headline: sm.headline, thesis: sm.thesis, action: sm.action, confidence: sm.confidence, valuation: sm.valuation, expected_return: sm.expected_return, risks: sm.risks, portfolio_fit: sm.portfolio_fit, allocation: sm.allocation, price_framework: sm.price_framework, would_change: sm.would_change, reasons: sm.reasons }) : "No summary was submitted."}
+
+VALUATION (computed by the app): ${v ? JSON.stringify({ horizon: v.horizon_date, revenue_basis: v.revenue_basis, weighted: v.result.weighted_value, annualized: v.result.annualized_return, scenarios: v.specs.map((x) => ({ name: x.name, p: x.probability, method: x.method, inputs: x.inputs, sources: x.sources, rationale: x.rationale, value: v.result.scenarios.find((r) => r.name === x.name)?.value_per_share })) }) : "none"}
+
+SENSITIVITY (computed by the app from the research's own inputs):
+${(s.stress ?? []).filter((x) => !x.label.startsWith("Skeptic:")).map((x) => `- ${x.label}: ${x.weighted_value !== null ? `weighted $${x.weighted_value.toFixed(2)}, ` : ""}${pct(x.annualized_return)} a year. ${x.note}`).join("\n") || "none"}
+
+POSITION (app data): ${s.portfolioCheck ? `weight ${pct(s.portfolioCheck.weight)} including ETFs (${pct(s.portfolioCheck.direct)} direct); top of normal range ${pct(s.portfolioCheck.normalHigh)}; maximum ${pct(s.portfolioCheck.max)} (limit authority: ${s.portfolioCheck.limitAuthority}); room for new money $${s.portfolioCheck.headroomDollars ?? "?"}` : "not loaded"}
+
 PHASE CHECKPOINTS:
-${s.phases.map((p) => `Phase ${p.n} ${p.title} [${p.status}]\n${p.summary.slice(0, 7000)}`).join("\n\n")}
-
-VALUATION (computed by the app): ${v ? JSON.stringify({ horizon: v.horizon_date, revenue_basis: v.revenue_basis, result: v.result, assumptions: v.specs.map((x) => ({ name: x.name, p: x.probability, method: x.method, inputs: x.inputs, sources: x.sources, rationale: x.rationale })) }) : "none"}
+${s.phases.map((p) => `Phase ${p.n} ${p.title} [${p.status}]\n${p.summary.slice(0, 5000)}`).join("\n\n")}
 
 KEY FINDINGS:
-${s.findings.filter((f) => f.key && !f.withdrawn).map((f) => `${f.id} ${f.claim}: ${f.value} ${f.unit} (${f.period}) [${f.source}, ${f.check.status}]`).join("\n")}
+${s.findings.filter((f) => f.key && !f.withdrawn).map((f) => `${f.id} ${f.claim}: ${f.value} ${f.unit} (${f.period}) [${f.source}${f.doc_id ? ` ${f.doc_id}` : ""}, ${f.check.status}]${f.classification ? ` classified ${f.classification.cls}: ${f.classification.explanation}` : ""}`).join("\n")}
 
 QUESTIONS:
-${s.questions.map((q) => `${q.id} [${q.status}, ${q.materiality}] ${q.question}${q.answer ? ` -> ${q.answer}` : ""}${q.why_unresolvable ? ` (unresolvable: ${q.why_unresolvable})` : ""}`).join("\n")}
+${s.questions.map((q) => `${q.id} [${q.status}, ${q.materiality}] ${q.question}${q.answer ? ` -> ${q.answer.slice(0, 300)}` : ""}${q.why_unresolvable ? ` (unresolvable: ${q.why_unresolvable})` : ""}`).join("\n") || "none"}
 
 CONFLICTS:
 ${s.conflicts.map((c) => `${c.id} ${c.description} -> ${c.resolution} [${c.status}]`).join("\n") || "none"}
 
-DOCUMENTS: ${s.inventory.map((d) => `${d.id} ${d.kind} ${docStatus(d)}`).join("; ")}`;
-  const r = await runOnce({
-    model: INV_MODELS.skeptic,
-    system: `You are the skeptical reviewer on an investment committee. Attack this research before any money is committed: weak or circular evidence, assumptions not anchored in the documents, optimistic or pessimistic scenario inputs versus the reported record and guidance, probabilities that do not match the evidence, ignored risks, conflicting evidence glossed over, dilution or financing not reflected, questions closed too easily, and conclusions that do not follow. Be specific and cite finding, question and document ids. Give 3-10 objections, each with what evidence would settle it. Severity: critical (could reverse the action), major (could change the valuation or sizing materially), minor.`,
-    user, schema: SKEPTIC_SCHEMA,
+DOCUMENTS: ${s.inventory.map((d) => `${d.id} ${d.kind} "${d.title}" ${docStatus(d)}`).join("; ")}
+
+EARLIER RESEARCH ON FILE: ${s.base?.summary?.slice(0, 1500) ?? "none"}
+${s.objections.length ? `\nCHALLENGES ALREADY RECORDED (continue from here; do not repeat them):\n${s.objections.map((o) => `${o.id} [${o.area}, ${o.severity}] ${o.objection}`).join("\n")}` : ""}`;
+}
+
+async function stepSkeptic(db: SupabaseClient, s: RunState) {
+  const ws = await buildWorkspace(db).catch(() => null);
+  if (!s.draft) {
+    const r = s.valuation?.result;
+    s.draft = { action: s.summary?.action ?? null, confidence: s.summary?.confidence ?? null, headline: s.summary?.headline ?? null, weighted_value: r?.weighted_value ?? null, annualized_return: r?.annualized_return ?? null, at: new Date().toISOString() };
+    s.stress = stressTests(s);
+  }
+  if (ws) s.portfolioCheck = portfolioCheckFrom(ws, s.symbol);
+  const done = { value: false };
+  const exec = makeExec({ state: s, phase: 0, db, ws, done });
+  const r = await runLoop({
+    model: INV_MODELS.skeptic, system: SKEPTIC_SYSTEM, user: skepticUser(s),
+    tools: [T.list_documents, T.ask_document, T.read_text, T.get_financials, T.get_portfolio, T.get_policy, T.get_exposure, T.stress_test, T.record_objection, T.finish_review],
+    webSearches: 3, exec, isDone: () => done.value,
+    missing: () => "Record tested challenges for every area with record_objection, then call finish_review",
+    limits: { turns: 40, ms: STEP_MS },
   });
   s.usage = addUsage(s.usage, r.usage);
-  let objections: { objection: string; severity: "critical" | "major" | "minor"; evidence_to_check: string }[] = [];
-  try { objections = (JSON.parse(r.text) as { objections: typeof objections }).objections ?? []; } catch { /* handled below */ }
-  if (!objections.length) {
-    s.attemptsAtStep++;
-    note(s, "skeptic", `The skeptic's review was not readable (${r.stop ?? "?"})`);
-    if (s.attemptsAtStep >= MAX_ATTEMPTS.skeptic) advance(s);
-    return;
-  }
-  s.objections = objections.slice(0, 12).map((o, i) => ({ id: `S${i + 1}`, objection: o.objection.slice(0, 1200), severity: o.severity, evidence_to_check: o.evidence_to_check.slice(0, 600) }));
-  advance(s);
+  for (const x of r.searches) note(s, "skeptic", `search "${x.query}": ${x.title} ${x.url}`);
+  if (done.value) { advance(s); return; }
+  s.attemptsAtStep++;
+  note(s, "skeptic", `The skeptical review did not finish in this step (${r.stopped ?? "not accepted"}); ${s.objections.length} challenges recorded so far.`);
+  if (s.attemptsAtStep >= MAX_ATTEMPTS.skeptic) advance(s);
+}
+
+// ---------------------------------------------------------------- answer the skeptic
+
+async function stepAnswer(db: SupabaseClient, s: RunState) {
+  const p = s.phases.find((x) => x.n === 6)!;
+  if (!s.objections.length) { advance(s); return; }
+  const done = { value: false };
+  const ws = await buildWorkspace(db).catch(() => null);
+  const exec = makeExec({ state: s, phase: 6, db, ws, done });
+  const rv = s.review;
+  const objections = s.objections.map((o) => `${o.id} [${o.severity}, ${o.area ?? "general"}] ${o.objection}${o.claim ? `\n  Claim challenged: ${o.claim}` : ""}${o.test ? `\n  Test: ${o.test}\n  Result: ${o.test_result}` : ""}${o.evidence_to_check ? `\n  Would settle it: ${o.evidence_to_check}` : ""}${o.outcome ? `\n  -> answered (${o.outcome}): ${o.response}` : ""}`).join("\n");
+  const verdict = rv ? `SKEPTIC'S VERDICT: thesis ${rv.thesis}, valuation ${rv.valuation}, recommendation ${rv.recommendation}. ${rv.summary}\nRequired changes:\n${rv.required_changes.map((x) => `- ${x}`).join("\n") || "- none"}` : "The skeptic did not finish a verdict; answer the challenges recorded.";
+  const r = await runLoop({
+    model: INV_MODELS.analystHigh, system: phaseSystem(s.type),
+    user: `${phaseUser(s, ANSWER_DEF, { prior: s.base?.summary ?? null, attempt: s.attemptsAtStep + 1, objections })}\n\n${verdict}\n\nYOUR DRAFT CONCLUSION BEFORE THE REVIEW: ${s.draft ? `${s.draft.action} (confidence ${s.draft.confidence}); weighted $${s.draft.weighted_value?.toFixed(2)}, ${pct(s.draft.annualized_return)} a year` : "none"}`,
+    tools: ANSWER_DEF.tools, webSearches: ANSWER_DEF.webSearches, exec, isDone: () => done.value,
+    missing: () => p.gate.join("\n") || "answer every objection, revisit the conclusion, then call finish_answers",
+    limits: { turns: 40, ms: STEP_MS },
+  });
+  s.usage = addUsage(s.usage, r.usage);
+  p.usage = addUsage(p.usage, { ...emptyUsage(), costUsd: r.usage.costUsd, ms: r.usage.ms, calls: r.usage.calls, searches: r.usage.searches });
+  for (const x of r.searches) note(s, "answer", `search "${x.query}": ${x.title} ${x.url}`);
+  if (done.value) { await savePhaseRow(db, s, 6); advance(s); return; }
+  s.attemptsAtStep++;
+  note(s, "answer", `Answers to the skeptic not finished in this step (${r.stopped ?? "not accepted"}).`);
+  if (s.attemptsAtStep >= MAX_ATTEMPTS.answer) { await savePhaseRow(db, s, 6); advance(s); }
 }
 
 // ---------------------------------------------------------------- finalize
 
 async function stepFinalize(db: SupabaseClient, s: RunState) {
   for (const d of s.inventory) d.status = docStatus(d);
+  const ws = await buildWorkspace(db).catch(() => null);
+  if (ws) s.portfolioCheck = portfolioCheckFrom(ws, s.symbol);
+  // The work and evidence rules first, then whether the written conclusion matches the numbers, the
+  // portfolio and that state (an add needs complete research), then the rules again with that result.
+  s.consistency = null;
+  const pre = finalGate(s);
+  s.completeness = { complete: pre.complete, reasons: pre.reasons, kind: pre.kind };
+  s.consistency = consistencyCheck(s);
   const gate = finalGate(s);
-  if (s.usage.costUsd >= RUN_CEILING_USD) gate.reasons.unshift(`Stopped at the $${RUN_CEILING_USD} safety ceiling`);
-  s.completeness = { complete: gate.complete && s.usage.costUsd < RUN_CEILING_USD, reasons: gate.reasons };
+  if (s.usage.costUsd >= RUN_CEILING_USD) { gate.reasons.unshift(`Stopped at the $${RUN_CEILING_USD} safety ceiling`); gate.kind = "work_incomplete"; }
+  s.completeness = { complete: gate.complete && s.usage.costUsd < RUN_CEILING_USD, reasons: gate.reasons, kind: gate.complete && s.usage.costUsd < RUN_CEILING_USD ? "complete" : gate.kind === "complete" ? "work_incomplete" : gate.kind };
   const v = s.valuation?.result;
   const sm = s.summary;
   const by = (n: "bear" | "base" | "bull") => v?.scenarios.find((x) => x.name === n);
@@ -386,6 +457,7 @@ async function stepFinalize(db: SupabaseClient, s: RunState) {
     // The evidence behind the conclusion, kept with the record so it can be audited without the run log.
     evidence: {
       findings: s.findings, questions: s.questions, conflicts: s.conflicts, objections: s.objections,
+      review: s.review ?? null, draft: s.draft ?? null, stress: s.stress ?? [], consistency: s.consistency ?? null, portfolio_check: s.portfolioCheck ?? null,
       valuation: s.valuation ? { specs: s.valuation.specs, result: s.valuation.result, revenue_basis: s.valuation.revenue_basis } : null,
       financials_source: s.financials?.source ?? null, base_version: s.base ? { id: s.base.versionId, research_as_of: s.base.research_as_of, origin: s.base.origin } : null,
       phases: s.phases.map((p) => ({ n: p.n, title: p.title, status: p.status, gate: p.gate, attempts: p.attempts, cost_usd: p.usage.costUsd, ms: p.usage.ms })),

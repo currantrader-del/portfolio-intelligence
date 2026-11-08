@@ -2,8 +2,8 @@ import { ActionForm, SubmitButton } from "@/components/forms";
 import { Markdown } from "@/components/Markdown";
 import { Card, CardHead, Disclose, Pill } from "@/components/ui";
 import { shortDate } from "@/lib/format";
-import { adoptResearch } from "@/app/(app)/research/actions";
-import type { Conflict, Finding, InvestmentSummary, Objection, Question } from "@/lib/research/investigate/types";
+import { adoptResearch, setAsideResearch } from "@/app/(app)/research/actions";
+import type { ConsistencyCheck, Conflict, Finding, InvestmentSummary, Objection, Question, ReviewVerdict } from "@/lib/research/investigate/types";
 import type { ScenarioSpec, ValuationResult } from "@/lib/research/investigate/valuationCalc";
 
 export type InvVersion = {
@@ -20,15 +20,22 @@ const CHECK_LABEL: Record<string, string> = {
   verified: "Quote and figure found in document", xbrl: "SEC XBRL", quote_found_value_not_in_quote: "Figure not in quote", quote_not_found: "Quote not found",
   secondary_unverifiable: "Secondary source", calculation: "Calculation", estimate: "Estimate", document_unreadable: "Document unreadable",
 };
+const CLASS_LABEL: Record<string, string> = {
+  verified_primary: "Verified from a primary document", labeled_estimate: "Labeled estimate or assumption", unresolved_not_material: "Unresolved, not material", unresolved_thesis_changing: "Unresolved, could change the thesis",
+};
+const VERDICT: Record<string, string> = { survives: "survives", survives_with_changes: "survives with changes", fails: "does not survive" };
 const usd = (n: number | null | undefined, d = 2) => (n === null || n === undefined ? "—" : `$${n.toLocaleString("en-US", { maximumFractionDigits: d, minimumFractionDigits: d })}`);
 const pct = (n: number | null | undefined) => (n === null || n === undefined ? "—" : `${(n * 100).toFixed(1)}%`);
 
 /** The concise investment summary from an investigation, with the full evidence underneath. */
-export function InvestigationReport({ symbol, v, sources }: { symbol: string; v: InvVersion; sources: SourceRow[] }) {
+export function InvestigationReport({ symbol, v, sources, inUse }: { symbol: string; v: InvVersion; sources: SourceRow[]; inUse?: { research_as_of: string; label: string } | null }) {
   const c = v.conclusion;
   const sm = c.investment_summary as InvestmentSummary | null | undefined;
-  const ev = (c.evidence ?? {}) as { findings?: Finding[]; questions?: Question[]; conflicts?: Conflict[]; objections?: Objection[]; valuation?: { specs: ScenarioSpec[]; result: ValuationResult; revenue_basis: string } | null; phases?: { n: number; title: string; status: string; gate: string[]; attempts: number; cost_usd: number; ms: number }[] };
-  const completion = c.completion as { complete: boolean; reasons: string[] } | undefined;
+  const ev = (c.evidence ?? {}) as { findings?: Finding[]; questions?: Question[]; conflicts?: Conflict[]; objections?: Objection[]; valuation?: { specs: ScenarioSpec[]; result: ValuationResult; revenue_basis: string } | null; phases?: { n: number; title: string; status: string; gate: string[]; attempts: number; cost_usd: number; ms: number }[];
+    review?: ReviewVerdict | null; draft?: { action: string | null; confidence: string | null; weighted_value: number | null; annualized_return: number | null } | null;
+    stress?: { label: string; weighted_value: number | null; annualized_return: number | null; note: string }[]; consistency?: ConsistencyCheck | null };
+  const completion = c.completion as { complete: boolean; reasons: string[]; kind?: string } | undefined;
+  const adoption = c.adoption as { mode?: string; open_items?: string[] } | undefined;
   const usage = c.usage as { cost_usd: number; runtime_ms: number; calls: number; searches: number; by_model: Record<string, { calls: number; costUsd: number }>; input_tokens: number; output_tokens: number } | undefined;
   const state = String(c.review_state ?? "");
   const type = c.research_type === "material_event_refresh" ? "Material-event refresh" : "Full investigation";
@@ -54,8 +61,8 @@ export function InvestigationReport({ symbol, v, sources }: { symbol: string; v:
     <Card labelledBy={`inv-${v.id}`} className="!gap-3">
       <CardHead id={`inv-${v.id}`} title={`${type} · ${shortDate(v.research_as_of)}`} right={
         <>
-          <Pill small tone={v.completeness === "complete" ? "gain" : "warn"}>{v.completeness === "complete" ? "Complete" : "Incomplete"}</Pill>
-          {v.is_current ? <Pill small tone="gain" dot="solid">In use</Pill> : state === "awaiting_approval" ? <Pill small tone="copper">Awaiting approval</Pill> : null}
+          <Pill small tone={v.completeness === "complete" ? "gain" : "warn"}>{v.completeness === "complete" ? "Complete" : completion?.kind === "material_uncertainty" ? "Incomplete: material uncertainty" : "Incomplete"}</Pill>
+          {v.is_current ? <Pill small tone={state === "adopted_provisional" ? "warn" : "gain"} dot="solid">{state === "adopted_provisional" ? "In use, provisional" : "In use"}</Pill> : state === "awaiting_approval" ? <Pill small tone="copper">Awaiting your decision</Pill> : state === "set_aside" ? <Pill small>Set aside</Pill> : null}
         </>
       } />
       {sm ? (
@@ -81,13 +88,32 @@ export function InvestigationReport({ symbol, v, sources }: { symbol: string; v:
           <ul className="list-disc pl-4">{completion.reasons.slice(0, 12).map((r, i) => <li key={i}>{r}</li>)}</ul>
         </div>
       )}
+      {state === "adopted_provisional" && v.is_current && (
+        <p className="t-sm rounded-[12px] bg-warn-bg text-warn-ink px-3 py-2">Approved provisionally by you with {adoption?.open_items?.length ?? completion?.reasons.length ?? 0} open item{(adoption?.open_items?.length ?? 0) === 1 ? "" : "s"}. The app suggests no new money for {symbol} until a refresh resolves them.</p>
+      )}
       {state === "awaiting_approval" && !v.is_current && (
-        <ActionForm action={adoptResearch} success="This research is now in use" className="flex flex-col gap-1.5">
-          <input type="hidden" name="symbol" value={symbol} />
-          <input type="hidden" name="versionId" value={v.id} />
-          <SubmitButton className="btn btn-primary self-start" pendingText="Adopting…">Use this as my research</SubmitButton>
-          <span className="t-xs">The research in use now stays on file unchanged. {v.completeness !== "complete" ? "This investigation is incomplete; read the open items first." : ""}</span>
-        </ActionForm>
+        <div className="flex flex-col gap-2 rounded-[12px] border border-line px-3 py-2.5">
+          <span className="text-ink font-semibold t-sm">Your decision</span>
+          <span className="t-xs">Nothing changes until you choose. Approving makes this the research your decisions use; {inUse ? `the research in use now (${shortDate(inUse.research_as_of)}, ${inUse.label}) stays on file unchanged` : "there is no research in use now"}. Keeping your current research leaves this investigation on file, marked as set aside.</span>
+          <ActionForm action={adoptResearch} success={v.completeness === "complete" ? "Approved: this research is now in use" : "Approved provisionally"} className="flex flex-col gap-1.5">
+            <input type="hidden" name="symbol" value={symbol} />
+            <input type="hidden" name="versionId" value={v.id} />
+            {v.completeness === "complete" ? (
+              <SubmitButton className="btn btn-primary self-start" pendingText="Approving…">Approve as my research</SubmitButton>
+            ) : (
+              <>
+                <label className="t-sm flex items-start gap-2"><input type="checkbox" name="acknowledge" value="yes" required className="mt-1" />
+                  <span>I have read the {completion?.reasons.length ?? 0} open item{completion?.reasons.length === 1 ? "" : "s"} above. Approve provisionally: they stay listed on the record, and the app suggests no new money for {symbol} until a refresh resolves them.</span></label>
+                <SubmitButton className="btn self-start" pendingText="Approving…">Approve provisionally</SubmitButton>
+              </>
+            )}
+          </ActionForm>
+          <ActionForm action={setAsideResearch} success="Kept your current research" className="flex">
+            <input type="hidden" name="symbol" value={symbol} />
+            <input type="hidden" name="versionId" value={v.id} />
+            <SubmitButton className="btn btn-sm" pendingText="Saving…">{inUse ? "Keep my current research" : "Set this aside"}</SubmitButton>
+          </ActionForm>
+        </div>
       )}
 
       <div className="flex flex-col rounded-[12px] border border-line px-3">
@@ -106,12 +132,13 @@ export function InvestigationReport({ symbol, v, sources }: { symbol: string; v:
             ))}
           </div>
         </Disclose>
-        <Disclose summary={<span className="t-sm">Key numbers · {keyF.filter((f) => f.check.status === "verified" || f.check.status === "xbrl").length} of {keyF.length} verified against primary sources</span>}>
+        <Disclose summary={<span className="t-sm">Key numbers · {keyF.filter((f) => f.check.status === "verified" || f.check.status === "xbrl").length} of {keyF.length} verified against primary sources{classCounts(keyF)}</span>}>
           <div className="flex flex-col gap-1.5 t-sm">
             {[...keyF, ...findings.filter((f) => !f.key && !f.withdrawn), ...withdrawn].map((f, i) => (
               <div key={`${f.id}-${i}`} className={`flex flex-col ${f.withdrawn ? "opacity-60" : ""}`}>
                 <span className="text-ink">{f.id} · {f.claim}{f.value ? `: ${f.value} ${f.unit}` : ""} <span className="t-xs">({f.period})</span></span>
                 <span className={`t-xs ${f.check.status.startsWith("quote") ? "warn" : ""}`}>{CHECK_LABEL[f.check.status] ?? f.check.status}{f.doc_id ? ` · ${f.doc_id}` : ""}{f.key ? " · key" : ""}{f.withdrawn ? ` · withdrawn: ${f.withdrawn.reason}${f.withdrawn.replaced_by ? ` (see ${f.withdrawn.replaced_by})` : ""}` : ""}{f.quote && f.source === "primary" ? ` · “${f.quote.slice(0, 160)}${f.quote.length > 160 ? "…" : ""}”` : ""}</span>
+                {f.classification && <span className={`t-xs ${f.classification.cls === "unresolved_thesis_changing" ? "warn" : ""}`}><strong>{CLASS_LABEL[f.classification.cls]}</strong>{f.classification.replaced_by ? ` (${f.classification.replaced_by})` : ""}: {f.classification.explanation} Effect: {f.classification.impact}</span>}
               </div>
             ))}
           </div>
@@ -151,16 +178,38 @@ export function InvestigationReport({ symbol, v, sources }: { symbol: string; v:
             <div className="flex flex-col gap-1.5 t-sm">{(ev.conflicts ?? []).map((x) => <div key={x.id}><span className="text-ink">{x.id} {x.description}</span><span className="t-xs block">{x.status}: {x.resolution}</span></div>)}</div>
           </Disclose>
         )}
-        <Disclose summary={<span className="t-sm">Skeptical review · {(ev.objections ?? []).length} objections</span>}>
-          <div className="flex flex-col gap-1.5 t-sm">
+        <Disclose summary={<span className="t-sm">Skeptical review · {ev.review ? `recommendation ${VERDICT[ev.review.recommendation]}, ${(ev.objections ?? []).length} tested challenges` : (ev.objections ?? []).length ? `${(ev.objections ?? []).length} objections (untested, earlier engine)` : "none recorded"}</span>}>
+          <div className="flex flex-col gap-2 t-sm">
+            {ev.review && (
+              <div className="flex flex-col gap-0.5">
+                <span className="text-ink">Thesis {VERDICT[ev.review.thesis]} · valuation {VERDICT[ev.review.valuation]} · recommendation {VERDICT[ev.review.recommendation]}</span>
+                <span className="t-xs">{ev.review.summary}</span>
+                {ev.review.required_changes.length > 0 && <ul className="t-xs list-disc pl-4">{ev.review.required_changes.map((x, i) => <li key={i}>{x}</li>)}</ul>}
+                {ev.draft && <span className="t-xs">Before the review: {ev.draft.action ?? "—"} ({ev.draft.confidence ?? "—"}), {usd(ev.draft.weighted_value)} weighted. After: {sm?.action ?? "—"} ({sm?.confidence ?? "—"}), {usd(val?.result.weighted_value)} weighted{ev.draft.action === sm?.action ? "; the action survived" : "; the action changed"}.</span>}
+              </div>
+            )}
             {(ev.objections ?? []).map((o) => (
-              <div key={o.id} className="flex flex-col">
-                <span className="text-ink">{o.id} [{o.severity}] {o.objection}</span>
-                <span className="t-xs">{o.outcome ? `${o.outcome.replace("_", " ")}: ${o.response}` : "Not answered"}</span>
+              <div key={o.id} className="flex flex-col border-t border-line pt-1.5">
+                <span className="text-ink">{o.id} [{o.severity}{o.area ? `, ${o.area.replace(/_/g, " ")}` : ""}] {o.objection}</span>
+                {o.claim && <span className="t-xs">Challenged: {o.claim}</span>}
+                {o.test && <span className="t-xs">Test ({o.test_kind?.replace("_", " ")}): {o.test} → {o.test_result}</span>}
+                <span className={`t-xs ${o.outcome ? "" : "warn"}`}>{o.outcome ? `Answer, ${o.outcome.replace("_", " ")}: ${o.response}` : "Not answered"}</span>
               </div>
             ))}
           </div>
         </Disclose>
+        {(ev.stress ?? []).length > 0 && (
+          <Disclose summary={<span className="t-sm">Sensitivity · computed by the app</span>}>
+            <div className="flex flex-col gap-1 t-sm">
+              {(ev.stress ?? []).map((x, i) => <span key={i} className="t-xs"><span className="text-ink">{x.label}</span>: {x.weighted_value !== null ? `${usd(x.weighted_value)} weighted, ` : ""}{pct(x.annualized_return)} a year{x.label.startsWith("Skeptic:") ? "" : ` · ${x.note}`}</span>)}
+            </div>
+          </Disclose>
+        )}
+        {ev.consistency && (
+          <Disclose summary={<span className={`t-sm ${ev.consistency.ok ? "" : "warn"}`}>Conclusion checked against the numbers · {ev.consistency.ok ? "consistent" : `${ev.consistency.issues.length} problem${ev.consistency.issues.length === 1 ? "" : "s"}`}</span>}>
+            <div className="flex flex-col gap-1 t-sm">{ev.consistency.checks.map((x, i) => <span key={i} className={`t-xs ${x.ok ? "" : "warn"}`}><span className="text-ink">{x.ok ? "✓" : "✕"} {x.label}</span>: {x.detail}</span>)}</div>
+          </Disclose>
+        )}
         <Disclose summary={<span className="t-sm">Phase checkpoints</span>}><Phases v={v} /></Disclose>
         {usage && (
           <Disclose summary={<span className="t-sm">Run · {Math.round(usage.runtime_ms / 60000)} min · ${usage.cost_usd.toFixed(2)}</span>}>
@@ -191,6 +240,13 @@ function Phases({ v }: { v: InvVersion }) {
       })}
     </div>
   );
+}
+
+function classCounts(keyF: Finding[]) {
+  const n = (c: string) => keyF.filter((f) => f.classification?.cls === c).length;
+  const est = n("labeled_estimate"), nm = n("unresolved_not_material"), tc = n("unresolved_thesis_changing");
+  const parts = [est ? `${est} labeled estimates` : "", nm ? `${nm} unresolved, not material` : "", tc ? `${tc} could change the thesis` : ""].filter(Boolean);
+  return parts.length ? `; ${parts.join(", ")}` : "";
 }
 
 function Field({ k, v, strong, wide }: { k: string; v: string | null | undefined; strong?: boolean; wide?: boolean }) {

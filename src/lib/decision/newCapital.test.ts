@@ -119,6 +119,27 @@ describe("new capital: a drop is not a buy signal", () => {
   });
 });
 
+describe("new capital: research waiting for approval or approved provisionally", () => {
+  const policy = policyFromRules(approvedRules);
+  const withBasis = { ...snap, cashValue: 400, positions: snap.positions.filter((x) => x.symbol !== "BBB").map((x) => ({ ...x, costBasis: x.marketValue })) };
+  const ledger = [{ accountId: "a", tradeDate: "2026-10-01", kind: "deposit" as const, symbol: null, quantity: null, price: null, amount: 500 }];
+  const p = buildPortfolio([withBasis, savings], new Map(), policy, {}, ledger, now);
+  const base = research("$26").current!;
+  const inv = { id: "v2", research_as_of: "2026-11-04", created_at: "2026-11-04T12:00:00Z", completeness: "partial", origin: "claude_full", is_current: false, conclusion: { ...base.conclusion, research_type: "full_investigation", review_state: "awaiting_approval", completion: { complete: false, reasons: ["Q1"] } } };
+  it("adds nothing while a newer investigation waits for the investor's decision", () => {
+    const r = newCapital({ amount: 400, source: "deposited", portfolio: p, research: [toResearchRecord("AAA", "AAA", "held", [{ ...base, created_at: "2026-10-20T00:00:00Z" }, inv])], policy, now, filings: quiet });
+    const aaa = r.options.find((o) => o.symbol === "AAA")!;
+    expect(r.recommendation.allocations.find((a) => a.symbol === "AAA")).toBeUndefined();
+    expect(JSON.stringify(aaa)).toMatch(/waiting for your decision/);
+  });
+  it("adds nothing on provisionally approved research, however attractive its modeled return", () => {
+    const adopted = { ...inv, is_current: true, conclusion: { ...inv.conclusion, review_state: "adopted_provisional" } };
+    const r = newCapital({ amount: 400, source: "deposited", portfolio: p, research: [toResearchRecord("AAA", "AAA", "held", [{ ...base, is_current: false }, adopted])], policy, now, filings: quiet });
+    expect(r.recommendation.allocations.find((a) => a.symbol === "AAA")).toBeUndefined();
+    expect(JSON.stringify(r.options.find((o) => o.symbol === "AAA"))).toMatch(/approved provisionally/);
+  });
+});
+
 describe("new capital: ceilings and money source", () => {
   it("fills a stock only to the top of its normal range", () => {
     const tight = policyFromRules([...approvedRules.filter((x) => x.subject !== "AAA"), row({ subject: "AAA", normal_low: 0.03, normal_high: 0.05, hard_max: 0.10 })]);

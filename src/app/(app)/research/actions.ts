@@ -12,6 +12,7 @@ import { buildWorkspace } from "@/lib/workspace";
 import { runFilingCheck } from "@/lib/research/runFilingCheck";
 import { FILING_CHECK_VERSION } from "@/lib/research/filingCheck";
 import { fail, type ActionResult } from "@/lib/action-result";
+import { save } from "@/lib/intel/jobs";
 
 const cleanSymbol = (v: FormDataEntryValue | null) => String(v ?? "").trim().toUpperCase().replace(/[^A-Z0-9.\-]/g, "").slice(0, 10);
 
@@ -106,8 +107,11 @@ export async function checkLatestFiling(formData: FormData): Promise<ActionResul
 }
 
 /**
- * Makes an investigation the research in use, at the investor's request. The research it replaces
- * stays on file unchanged (only its "current" flag moves); nothing else is edited.
+ * Makes an investigation the research in use, only at the investor's request. A complete investigation
+ * is approved in full. An incomplete one can only be approved provisionally, with the investor
+ * acknowledging its open items: they stay listed on the record and keep new money off the company until
+ * they are resolved. The research it replaces stays on file unchanged (only its "current" flag moves),
+ * and the decision is logged (model_runs "research_adoption") with what it replaced.
  */
 export async function adoptResearch(formData: FormData): Promise<ActionResult> {
   const symbol = cleanSymbol(formData.get("symbol"));
@@ -117,13 +121,46 @@ export async function adoptResearch(formData: FormData): Promise<ActionResult> {
   if (!v) return fail("That research record was not found.");
   const c = (v.conclusion ?? {}) as Record<string, unknown>;
   if (v.is_current) return fail("This research is already the one in use.");
-  if (c.review_state !== "awaiting_approval") return fail("Only a finished investigation can be adopted.");
+  if (c.review_state !== "awaiting_approval") return fail("Only a finished investigation waiting for your decision can be approved.");
+  const complete = v.completeness === "complete";
+  const open = Array.isArray((c.completion as { reasons?: unknown } | undefined)?.reasons) ? ((c.completion as { reasons: unknown[] }).reasons.map(String)) : [];
+  if (!complete && formData.get("acknowledge") !== "yes") return fail("This investigation is incomplete. Tick the box to confirm you have read its open items before approving it provisionally.");
+  const { data: prior } = await db.from("research_versions").select("id, research_as_of").eq("company_id", v.company_id).eq("is_current", true).maybeSingle();
+  const at = new Date().toISOString();
+  const mode = complete ? "full" : "provisional";
   const { error: e1 } = await db.from("research_versions").update({ is_current: false }).eq("company_id", v.company_id).eq("is_current", true);
   if (e1) return fail(`Could not retire the research in use: ${e1.message}`);
-  const { error: e2 } = await db.from("research_versions").update({ is_current: true, conclusion: { ...c, review_state: "adopted", adopted_at: new Date().toISOString() } }).eq("id", v.id);
-  if (e2) return fail(`Could not adopt it: ${e2.message}`);
+  const { error: e2 } = await db.from("research_versions").update({ is_current: true, conclusion: { ...c, review_state: complete ? "adopted" : "adopted_provisional", adopted_at: at, adoption: { mode, at, open_items: open, replaced: prior?.id ?? null } } }).eq("id", v.id);
+  if (e2) {
+    // Put the earlier record back in use rather than leave the company with none.
+    if (prior) await db.from("research_versions").update({ is_current: true }).eq("id", prior.id);
+    return fail(`Could not approve it: ${e2.message}`);
+  }
+  await save(db, "research_adoption", "adoption@1", { symbol, version_id: v.id, mode, at }, { replaced: prior ? { id: prior.id, research_as_of: prior.research_as_of } : null, open_items: open, action: c.action ?? null }).catch(() => null);
   revalidatePath("/research");
   revalidatePath(`/research/${symbol}`);
   revalidatePath("/");
-  redirect(`/research/${symbol}?saved=adopted`);
+  redirect(`/research/${symbol}?saved=${complete ? "adopted" : "provisional"}`);
+}
+
+/**
+ * Keeps the research in use and sets a finished investigation aside, at the investor's request. The
+ * investigation stays on file (marked "set aside"); nothing else changes. Logged like an approval.
+ */
+export async function setAsideResearch(formData: FormData): Promise<ActionResult> {
+  const symbol = cleanSymbol(formData.get("symbol"));
+  const versionId = String(formData.get("versionId") ?? "");
+  const db = await createClient();
+  const { data: v } = await db.from("research_versions").select("id, conclusion, is_current").eq("id", versionId).maybeSingle();
+  if (!v) return fail("That research record was not found.");
+  const c = (v.conclusion ?? {}) as Record<string, unknown>;
+  if (v.is_current || c.review_state !== "awaiting_approval") return fail("Only an investigation waiting for your decision can be set aside.");
+  const at = new Date().toISOString();
+  const { error } = await db.from("research_versions").update({ conclusion: { ...c, review_state: "set_aside", set_aside_at: at } }).eq("id", v.id);
+  if (error) return fail(`Could not set it aside: ${error.message}`);
+  await save(db, "research_adoption", "adoption@1", { symbol, version_id: v.id, mode: "set_aside", at }, {}).catch(() => null);
+  revalidatePath("/research");
+  revalidatePath(`/research/${symbol}`);
+  revalidatePath("/");
+  redirect(`/research/${symbol}?saved=set_aside`);
 }

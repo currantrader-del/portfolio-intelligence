@@ -42,10 +42,10 @@ export const FULL_PHASES: PhaseDef[] = [
 - Account for share count changes (buybacks, dilution, convertibles) and net debt.
 - Probabilities must reflect the evidence from phases 1-4, including the open debates.
 - Compare the expected return with the investor's alternatives (get_policy lists the dated forecasts for VOO and others) and with cash.` },
-  { n: 6, title: "Conclusion and what would change it", webSearches: 2, high: true, tools: [...BASE_TOOLS, T.respond_objection, T.submit_summary, T.get_quote, T.get_technicals, T.get_portfolio, T.get_policy, T.get_exposure], tasks: `Answer the skeptic, then decide.
-- Respond to every objection (respond_objection) after checking the evidence it points to; investigate further where needed. Accepted objections must change the valuation (call set_valuation again) or the conclusion.
-- Portfolio fit: current holdings and exposure (get_portfolio, get_exposure with a what-if), the investor's policy limits and reserve (get_policy). Room under a limit is never a reason to buy; a price drop is never a reason to buy by itself; the reserve is never invested.
-- The action with price bands, an allocation within policy, confidence, what would change the call, and what changed versus the earlier research on file.
+  { n: 6, title: "Conclusion and what would change it", webSearches: 2, high: true, tools: [...BASE_TOOLS, T.classify_finding, T.submit_summary, T.get_quote, T.get_technicals, T.get_portfolio, T.get_policy, T.get_exposure], tasks: `Decide, from the evidence. An independent skeptic will then test this conclusion, and you will answer it in the next step.
+- Every key figure that is not verified from a primary document (status other than verified or xbrl) must be classified with classify_finding: verified_primary (find it in a primary document and record that finding first), labeled_estimate (an assumption, consensus or calculation, said so in the summary), unresolved_not_material, or unresolved_thesis_changing. Do not force an answer that the evidence does not support; say what remains uncertain and how it affects the conclusion.
+- Portfolio fit: current holdings and exposure (get_portfolio, get_exposure with a what-if), the investor's policy limits and reserve (get_policy), and whether each limit is one the investor approved. Room under a limit is never a reason to buy; a price drop is never a reason to buy by itself; an attractive modeled return is not permission to add; the reserve is never invested.
+- The action with price bands, an allocation within policy, confidence, what would change the call, and what changed versus the earlier research on file. State the app's weighted value and expected annual return exactly as computed.
 - submit_summary, then complete_phase with the reasoning.` },
 ];
 
@@ -59,6 +59,17 @@ export const REFRESH_PHASES: PhaseDef[] = [
   FULL_PHASES[4],
   FULL_PHASES[5],
 ];
+
+/** The step after the skeptic: the analyst answers each challenge with evidence and revisits the conclusion. */
+export const ANSWER_DEF: PhaseDef = {
+  n: 6, title: "Conclusion: answering the skeptical review", webSearches: 3, high: true,
+  tools: [T.list_documents, T.review_document, T.ask_document, T.read_text, T.add_document, T.get_financials, T.record_finding, T.withdraw_finding, T.classify_finding, T.respond_objection, T.set_valuation, T.stress_test, T.submit_summary, T.get_quote, T.get_portfolio, T.get_policy, T.get_exposure, T.finish_answers],
+  tasks: `An independent skeptic has tested your draft conclusion. Answer every challenge (respond_objection) after checking the evidence it points to.
+- Rebut only with evidence: cite finding, question or document ids, or a stress test. If the challenge holds, accept it (fully or partly) and change what it affects: the valuation (set_valuation), the probabilities, the action, the allocation or the confidence.
+- If the skeptic required changes or you accepted a critical or major challenge, submit the summary again (submit_summary) with the changes, and say in changes_vs_prior what the review changed and what survived.
+- Classify any new key figure that is not verified from a primary document (classify_finding).
+- Then finish_answers with a short account of what survived the review and what changed.`,
+};
 
 export function phaseSystem(type: RunState["type"]) {
   return `You are a senior equity research analyst inside Portfolio Intelligence, working for one private investor. You are doing one phase of a ${type === "full_investigation" ? "full initial investigation" : "material-event refresh"} of a company. The work is saved after the phase, and later phases build on it.
