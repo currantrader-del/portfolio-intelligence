@@ -48,7 +48,7 @@ export async function recordNewCapital(formData: FormData): Promise<ActionResult
   const db = await createClient();
   const ws = await buildWorkspace(db);
   const filings = await loadDecisionFilings(ws);
-  const result = newCapital({ amount, source, holdingsConfirmed, portfolio: ws.portfolio, research: ws.research, policy: ws.policy, now: ws.now, quotes: ws.quotes, filings, yields: ws.yields, rules: ruleRowsOf(ws.policy) });
+  const result = newCapital({ amount, source, holdingsConfirmed, transfers: ws.transfers, portfolio: ws.portfolio, research: ws.research, policy: ws.policy, now: ws.now, quotes: ws.quotes, filings, yields: ws.yields, rules: ruleRowsOf(ws.policy) });
   const symbols = result.options.map((o) => o.symbol).filter((s) => s !== "CASH");
   // Everything the result depended on, with timestamps and sources, so the decision can be audited later.
   const inputs = {
@@ -108,4 +108,39 @@ export async function recordReview(formData: FormData): Promise<ActionResult> {
   if (error) throw error;
   revalidatePath("/decisions");
   redirect("/decisions?saved=1");
+}
+
+/**
+ * Records a transfer between your own accounts as planned (it moves no money). New-money decisions may then use it,
+ * as conditional money, until the receiving account's records show it. Never from the protected reserve.
+ */
+export async function planTransfer(formData: FormData): Promise<ActionResult> {
+  const amount = Math.round(Number(String(formData.get("amount") ?? "").replace(/[$,\s]/g, "")) * 100) / 100;
+  const from = String(formData.get("from") ?? "");
+  const to = String(formData.get("to") ?? "");
+  const date = String(formData.get("date") ?? "").slice(0, 10) || new Date().toISOString().slice(0, 10);
+  if (!(amount > 0)) return fail("Enter the amount you plan to transfer.");
+  if (!from || !to || from === to) return fail("Choose two different accounts.");
+  const ws = await buildWorkspace(await createClient());
+  const src = ws.portfolio.cashDetail.accounts.find((a) => a.id === from);
+  const dst = ws.portfolio.cashDetail.accounts.find((a) => a.id === to);
+  if (!src || !dst) return fail("One of those accounts is not on file.");
+  if (!dst.canBuyChosen) return fail(`${dst.name} cannot buy a chosen stock or ETF, so a transfer there does not fund a decision.`);
+  if (src.use === "retirement_managed") return fail("Money cannot be taken out of a retirement account for this.");
+  const already = ws.transfers.filter((t) => t.fromAccountId === from).reduce((a, t) => a + t.amount, 0);
+  const available = src.use === "savings" ? ws.portfolio.cashDetail.deployableSavings - already : src.cash - already;
+  if (amount > available + 0.005) return fail(src.use === "savings" ? `Only $${Math.max(0, available).toLocaleString()} of ${src.name} is above your $${ws.portfolio.cashDetail.protectedReserve.toLocaleString()} protected reserve (after transfers already planned).` : `${src.name} holds only $${Math.max(0, available).toLocaleString()} of cash.`);
+  const db = await createClient();
+  await saveRun(db, "planned_transfer", "transfer@1", { from_account_id: from, to_account_id: to, amount, date, note: String(formData.get("note") ?? "").slice(0, 200) || null }, { from: src.name, to: dst.name });
+  revalidatePath("/decisions");
+  return;
+}
+
+export async function cancelTransfer(formData: FormData): Promise<ActionResult> {
+  const id = String(formData.get("id") ?? "");
+  if (!id) return fail("Missing transfer.");
+  const db = await createClient();
+  await saveRun(db, "planned_transfer_cancel", "transfer@1", { transfer_id: id }, {});
+  revalidatePath("/decisions");
+  return;
 }

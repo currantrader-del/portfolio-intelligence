@@ -33,7 +33,9 @@
  * Otherwise the result is "conditional": the analysis, the leaning and the conditions are given, and the split
  * is what to do once they are met.
  */
-import type { PortfolioView } from "@/lib/portfolio/engine";
+import type { PlannedTransfer, PortfolioView } from "@/lib/portfolio/engine";
+
+const fmt$ = (n: number) => `$${n.toLocaleString("en-US", { maximumFractionDigits: 2 })}`;
 import { DEFAULT_ETF_FOR_BUCKET, type Bucket } from "@/lib/portfolio/classify";
 import { companyLimit, type Policy } from "@/lib/policy/limits";
 import type { ResearchRecord } from "@/lib/research/records";
@@ -145,26 +147,44 @@ export function newCapital(args: {
   yields?: Yields | null;
   /** Extra tickers to assess even without research (e.g. a stock you asked about). They get no money without research and a limit. */
   consider?: string[];
+  /** Transfers between your accounts that you recorded as planned (savings to brokerage, for example). */
+  transfers?: PlannedTransfer[];
 }): NewCapitalResult {
   const { portfolio, research, policy, now } = args;
   const source: MoneySource = !args.source || args.source === "new" ? "planned" : args.source;
   const requested = args.amount;
-  const deployable = Math.max(0, portfolio.cashDetail.deployable);
-  // Cash already held can only be sized up to what is deployable after the protected reserve.
+  // ---- Money by account: only the self-directed brokerage account can buy a chosen stock or ETF. Savings
+  //      above the reserve can fund it only through a transfer you planned; Acorns and Roth cash stay where they are. ----
+  const cd = portfolio.cashDetail;
+  const inv = cd.investingAccount ?? null;
+  const invName = inv?.name ?? "your brokerage account";
+  const spendable = Math.max(0, cd.spendableNow ?? 0);
+  const invAsOf = portfolio.accounts.find((a) => a.id === inv?.id)?.asOf ?? null;
+  // A planned transfer counts until the receiving account's records postdate it (then it is already in the cash).
+  const pendingIn = (args.transfers ?? []).filter((t) => inv && t.toAccountId === inv.id && (!invAsOf || t.createdAt > invAsOf));
+  const plannedIn = Math.round(pendingIn.reduce((a, t) => a + t.amount, 0) * 100) / 100;
+  const elsewhere = (cd.accounts ?? []).filter((a) => !a.canBuyChosen && a.use !== "savings" && a.cash >= 0.5);
+  const elsewhereNote = elsewhere.length ? ` Cash in ${elsewhere.map((a) => `${a.name} (${fmt$(a.cash)})`).join(" and ")} stays in ${elsewhere.length > 1 ? "those accounts" : "that account"} and is not counted.` : "";
+  const reserveNote = `The ${fmt$(cd.protectedReserve)} savings reserve is never used.`;
+  const deployable = spendable + plannedIn;
   const amount = source === "existing" ? Math.min(requested, Math.floor(deployable * 100) / 100) : requested;
-  // "Already deposited" is checked against the cash the app can see. Once the deposit is recorded it is part of
-  // the brokerage cash, so it must not be added to the portfolio a second time.
-  const recordedCash = Math.round(Math.max(0, portfolio.cashDetail.brokerage) * 100) / 100;
+  // "Already deposited" is checked against the investing account's own cash. Once recorded it is already part
+  // of that cash, so it must not be added to the portfolio a second time.
+  const recordedCash = Math.round(spendable * 100) / 100;
   const depositShows = source === "deposited" && recordedCash + 0.5 >= amount;
+  const fromTransfer = source === "existing" ? Math.max(0, Math.round((amount - spendable) * 100) / 100) : 0;
+  const savingsHint = cd.deployableSavings >= 1 && !plannedIn ? ` Savings hold ${fmt$(cd.deployableSavings)} above the reserve; that can be used only after you plan a transfer to ${invName}.` : "";
   const funds: NewCapitalResult["funds"] = source === "planned"
-    ? { requested, used: amount, verified: false, detail: `$${requested.toLocaleString()} of planned new money, not yet deposited. This is what to do once it arrives, not an order to place now` }
+    ? { requested, used: amount, verified: false, detail: `${fmt$(requested)} of planned new money for ${invName}, not yet deposited. This is what to do once it arrives, not an order to place now` }
     : source === "deposited"
       ? depositShows
-        ? { requested, used: amount, verified: true, detail: `You said $${requested.toLocaleString()} of new money arrived, and the recorded brokerage cash ($${recordedCash.toLocaleString()}) covers it` }
-        : { requested, used: amount, verified: false, detail: `You said $${requested.toLocaleString()} of new money arrived, but the app shows only $${recordedCash.toLocaleString()} of brokerage cash. Record the deposit (or add a current statement) so the money can be checked` }
-      : { requested, used: amount, verified: portfolio.cashDetail.savings !== null, detail: amount < requested
-          ? `You asked about $${requested.toLocaleString()}, but only $${amount.toLocaleString()} is deployable after the $${portfolio.cashDetail.protectedReserve.toLocaleString()} protected reserve, so this is sized on $${amount.toLocaleString()}`
-          : `$${amount.toLocaleString()} of cash you hold (deployable after the protected reserve: $${deployable.toLocaleString()})` };
+        ? { requested, used: amount, verified: true, detail: `You said ${fmt$(requested)} of new money arrived in ${invName}, and its recorded cash (${fmt$(recordedCash)}) covers it` }
+        : { requested, used: amount, verified: false, detail: `You said ${fmt$(requested)} of new money arrived, but ${invName} shows only ${fmt$(recordedCash)} of cash. Record the deposit (or add a current statement) so the money can be checked.${elsewhereNote}` }
+      : fromTransfer > 0
+        ? { requested, used: amount, verified: false, detail: `${fmt$(amount)}: ${fmt$(spendable)} already in ${invName} plus ${fmt$(fromTransfer)} from the transfer you planned, which has not arrived yet. ${reserveNote}${elsewhereNote}` }
+        : { requested, used: amount, verified: amount >= 1, detail: (amount < requested
+          ? `You asked about ${fmt$(requested)}, but ${invName} holds ${fmt$(spendable)} of cash that can buy a stock or ETF, so this is sized on ${fmt$(amount)}.${savingsHint}`
+          : `${fmt$(amount)} of cash already in ${invName}.`) + ` ${reserveNote}${elsewhereNote}` };
   const audit = policy?.audit;
   const yields = args.yields ?? { y2: null, y10: null };
   // Money already counted as deployable cash only moves within the portfolio; new money grows it.
@@ -431,7 +451,7 @@ export function newCapital(args: {
     allocations.push({ symbol: etf.symbol, amount: Math.round(remaining * 100) / 100 });
     rationale.push(`${eligible.length ? "The rest" : "No stock qualifies for new money on current evidence, so the money"} to ${etf.symbol}, because ${whyOf.get(etf.symbol) ?? "it is the chosen diversified option"}. Holding cash is equally valid for money you may need within a few years.`);
   }
-  rationale.push("Account: assumes the money goes to your taxable brokerage account. Retirement contributions have annual limits, and selling in a taxable account can realize gains.");
+  rationale.push(`Account: bought in ${invName}${fromTransfer > 0 ? `, after the planned ${fmt$(fromTransfer)} transfer arrives` : ""}. Acorns and the Roth are managed separately and never pay for this; selling in a taxable account can realize gains.`);
   wouldChange.push(`${etf?.symbol ?? "The ETF"}: a concentration (NVIDIA, semiconductors, AI infrastructure, technology) reaching its level, which would favour a less concentrated fund, or needing the money within a few years, which favours cash.`);
 
   // ---- Execution readiness ----
@@ -448,11 +468,11 @@ export function newCapital(args: {
   if (unapproved.length) warnings.push(`No approved research for ${unapproved.join(", ")}: their records are context only, so none of them receives new money until you approve an investigation.`);
   const receivingStocks = allocations.map((x) => x.symbol).filter((s) => ![...etfOptions].some((e) => e.symbol === s));
   const gates: Gate[] = [
-    { key: "funds", label: "The money is verified", ok: source === "planned" ? false : source === "deposited" && !depositShows ? false : portfolio.cashDetail.savings !== null && amount >= 1,
+    { key: "funds", label: "The money is verified, in the account that buys", ok: source === "planned" ? false : source === "deposited" ? depositShows : funds.verified && cd.savings !== null,
       detail: source === "planned" ? `${funds.detail}. Choose "New, already deposited" once it has arrived`
-        : source === "deposited" && !depositShows ? funds.detail
-        : portfolio.cashDetail.savings === null ? "Enter your savings balance so the protected reserve and deployable cash are known"
-        : amount < 1 ? `No deployable cash: the $${portfolio.cashDetail.protectedReserve.toLocaleString()} protected reserve takes everything held` : funds.detail },
+        : source === "deposited" ? funds.detail
+        : cd.savings === null ? "Enter your savings balance so the protected reserve is known"
+        : amount < 1 ? `No cash in ${invName} to invest.${savingsHint}` : funds.detail },
     { key: "holdings", label: "Holdings and balances are verified", ok: confirmed || (!unverified.length && !gaps.length),
       detail: confirmed ? `You confirmed today that the holdings and balances shown match your broker accounts${portfolio.quality.reconciliation.complete ? "" : ` (still open, not blocking: ${portfolio.quality.reconciliation.gaps.join("; ")})`}`
         : unverified.length ? `${unverified.map((a) => `${a.name}: statement ${a.asOf.slice(0, 10)} (${a.ageDays} days)${a.tradesAfter ? `, plus ${a.tradesAfter} recorded transactions through ${a.knownThrough}` : ""}`).join("; ")}. Recorded transactions are not a reconciliation: check each account in its app and confirm, or add a current statement`

@@ -263,7 +263,7 @@ export async function runTool(name: string, input: Record<string, unknown>, ws: 
       if (!(amount > 0)) return { error: "amount must be positive" };
       const source = parseSource(input.source);
       const filings = await loadDecisionFilings(ws);
-      return { layer: "model_output", ...newCapital({ amount, source, holdingsConfirmed: input.holdings_confirmed === true, portfolio: p, research: ws.research, policy: ws.policy, now: ws.now, quotes: ws.quotes, filings, yields: ws.yields, rules: ruleRowsOf(ws.policy) }) };
+      return { layer: "model_output", ...newCapital({ amount, source, transfers: ws.transfers, holdingsConfirmed: input.holdings_confirmed === true, portfolio: p, research: ws.research, policy: ws.policy, now: ws.now, quotes: ws.quotes, filings, yields: ws.yields, rules: ruleRowsOf(ws.policy) }) };
     }
     case "get_policy": {
       const a = ws.policy?.audit;

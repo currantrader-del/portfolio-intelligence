@@ -45,7 +45,7 @@ export async function runPlanJob(db: SupabaseClient, requestId: string): Promise
       holdings: ws.portfolio.holdings.map((h) => ({ symbol: h.symbol, weight: h.weight })),
       researched: ws.research.filter((r) => r.current || r.latest).map((r) => ({ symbol: r.symbol, asOf: (r.current ?? r.latest)!.research_as_of, stage: r.pipeline.stage, approved: !!r.authoritative })),
       maxFor: (s) => (isEtf(s) ? null : companyMax(ws.policy, s)),
-      deployable: ws.portfolio.cashDetail.deployable,
+      deployable: ws.portfolio.cashDetail.spendableNow, // only the brokerage account's own cash; savings need a planned transfer
     });
     if ("error" in plan) return out({ ok: false, error: `${plan.error}${ans.stopped ? ` (stopped: ${ans.stopped})` : ""}`, ...meta });
     return out({ ok: true, plan, ...meta });

@@ -2,7 +2,7 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { BENCHMARKS, dayChangePct, getQuotes, type Quote } from "@/lib/market/quotes";
 import { isMarketOpen } from "@/lib/market/hours";
-import { buildPortfolio, type LedgerEntry, type PortfolioView, type SnapshotInput } from "@/lib/portfolio/engine";
+import { buildPortfolio, type LedgerEntry, type PlannedTransfer, type PortfolioView, type SnapshotInput } from "@/lib/portfolio/engine";
 import { readPolicy, type Policy , AGE_REMINDER_DAYS } from "@/lib/policy/limits";
 import { policyFromRules, type PolicyRuleRow } from "@/lib/policy/rules";
 import { toResearchRecord, type FilingCheckInfo, type ResearchRecord, type VersionRow } from "@/lib/research/records";
@@ -23,6 +23,8 @@ export type Workspace = {
   ledger: LedgerEntry[];
   /** Latest 2- and 10-year Treasury yields (FRED, from the last market snapshot): the risk-free alternative. */
   yields: Yields;
+  /** Transfers between your accounts you recorded as planned and have not cancelled. */
+  transfers: PlannedTransfer[];
   /** Sector, industry, country and theme exposure with ETF look-through, and the exposure limits checked against it. */
   exposure: ExposureReport;
   exposureLimits: LimitCheck[];
@@ -131,8 +133,19 @@ export async function loadLedger(db: SupabaseClient): Promise<LedgerEntry[]> {
   }));
 }
 
+/** Planned transfers (model_runs kind "planned_transfer"), minus any you cancelled ("planned_transfer_cancel"). */
+export async function loadTransfers(db: SupabaseClient): Promise<PlannedTransfer[]> {
+  const { data } = await db.from("model_runs").select("id, kind, inputs, computed_at").in("kind", ["planned_transfer", "planned_transfer_cancel"]).order("computed_at");
+  const rows = (data ?? []) as { id: string; kind: string; inputs: Record<string, unknown>; computed_at: string }[];
+  const cancelled = new Set(rows.filter((r) => r.kind === "planned_transfer_cancel").map((r) => String(r.inputs?.transfer_id ?? "")));
+  return rows.filter((r) => r.kind === "planned_transfer" && !cancelled.has(r.id)).map((r) => ({
+    id: r.id, fromAccountId: String(r.inputs.from_account_id ?? ""), toAccountId: String(r.inputs.to_account_id ?? ""),
+    amount: Number(r.inputs.amount) || 0, date: String(r.inputs.date ?? r.computed_at.slice(0, 10)), note: (r.inputs.note as string | null) ?? null, createdAt: r.computed_at,
+  })).filter((t) => t.amount > 0 && t.fromAccountId && t.toAccountId);
+}
+
 export async function buildWorkspace(db: SupabaseClient, now = new Date()): Promise<Workspace> {
-  const [{ data: auth }, snapshots, research, policy, ledger, yields] = await Promise.all([db.auth.getClaims(), loadSnapshots(db), loadResearch(db), loadPolicy(db), loadLedger(db), loadYields(db).catch(() => ({ y2: null, y10: null }))]);
+  const [{ data: auth }, snapshots, research, policy, ledger, yields, transfers] = await Promise.all([db.auth.getClaims(), loadSnapshots(db), loadResearch(db), loadPolicy(db), loadLedger(db), loadYields(db).catch(() => ({ y2: null, y10: null })), loadTransfers(db).catch(() => [])]);
   const symbols = [...new Set([...snapshots.flatMap((s) => s.positions.map((p) => p.symbol.toUpperCase())), ...ledger.filter((t) => t.symbol).map((t) => t.symbol!.toUpperCase())])];
   const quotes = await getQuotes([...symbols, ...BENCHMARKS.map((b) => b.symbol)]);
   const roles: Record<string, string | null> = Object.fromEntries(Object.values(policy?.companies ?? {}).map((c) => [c.symbol, c.role]));
@@ -142,7 +155,7 @@ export async function buildWorkspace(db: SupabaseClient, now = new Date()): Prom
   const exposure = computeExposure(portfolio.holdings.map((h) => ({ symbol: h.symbol, value: h.value })), portfolio.cash, now);
   const exposureLimits = checkLimits(exposure, policy?.audit?.subjects.flatMap((s) => [...(s.approvedRow ? [s.approvedRow] : []), ...s.candidates]) ?? []);
   const alerts = [...evaluateAlerts({ portfolio, research, marketDayPct: benchmarks[0].dayPct, now, freshnessDays: AGE_REMINDER_DAYS, policy }), ...exposureAlerts(exposureLimits)];
-  return { now, marketOpen: isMarketOpen(now), quotes, benchmarks, portfolio, research, policy, alerts, userId: auth?.claims?.sub ?? null, ledger, yields, exposure, exposureLimits };
+  return { now, marketOpen: isMarketOpen(now), quotes, benchmarks, portfolio, research, policy, alerts, userId: auth?.claims?.sub ?? null, ledger, yields, transfers, exposure, exposureLimits };
 }
 
 /** Alerts for APPROVED exposure limits only: a proposal is not policy yet, so it never raises an alert. */

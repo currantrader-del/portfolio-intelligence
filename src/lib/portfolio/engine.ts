@@ -96,14 +96,44 @@ export type AccountView = {
   knownAgeDays: number;
 };
 
+/**
+ * What an account's cash can do. Cash never moves between accounts on its own: Acorns invests its own cash in
+ * its own portfolios, a Roth follows contribution rules, and savings can only fund the brokerage through a
+ * transfer you plan. Only the self-directed brokerage account can buy a chosen stock or ETF.
+ */
+export type AccountCashUse = "self_directed" | "managed" | "retirement_managed" | "savings";
+export type AccountCash = { id: string; name: string; role: string; cash: number; use: AccountCashUse; canBuyChosen: boolean; note: string };
+
+export function accountCashUse(name: string, role: string): AccountCashUse {
+  if (role === "cash" || role === "protected_savings") return "savings";
+  // Acorns accounts are robo-managed portfolios: you cannot pick individual stocks or ETFs there.
+  if (/acorns/i.test(name)) return role === "retirement" ? "retirement_managed" : "managed";
+  return role === "retirement" ? "retirement_managed" : "self_directed";
+}
+const USE_NOTE: Record<AccountCashUse, string> = {
+  self_directed: "Can buy any stock or ETF you choose",
+  managed: "Invested by Acorns in its own portfolio; cannot buy a chosen stock or ETF",
+  retirement_managed: "Retirement account: annual contribution limits, withdrawals restricted; invested in its own portfolio",
+  savings: "Savings: funds the brokerage only through a transfer you plan",
+};
+
+/** A transfer you recorded as planned. It counts as conditional money until the receiving account shows it. */
+export type PlannedTransfer = { id: string; fromAccountId: string; toAccountId: string; amount: number; date: string; note: string | null; createdAt: string };
+
 export type CashView = {
+  /** Each account's own cash and what it can be used for. */
+  accounts: AccountCash[];
+  /** The self-directed brokerage account new-money decisions buy in (null when none is on file). */
+  investingAccount: { id: string; name: string; cash: number } | null;
   brokerage: number; // cash inside brokerage and retirement accounts
   savings: number | null; // cash accounts; null when never entered
   savingsAsOf: string | null;
   protectedReserve: number; // policy floor, excluded from every percentage
   reserveShortfall: number; // reserve not covered by savings
   deployableSavings: number; // savings above the reserve
-  deployable: number; // brokerage + deployable savings
+  deployable: number; // brokerage + deployable savings (capital accounting; not all of it can buy anything today)
+  /** Cash that can buy a chosen stock or ETF today, without any transfer: the self-directed brokerage cash. */
+  spendableNow: number;
 };
 
 export type DataQuality = {
@@ -167,12 +197,15 @@ export function buildPortfolio(
   let savings: number | null = null;
   let savingsAsOf: string | null = null;
   const accounts: AccountView[] = [];
+  const accountCash: AccountCash[] = [];
   const missing: string[] = [];
 
   for (const s of snapshots) {
     const isCashAccount = s.accountRole === "cash" || s.accountRole === "protected_savings";
     const after = ledger.filter((t) => t.accountId === s.accountId && t.tradeDate > s.asOf.slice(0, 10));
     const cashAfter = (s.cashValue ?? 0) + after.reduce((a, t) => a + t.amount, 0);
+    const use = accountCashUse(s.accountName, s.accountRole);
+    accountCash.push({ id: s.accountId, name: s.accountName, role: s.accountRole, cash: round2(cashAfter), use, canBuyChosen: use === "self_directed", note: USE_NOTE[use] });
     if (isCashAccount) {
       savings = (savings ?? 0) + cashAfter;
       if (!savingsAsOf || s.asOf < savingsAsOf) savingsAsOf = s.asOf;
@@ -226,7 +259,12 @@ export function buildPortfolio(
 
   const reserve = policy?.protectedSavingsFloor ?? 3000;
   const deployableSavings = savings === null ? 0 : Math.max(0, savings - reserve);
+  const selfDirected = accountCash.filter((a) => a.use === "self_directed").sort((a, b) => b.cash - a.cash);
+  const investingAccount = selfDirected[0] ? { id: selfDirected[0].id, name: selfDirected[0].name, cash: Math.max(0, selfDirected[0].cash) } : null;
   const cashDetail: CashView = {
+    accounts: accountCash,
+    investingAccount,
+    spendableNow: round2(Math.max(0, investingAccount?.cash ?? 0)),
     brokerage: round2(brokerageCash),
     savings: savings === null ? null : round2(savings),
     savingsAsOf,

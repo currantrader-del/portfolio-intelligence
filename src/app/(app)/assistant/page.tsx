@@ -23,7 +23,7 @@ export default async function QuestionsPage({ searchParams }: { searchParams: Pr
   const ws = await getWorkspace();
   const stocks = ws.portfolio.holdings.filter((h) => !isEtf(h.symbol)).sort((a, b) => b.weight - a.weight).map((h) => h.symbol);
   const ticker = (sp.ticker ?? "").toUpperCase().replace(/[^A-Z0-9.\-]/g, "").slice(0, 10) || stocks[0] || "IREN";
-  const cash = ws.portfolio.cashDetail.deployable;
+  const cash = ws.portfolio.cashDetail.spendableNow; // cash that can buy a chosen stock or ETF today, in the brokerage account
   const fill = (t: string) => t.replace("{cash}", cash > 0 ? money(cash) : "my available cash").replace("{ticker}", ticker);
 
   const { data: quick } = await db.from("model_runs").select("computed_at, inputs, outputs").eq("kind", "assistant_answer").eq("inputs->>purpose", "quick").order("computed_at", { ascending: false }).limit(40);

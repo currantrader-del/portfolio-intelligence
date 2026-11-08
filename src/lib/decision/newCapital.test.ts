@@ -152,16 +152,24 @@ describe("new capital: ceilings and money source", () => {
 
   it("does not grow the portfolio when the money is cash already held", () => {
     const policy = policyFromRules(approvedRules);
-    const p = buildPortfolio([snap, savings], new Map(), policy, {}, [], now);
+    const p = buildPortfolio([{ ...snap, cashValue: 1500 }, savings], new Map(), policy, {}, [], now);
     const fromNew = newCapital({ amount: 1000, source: "new", portfolio: p, research: [research("$26")], policy, now });
     const fromCash = newCapital({ amount: 1000, source: "existing", portfolio: p, research: [research("$26")], policy, now });
     const room = (x: typeof fromNew) => x.options.find((o) => o.symbol === "AAA")!.headroomDollars!;
     expect(room(fromNew) - room(fromCash)).toBeCloseTo(100, 1); // 10% of the extra 1000
-    // Cash already held is capped at what is deployable after the reserve ($12,000 savings - $10,000 reserve).
+    // Cash already held is only what the brokerage account itself holds: savings above the reserve
+    // ($12,000 - $10,000) needs a planned transfer first.
     const tooMuch = newCapital({ amount: 5000, source: "existing", portfolio: p, research: [], policy, now });
-    expect(tooMuch.funds).toMatchObject({ requested: 5000, used: 2000 });
-    expect(tooMuch.funds.detail).toMatch(/only \$2,000 is deployable after the \$10,000 protected reserve/);
-    expect(tooMuch.recommendation.allocations.reduce((a, x) => a + x.amount, 0)).toBe(2000);
+    expect(tooMuch.funds).toMatchObject({ requested: 5000, used: 1500, verified: true });
+    expect(tooMuch.funds.detail).toMatch(/Broker holds \$1,500 of cash that can buy a stock or ETF, so this is sized on \$1,500\. Savings hold \$2,000 above the reserve; that can be used only after you plan a transfer to Broker\. The \$10,000 savings reserve is never used\./);
+    expect(tooMuch.recommendation.allocations.reduce((a, x) => a + x.amount, 0)).toBe(1500);
+    // With a planned $2,000 transfer it can be used, but only as conditional money until it arrives.
+    const transfers = [{ id: "t1", fromAccountId: "s", toAccountId: "a", amount: 2000, date: "2026-11-06", note: null, createdAt: "2026-11-05T15:00:00Z" }];
+    const withTransfer = newCapital({ amount: 5000, source: "existing", portfolio: p, research: [], policy, now, transfers });
+    expect(withTransfer.funds).toMatchObject({ used: 3500, verified: false });
+    expect(withTransfer.funds.detail).toMatch(/^\$3,500: \$1,500 already in Broker plus \$2,000 from the transfer you planned, which has not arrived yet\./);
+    expect(withTransfer.gates.find((g) => g.key === "funds")!.ok).toBe(false);
+    expect(withTransfer.recommendation.rationale.join(" ")).toMatch(/Account: bought in Broker, after the planned \$2,000 transfer arrives/);
   });
 });
 
@@ -283,7 +291,7 @@ describe("new capital: hypothetical vs verified money", () => {
     const planned = newCapital({ amount: 1250, source: "planned", portfolio: p, research: [research("$26")], policy, now, filings: quiet });
     expect(planned.status).toBe("conditional");
     expect(planned.funds.verified).toBe(false);
-    expect(planned.gates.find((g) => g.key === "funds")).toMatchObject({ ok: false, detail: expect.stringMatching(/planned new money, not yet deposited\. This is what to do once it arrives, not an order/) });
+    expect(planned.gates.find((g) => g.key === "funds")).toMatchObject({ ok: false, detail: expect.stringMatching(/planned new money for Broker, not yet deposited\. This is what to do once it arrives, not an order/) });
     expect(planned.recommendation.headline).toMatch(/, once the money arrives$/);
     const legacyNew = newCapital({ amount: 1250, source: "new", portfolio: p, research: [research("$26")], policy, now, filings: quiet });
     expect(legacyNew.source).toBe("planned"); // "new" from older callers is treated as unverified
@@ -299,7 +307,7 @@ describe("new capital: hypothetical vs verified money", () => {
     const r = newCapital({ amount: 1250, source: "deposited", holdingsConfirmed: true, portfolio: p221, research: [research("$26")], policy, now, filings: quiet });
     expect(r.status).toBe("conditional");
     expect(r.funds.verified).toBe(false);
-    expect(r.gates.find((g) => g.key === "funds")).toMatchObject({ ok: false, detail: expect.stringMatching(/only \$221\.24 of brokerage cash\. Record the deposit/) });
+    expect(r.gates.find((g) => g.key === "funds")).toMatchObject({ ok: false, detail: expect.stringMatching(/but Broker shows only \$221\.24 of cash\. Record the deposit/) });
     expect(r.recommendation.headline).toMatch(/once the deposit shows in your recorded cash$/);
   });
 

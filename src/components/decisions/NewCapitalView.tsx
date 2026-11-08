@@ -4,7 +4,7 @@ import Link from "next/link";
 import type { Workspace } from "@/lib/workspace";
 import { newCapital, ruleRowsOf, type MoneySource, type OptionLabel } from "@/lib/decision/newCapital";
 import { WATCHED } from "@/lib/decision/exposureImpact";
-import { recordNewCapital } from "@/app/(app)/decisions/actions";
+import { cancelTransfer, planTransfer, recordNewCapital } from "@/app/(app)/decisions/actions";
 import { loadDecisionFilings } from "@/lib/alerts/events";
 import { AskButton } from "@/components/AskPanel";
 import { pctStr, usd } from "@/lib/format";
@@ -26,7 +26,7 @@ const GATE_LINK: Record<string, { href: string; label: string }> = {
  */
 export async function NewCapitalView({ ws, amount, source, confirmed, action }: { ws: Workspace; amount: number; source: MoneySource; confirmed: boolean; action: string }) {
   const filings = await loadDecisionFilings(ws);
-  const r = newCapital({ amount, source, holdingsConfirmed: confirmed, portfolio: ws.portfolio, research: ws.research, policy: ws.policy, now: ws.now, quotes: ws.quotes, filings, yields: ws.yields, rules: ruleRowsOf(ws.policy) });
+  const r = newCapital({ amount, source, holdingsConfirmed: confirmed, transfers: ws.transfers, portfolio: ws.portfolio, research: ws.research, policy: ws.policy, now: ws.now, quotes: ws.quotes, filings, yields: ws.yields, rules: ruleRowsOf(ws.policy) });
   const rec = r.recommendation;
   const wait = r.status !== "ready";
   const shown = r.exposure.impacts.filter((x) => x.label !== "Existing holding");
@@ -77,6 +77,8 @@ export async function NewCapitalView({ ws, amount, source, confirmed, action }: 
             ))}
           </ul>
         </Card>
+
+        <AccountCashCard ws={ws} />
 
         {r.toVerify.length > 0 && (
           <Card labelledBy="wc-h" className="!gap-2.5">
@@ -197,6 +199,59 @@ export async function NewCapitalView({ ws, amount, source, confirmed, action }: 
         <AskButton question={`Explain the ${usd(amount)} new capital recommendation, what to check before acting, and the strongest case against each alternative.`} className="btn w-full">Ask why</AskButton>
       </div>
     </div>
+  );
+}
+
+/**
+ * Each account's own cash and what it can do. Cash never moves between accounts on its own; savings can fund the
+ * brokerage only through a transfer you plan here (recorded only, nothing is moved), and the reserve never can.
+ */
+function AccountCashCard({ ws }: { ws: Workspace }) {
+  const cd = ws.portfolio.cashDetail;
+  const accounts = cd.accounts ?? [];
+  const name = (id: string) => accounts.find((a) => a.id === id)?.name ?? "Unknown account";
+  const sources = accounts.filter((a) => a.use === "savings" || a.use === "self_directed");
+  const targets = accounts.filter((a) => a.canBuyChosen);
+  return (
+    <Card labelledBy="acct-h" className="!gap-2.5">
+      <CardHead id="acct-h" title="Cash by account" right={<span className="t-xs">can buy today: {usd(cd.spendableNow)}</span>} />
+      <ul className="flex flex-col">
+        {accounts.map((a) => (
+          <li key={a.id} className="flex items-start justify-between gap-3 py-1.5 border-t border-line first:border-t-0">
+            <span className="flex flex-col min-w-0"><span className="t-sm text-ink">{a.name}</span><span className="t-xs">{a.use === "savings" ? `${a.note}. ${usd(cd.protectedReserve)} is your protected reserve; ${usd(cd.deployableSavings)} is above it.` : a.note}</span></span>
+            <span className="t-sm num text-ink shrink-0">{usd(a.cash, 2)}</span>
+          </li>
+        ))}
+      </ul>
+      {ws.transfers.length > 0 && (
+        <div className="flex flex-col gap-1.5 border-t border-line pt-2">
+          <span className="t-xs text-ink">Planned transfers (recorded only; counted as conditional until the money shows)</span>
+          {ws.transfers.map((t) => (
+            <ActionForm key={t.id} action={cancelTransfer} success="Transfer cancelled" className="flex items-center justify-between gap-2">
+              <input type="hidden" name="id" value={t.id} />
+              <span className="t-xs">{usd(t.amount, 2)} from {name(t.fromAccountId)} to {name(t.toAccountId)}, {t.date}</span>
+              <SubmitButton className="btn btn-sm shrink-0" pendingText="Cancelling…">Cancel</SubmitButton>
+            </ActionForm>
+          ))}
+        </div>
+      )}
+      {sources.length > 0 && targets.length > 0 && (
+        <div className="border-t border-line -mb-2">
+          <Disclose summary="Plan a transfer to the brokerage account">
+            <ActionForm action={planTransfer} success="Transfer recorded as planned" className="flex flex-col gap-2">
+              <div className="grid grid-cols-2 gap-2">
+                <label className="field">From<select name="from" className="input" defaultValue={sources.find((a) => a.use === "savings")?.id ?? sources[0].id}>{sources.map((a) => <option key={a.id} value={a.id}>{a.name}</option>)}</select></label>
+                <label className="field">To<select name="to" className="input" defaultValue={targets[0].id}>{targets.map((a) => <option key={a.id} value={a.id}>{a.name}</option>)}</select></label>
+                <label className="field">Amount<input name="amount" inputMode="decimal" className="input" placeholder={cd.deployableSavings >= 1 ? String(Math.floor(cd.deployableSavings)) : "0"} /></label>
+                <label className="field">Date<input name="date" type="date" className="input" defaultValue={ws.now.toISOString().slice(0, 10)} /></label>
+              </div>
+              <span className="t-xs">This only records your plan; it moves no money. The protected reserve cannot be planned out.</span>
+              <SubmitButton className="btn self-start" pendingText="Saving…">Record planned transfer</SubmitButton>
+            </ActionForm>
+          </Disclose>
+        </div>
+      )}
+    </Card>
   );
 }
 
