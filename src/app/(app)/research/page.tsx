@@ -2,7 +2,8 @@ import { ActionForm, SubmitButton } from "@/components/forms";
 import { AGE_REMINDER_DAYS } from "@/lib/policy/limits";
 import { getWorkspace } from "@/lib/workspace";
 import { isEtf } from "@/lib/portfolio/classify";
-import { coverage } from "@/lib/research/status";
+import { coverage, suggestStage } from "@/lib/research/status";
+import { getQuotes } from "@/lib/market/quotes";
 import { pctStr, shortDate } from "@/lib/format";
 import { Card, CardHead, Disclose, PageHeader, Pill } from "@/components/ui";
 import { AlertList } from "@/components/cards/Alerts";
@@ -32,9 +33,26 @@ export default async function ResearchPage({ searchParams }: { searchParams: Pro
       exposure: e ? `${pctStr(e.total)} of investable · limit ${pctStr(e.max, 0)}` : null,
     };
   });
-  const pipeline: PipeItem[] = ws.research.filter((r) => !ownedSet.has(r.symbol)).map((r) => {
+  const notOwned = ws.research.filter((r) => !ownedSet.has(r.symbol));
+  // The workspace only quotes holdings; researched companies need their own price for the bands.
+  const need = notOwned.filter((r) => (r.current ?? r.latest) && !ws.quotes.has(r.symbol)).map((r) => r.symbol);
+  const extraQuotes = need.length ? await getQuotes(need).catch(() => new Map()) : new Map();
+  const STAGE_NAME: Record<string, string> = { screening: "Screening", researching: "Researching", ready: "Ready", passed: "Passed" };
+  const pipeline: PipeItem[] = notOwned.map((r) => {
     const v = r.current ?? r.latest;
+    const price = (ws.quotes.get(r.symbol) ?? extraQuotes.get(r.symbol))?.price ?? null;
+    const stageNow = r.pipeline.stage === "owned" ? "researching" : r.pipeline.stage;
+    const c = coverage(r, price, ws.now, freshDays);
+    const sug = v ? suggestStage({ stage: stageNow, held: false, coverageKey: c.key, hasResearch: true, action: v.parsed.action ?? null, screenVerdict: r.pipeline.screen?.verdict ?? null }) : null;
+    // Same card as an owned position whenever research exists, minus the position size.
+    const card: OwnedItem | null = v ? {
+      symbol: r.symbol, name: r.name ?? null, classification: v.parsed.classification ?? null, coverage: c,
+      action: v.parsed.action ?? null, confidence: v.parsed.confidence ?? null, researchAsOf: md(v.research_as_of), versions: r.versions ?? 0,
+      price, zones: toZoneViews(v.parsed.zones ?? []),
+      exposure: sug ? `Suggested move: ${STAGE_NAME[sug.stage]}. Open to accept.` : r.pipeline.note,
+    } : null;
     return {
+      card,
       symbol: r.symbol, name: r.name,
       // A company is only "owned" while it is in the holdings; otherwise it returns to research.
       stage: r.pipeline.stage === "owned" ? "researching" : r.pipeline.stage,

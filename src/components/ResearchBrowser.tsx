@@ -14,6 +14,8 @@ export type OwnedItem = {
 export type PipeItem = {
   symbol: string; name: string | null; stage: string; note: string | null;
   screen: string | null; screenedAt: string | null; coverage: string | null;
+  /** Researched companies get the same card as an owned position, without the position size. */
+  card: OwnedItem | null;
 };
 
 const SCREEN_TONE: Record<string, "gain" | "warn" | "neutral"> = { "Worth researching": "gain", Mixed: "warn", "Weak on screen": "warn", "Not enough data": "neutral" };
@@ -37,7 +39,9 @@ export function ResearchBrowser({ owned, pipeline, initialStage }: { owned: Owne
   const needle = q.trim().toLowerCase();
   const match = (s: string, n: string | null, extra = "") => `${s} ${n ?? ""} ${extra}`.toLowerCase().includes(needle);
   const ownedShown = needle ? owned.filter((o) => match(o.symbol, o.name, o.classification ?? "")) : stage === "owned" ? owned : [];
-  const pipeShown = needle ? pipeline.filter((p) => match(p.symbol, p.name, p.note ?? "")) : pipeline.filter((p) => p.stage === stage);
+  const pipeMatched = needle ? pipeline.filter((p) => match(p.symbol, p.name, p.note ?? "")) : pipeline.filter((p) => p.stage === stage);
+  const cardsShown = pipeMatched.filter((p) => p.card);
+  const pipeShown = pipeMatched.filter((p) => !p.card);
   const total = owned.length + pipeline.length;
 
   return (
@@ -57,15 +61,16 @@ export function ResearchBrowser({ owned, pipeline, initialStage }: { owned: Owne
         </div>
       )}
 
-      {needle && <p className="t-xs" aria-live="polite">{ownedShown.length + pipeShown.length} match{ownedShown.length + pipeShown.length === 1 ? "" : "es"}</p>}
+      {needle && <p className="t-xs" aria-live="polite">{ownedShown.length + pipeMatched.length} match{ownedShown.length + pipeMatched.length === 1 ? "" : "es"}</p>}
 
-      {ownedShown.length > 0 && (
+      {ownedShown.length + cardsShown.length > 0 && (
         <div className="grid gap-3 lg:grid-cols-2">
           {ownedShown.map((o) => <OwnedCard key={o.symbol} o={o} />)}
+          {cardsShown.map((p) => <OwnedCard key={p.symbol} o={p.card!} stage={needle ? STAGE_LABEL[p.stage] ?? p.stage : null} />)}
         </div>
       )}
 
-      {(pipeShown.length > 0 || (!needle && stage !== "owned")) && (
+      {(pipeShown.length > 0 || (!needle && stage !== "owned" && cardsShown.length === 0)) && (
         <div className="card !gap-0 !py-1">
           {pipeShown.length === 0 ? <p className="t-sm py-3">Nothing at this stage.</p> : (
             <ul className="list">
@@ -85,7 +90,7 @@ export function ResearchBrowser({ owned, pipeline, initialStage }: { owned: Owne
           )}
         </div>
       )}
-      {needle && ownedShown.length + pipeShown.length === 0 && (
+      {needle && ownedShown.length + pipeMatched.length === 0 && (
         <div className="card card-tight">
           <p className="t-sm">No company matches &ldquo;{q}&rdquo;.</p>
           {/^[a-z.\-]{1,10}$/i.test(q.trim()) && <Link href={`/research/${q.trim().toUpperCase()}`} className="btn btn-sm self-start">Look up {q.trim().toUpperCase()}</Link>}
@@ -95,8 +100,8 @@ export function ResearchBrowser({ owned, pipeline, initialStage }: { owned: Owne
   );
 }
 
-/** Company Research card for an owned position. */
-function OwnedCard({ o }: { o: OwnedItem }) {
+/** Company Research card: an owned position, or a researched company (no position size). */
+function OwnedCard({ o, stage }: { o: OwnedItem; stage?: string | null }) {
   return (
     <Link href={`/research/${o.symbol}`} className="card !gap-2.5">
       <div className="flex items-center justify-between gap-3 min-w-0">
@@ -104,7 +109,7 @@ function OwnedCard({ o }: { o: OwnedItem }) {
           <Tick symbol={o.symbol} />
           <div className="flex flex-col min-w-0">
             <span className="font-semibold truncate">{o.name ?? o.symbol}</span>
-            <span className="t-xs truncate">{o.symbol}{o.classification ? ` · ${o.classification}` : ""}</span>
+            <span className="t-xs truncate">{o.symbol}{stage ? ` · ${stage}` : ""}{o.classification ? ` · ${o.classification}` : ""}</span>
           </div>
         </div>
         <Pill tone={o.coverage.tone} dot={o.coverage.dot} title={o.coverage.detail}>{o.coverage.label}</Pill>
