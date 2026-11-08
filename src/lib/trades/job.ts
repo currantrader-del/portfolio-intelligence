@@ -13,18 +13,47 @@ import { extractJson } from "@/lib/research/aiResearch";
 import { getQuote, getQuotes } from "@/lib/market/quotes";
 import { getHistory } from "@/lib/market/history";
 import { analyze } from "@/lib/market/ta";
+import { UNIVERSE } from "@/lib/market/universe";
+import { SCAN_VERSION, findSetup, rankSetups, setupsText, type Setup } from "./scan";
 import { TRADE_LIMITS, TRADE_SYSTEM, TRADE_VERSION, evaluate, tradeQuestion, validateIdea, type Entry, type Mark, type Result, type TradeIdea } from "./trades";
 
 export const BENCH = "VOO";
 export const SCAN_RUNNING_MIN = 12;
 const etDay = (d: Date) => new Intl.DateTimeFormat("en-CA", { timeZone: "America/New_York" }).format(d);
 
-export type StoredScan = { ok: boolean; error?: string; trigger: string; focus: string | null; ideaIds: string[]; rejected: { symbol: string; why: string }[]; noneReason: string | null; costUsd: number; ms: number; searches: number; model: string | null };
+export type MarketScan = { version: string; at: string; scanned: number; failed: number; found: number; setups: Setup[]; ms: number };
+export type StoredScan = { ok: boolean; error?: string; trigger: string; focus: string | null; screen?: { at: string; scanned: number; failed: number; found: number; setups: Setup[] } | null; ideaIds: string[]; rejected: { symbol: string; why: string }[]; noneReason: string | null; costUsd: number; ms: number; searches: number; model: string | null };
 export type Trade = {
   id: string; at: string; idea: TradeIdea; entry: Entry;
   close: { at: string; result: Result; mark: Mark } | null;
   taken: { at: string; price: number | null; quantity: number | null; note: string } | null;
 };
+
+/**
+ * Screens the whole universe in code: a year of daily bars for each stock, the technicals, and the best
+ * chart setup. Reused for 6 hours (prices only change during the session), so repeated searches are cheap.
+ */
+export async function marketScan(db: SupabaseClient, extra: string[], now = new Date()): Promise<MarketScan> {
+  const { data: cached } = await db.from("model_runs").select("computed_at, outputs").eq("kind", "market_scan").order("computed_at", { ascending: false }).limit(1).maybeSingle();
+  if (cached && now.getTime() - new Date(cached.computed_at as string).getTime() < 6 * 3600_000 && (cached.outputs as MarketScan).version === SCAN_VERSION) return cached.outputs as MarketScan;
+  const t0 = Date.now();
+  const sector = new Map(UNIVERSE);
+  const symbols = [...new Set([...UNIVERSE.map(([s]) => s), ...extra.map((s) => s.toUpperCase())])];
+  const setups: Setup[] = [];
+  let failed = 0;
+  for (let i = 0; i < symbols.length; i += 12) {
+    await Promise.all(symbols.slice(i, i + 12).map(async (s) => {
+      const h = await getHistory(s, "1y").catch(() => null);
+      const ta = h ? analyze(h.bars) : null;
+      if (!h || !ta) { failed++; return; }
+      const setup = findSetup(s, sector.get(s) ?? null, h.bars, ta);
+      if (setup) setups.push(setup);
+    }));
+  }
+  const out: MarketScan = { version: SCAN_VERSION, at: now.toISOString(), scanned: symbols.length - failed, failed, found: setups.length, setups: rankSetups(setups), ms: Date.now() - t0 };
+  await save(db, "market_scan", SCAN_VERSION, { symbols: symbols.length }, out);
+  return out;
+}
 
 /** At least two price/trend lookups and one web search: the minimum for a decision worth recording. */
 export function researched(steps: { tool: string }[], searches: number) {
@@ -60,7 +89,9 @@ export async function runTradeScan(db: SupabaseClient, requestId: string, notify
   const ws = await buildWorkspace(db);
   const now = new Date();
   try {
-    const question = tradeQuestion(etDay(now), focus);
+    const held = ws.portfolio.holdings.map((h) => h.symbol), researchedSyms = ws.research.map((r) => r.symbol);
+    const screen = await marketScan(db, [...held, ...researchedSyms], now).catch((e) => { console.error(`trades: market scan failed: ${(e as Error).message}`); return null; });
+    const question = tradeQuestion(etDay(now), focus, screen ? setupsText(screen.setups, screen.scanned) : null);
     let ans = await runAgent(db, ws, { question, system: TRADE_SYSTEM, limits: TRADE_LIMITS, page: "/trades", symbol: focus });
     let spent = { costUsd: ans.costUsd, ms: ans.ms };
     // An answer that skipped the research is sent back once with the steps it missed.
@@ -68,7 +99,7 @@ export async function runTradeScan(db: SupabaseClient, requestId: string, notify
       ans = await runAgent(db, ws, { question: "You answered without doing the research. Do steps 1-4 now with the tools (quotes and technicals for each candidate, a web search for the catalyst and its date), then reply with the JSON.", history: [{ role: "user", content: question }, { role: "assistant", content: ans.answer || "(no answer)" }], system: TRADE_SYSTEM, limits: TRADE_LIMITS, page: "/trades", symbol: focus });
       spent = { costUsd: spent.costUsd + ans.costUsd, ms: spent.ms + ans.ms };
     }
-    const meta = { ...spent, searches: ans.searches, model: ans.model };
+    const meta = { ...spent, searches: ans.searches, model: ans.model, screen: screen ? { at: screen.at, scanned: screen.scanned, failed: screen.failed, found: screen.found, setups: screen.setups } : null };
     if (!researched(ans.steps, ans.searches)) return out({ ok: false, error: "The search did not research any candidates; nothing was decided. Try again.", ideaIds: [], rejected: [], noneReason: null, ...meta });
     const json = extractJson(ans.answer) as { ideas?: unknown[]; none_reason?: string | null } | null;
     if (!json || !Array.isArray(json.ideas)) return out({ ok: false, error: `The answer was not in the expected format${ans.stopped ? ` (stopped: ${ans.stopped})` : ""}`, ideaIds: [], rejected: [], noneReason: null, ...meta });
@@ -94,7 +125,7 @@ export async function runTradeScan(db: SupabaseClient, requestId: string, notify
     if (made.length && notify) await notify(made).catch((e) => console.error(`trades: notify failed: ${(e as Error).message}`));
     return id;
   } catch (e) {
-    return out({ ok: false, error: (e as Error).message.slice(0, 300), ideaIds: [], rejected: [], noneReason: null, costUsd: 0, ms: 0, searches: 0, model: null });
+    return out({ ok: false, error: (e as Error).message.slice(0, 300), ideaIds: [], rejected: [], noneReason: null, costUsd: 0, ms: 0, searches: 0, model: null, screen: null });
   }
 }
 
