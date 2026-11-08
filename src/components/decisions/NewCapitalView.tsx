@@ -2,19 +2,20 @@ import Link from "next/link";
 import type { Workspace } from "@/lib/workspace";
 import { newCapital, type OptionLabel } from "@/lib/decision/newCapital";
 import { recordNewCapital } from "@/app/(app)/decisions/actions";
+import { loadDecisionFilings } from "@/lib/alerts/events";
 import { AskButton } from "@/components/AskPanel";
 import { pctStr, usd } from "@/lib/format";
 import { Card, CardHead, DataLabel, Disclose, Dot, Pill } from "@/components/ui";
 
 const LABEL_TONE: Record<OptionLabel, "gain" | "warn" | "neutral" | "solid" | "alert"> = {
-  Candidate: "solid", "Valid option": "neutral", "Refresh required": "warn", "Research needed": "warn", "At limit": "warn", "Below hurdle": "neutral", "Trim review": "alert",
+  Candidate: "solid", "Valid option": "neutral", "Refresh required": "warn", "Research needed": "warn", "No limit set": "warn", "At limit": "warn", "Below the bar": "neutral", "Research says wait": "neutral", "Trim review": "alert",
 };
 const KIND: Record<string, string> = { stock: "Existing position", new_stock: "New position", etf: "Diversified ETF", cash: "Always available", trim: "Reduce exposure" };
 const GATE_LINK: Record<string, { href: string; label: string }> = {
   holdings: { href: "/portfolio/reconcile", label: "Update holdings" },
   cash: { href: "/portfolio/reconcile", label: "Enter savings" },
   limits: { href: "/policy", label: "Choose limits" },
-  assumptions: { href: "/policy", label: "Set assumptions" },
+  assumptions: { href: "/policy", label: "Review on Policy" },
   research: { href: "/research", label: "Refresh research" },
 };
 
@@ -22,8 +23,9 @@ const GATE_LINK: Record<string, { href: string; label: string }> = {
  * Investment Decision card set for new cash. The engine decides; this only lays it out.
  * When the status is WAIT / REVIEW nothing here reads as a recommendation.
  */
-export function NewCapitalView({ ws, amount, source, action }: { ws: Workspace; amount: number; source: "new" | "existing"; action: string }) {
-  const r = newCapital({ amount, source, portfolio: ws.portfolio, research: ws.research, policy: ws.policy, now: ws.now, quotes: ws.quotes });
+export async function NewCapitalView({ ws, amount, source, action }: { ws: Workspace; amount: number; source: "new" | "existing"; action: string }) {
+  const filings = await loadDecisionFilings(ws);
+  const r = newCapital({ amount, source, portfolio: ws.portfolio, research: ws.research, policy: ws.policy, now: ws.now, quotes: ws.quotes, filings });
   const rec = r.recommendation;
   const wait = r.status !== "actionable";
   const open = r.gates.filter((g) => !g.ok);
@@ -100,7 +102,8 @@ export function NewCapitalView({ ws, amount, source, action }: { ws: Workspace; 
                 <div className="disclose-body t-sm">
                   <div className="flex flex-wrap gap-x-4 gap-y-0.5 t-xs num">
                     {o.price !== null && <span>{usd(o.price, 2)}{o.priceSource === "statement" ? " (statement)" : " (delayed)"}</span>}
-                    {o.expectedReturn !== null && <span>exp. {pctStr(o.expectedReturn)}/yr{o.kind === "etf" ? " (assumption)" : " (model)"}</span>}
+                    {o.expectedReturn !== null && <span>exp. {pctStr(o.expectedReturn)}/yr{o.kind === "etf" ? " (forecast middle)" : " (model)"}</span>}
+                    {o.comparison && <span>bar {pctStr(o.comparison.bar)}</span>}
                     {o.weightNow !== null && <span>now {pctStr(o.weightNow)}{o.maxWeight !== null ? ` of ${pctStr(o.maxWeight, 0)}` : ""}</span>}
                   </div>
                   {o.zoneAction && <span>Research price band today: {o.zoneAction} (a prompt to research, not a trade).</span>}
@@ -109,25 +112,25 @@ export function NewCapitalView({ ws, amount, source, action }: { ws: Workspace; 
               </details>
             ))}
           </div>
-          <span className="t-xs">Expected returns are model estimates from your research scenarios at today&apos;s price; ETF returns are assumptions. A drop is never a buy signal by itself.</span>
+          <span className="t-xs">Expected returns are model estimates from your research scenarios at today&apos;s price. A stock must beat the top of the published U.S. stock forecasts plus a margin for its own scenario spread. A drop is never a buy signal by itself.</span>
         </Card>
 
         <Card flush>
           <Disclose open={!wait} summary={wait ? "Illustrative split (not a recommendation)" : `Recommended split · confidence ${rec.confidence}/10`}>
             {wait && <DataLabel kind="illustrative" />}
             <div className="num text-[17px] text-ink">{rec.allocations.length ? rec.allocations.map((x) => `${usd(x.amount)} ${x.symbol}`).join(" + ") : "Nothing allocated"}</div>
-            {wait && <p className="t-sm warn">Shown only to make the engine&apos;s mechanics visible. It uses placeholder assumptions and unverified inputs.</p>}
+            {wait && <p className="t-sm warn">Shown only to make the engine&apos;s mechanics visible. It uses inputs that are not yet verified or approved.</p>}
             <ul className="list-disc pl-4 t-sm flex flex-col gap-1">{rec.rationale.map((x) => <li key={x}>{x}</li>)}</ul>
             {rec.wouldChange.length > 0 && <p className="t-sm"><span className="text-ink font-semibold">Would change it:</span> {rec.wouldChange.join(" ")}</p>}
           </Disclose>
           <Disclose summary="Assumptions and sources">
             <ul className="t-sm flex flex-col gap-1">
-              <li className="flex justify-between gap-3"><span>ETF expected return</span><span className="num text-ink">{pctStr(r.assumptions.etfExpectedReturn)} <span className="t-xs">· {r.assumptions.etfSource}</span></span></li>
-              <li className="flex justify-between gap-3"><span>Hurdle over the ETF</span><span className="num text-ink">{pctStr(r.assumptions.hurdlePoints, 0)} <span className="t-xs">· {r.assumptions.hurdleSource}</span></span></li>
+              <li className="flex justify-between gap-3"><span>U.S. stocks, published forecasts</span><span className="num text-ink">{pctStr(r.assumptions.benchmark.low)}–{pctStr(r.assumptions.benchmark.high)} <span className="t-xs">· {r.assumptions.benchmark.sources.map((x) => `${x.firm.split(" ")[0]} ${x.asOf}`).join(", ")}</span></span></li>
+              <li className="flex justify-between gap-3"><span>Margin per unit of scenario spread</span><span className="num text-ink">{r.assumptions.riskMarginFactor} <span className="t-xs">· your risk preference</span></span></li>
               <li className="flex justify-between gap-3"><span>Investable capital</span><span className="num text-ink">{usd(ws.portfolio.total)} <span className="t-xs">· {ws.portfolio.quality.status}, {ws.portfolio.quality.reconciliation.label.toLowerCase()}</span></span></li>
             </ul>
-            {!r.assumptions.approved && <DataLabel kind="placeholder">Placeholders in use</DataLabel>}
-            <Link href="/policy" className="t-sm">Set your own on the Policy page</Link>
+            {!r.assumptions.approved && <DataLabel kind="placeholder">Not approved yet</DataLabel>}
+            <Link href="/policy" className="t-sm">Approve or reject on the Policy page</Link>
           </Disclose>
           <Disclose summary="Record what you decide">
             <form action={recordNewCapital} className="flex flex-col gap-2.5">

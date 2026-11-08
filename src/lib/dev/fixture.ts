@@ -205,11 +205,13 @@ function policyRules() {
     row({ scope: "bucket", subject: "Asymmetric/high-risk growth sleeve", normal_low: 0, normal_high: 0.1, hard_max: 0.12 }),
     row({ subject: "ACME", normal_low: 0.05, normal_high: 0.12, hard_max: 0.18 }),
     row({ subject: "BOLT", hard_max: 0.1, approval: "unresolved", source_label: "Sample policy v2 (undated)", source_date: null }),
-    row({ subject: "BOLT", hard_max: 0.08, approval: "unresolved", source_label: "BOLT research", source_date: ago(57) }),
+    row({ subject: "BOLT", normal_low: 0.03, normal_high: 0.05, hard_max: 0.08, approval: "unresolved", source_label: "BOLT research", source_date: ago(57), approval_note: "Claude recommends: the completed company research sets this range; the older figure was provisional.", conditions: "Research archive, final allocation section" }),
     row({ subject: "CRWN", hard_max: 0.12 }),
     row({ scope: "generic_company", subject: "generic", hard_max: 0.08, approval: "proposed", source_label: "App default" }),
     row({ scope: "assumption", subject: "etf_expected_return", value: 0.07, approval: "proposed", source_label: "App placeholder" }),
     row({ scope: "assumption", subject: "hurdle_over_etf", value: 0.03, approval: "proposed", source_label: "App placeholder" }),
+    row({ scope: "assumption", subject: "benchmark_return", normal_low: 0.048, normal_high: 0.075, value: 0.0665, approval: "proposed", approved_at: null, source_label: "Published forecasts", source_date: ago(10), approval_note: "Claude recommends: use the range of published forecasts instead of a fixed 7%." }),
+    row({ scope: "bucket", subject: "Bonds", normal_low: 0, normal_high: 0.05, hard_max: 0.15, approved_at: null, source_label: "Sample policy v2 (imported)" }),
     row({ scope: "portfolio", subject: "protected_reserve", value: 10000 }),
   ];
 }

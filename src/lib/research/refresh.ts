@@ -35,7 +35,8 @@ export function decideRefresh(args: {
   if (args.completeness !== "complete") t.push({ rule: "R1 incomplete research", level: "targeted_refresh", evidence: `Stored research is ${args.completeness}`, scope: ["missing phases"] });
 
   const age = Math.floor((now.getTime() - new Date(`${researchAsOf}T00:00:00Z`).getTime()) / 86400000);
-  if (age > args.freshDays) t.push({ rule: "R2 stale research", level: "targeted_refresh", evidence: `${age} days old, limit ${args.freshDays}`, scope: ["financials", "catalysts"] });
+  // R2 (age) is only a reminder when filings could not be checked; with filings, R3-R6 (events) decide.
+  if (age > args.freshDays && args.filings === null) t.push({ rule: "R2 long gap, filings not checked", level: "targeted_refresh", evidence: `${age} days since research and filings could not be retrieved`, scope: ["financials", "catalysts"] });
 
   if (args.filings === null) notChecked.push("SEC filings could not be retrieved, so new reports and financing were not checked");
   else {

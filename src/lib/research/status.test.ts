@@ -20,10 +20,12 @@ describe("research coverage label", () => {
   });
   it("does not ask for research just because there is no live price", () => {
     expect(coverage(rec(), null, now, 120).key).toBe("current");
-    expect(coverage(rec({ asOf: "2026-05-01" }), null, now, 120).key).toBe("refresh");
+    expect(coverage(rec({ asOf: "2026-05-01" }), null, now, 120).key).toBe("current");
   });
-  it("asks for a refresh when research is past the freshness window", () => {
-    expect(coverage(rec({ asOf: "2026-05-01" }), 100, now, 120).key).toBe("refresh");
+  it("does not call research stale on age alone; it only adds a reminder to check filings", () => {
+    const c = coverage(rec({ asOf: "2026-05-01" }), 100, now, 120);
+    expect(c.key).toBe("current");
+    expect(c.detail).toMatch(/check filings since then/);
   });
   it("marks partial research incomplete, never current", () => {
     expect(coverage(rec({ completeness: "partial" }), 100, now, 120).key).toBe("incomplete");

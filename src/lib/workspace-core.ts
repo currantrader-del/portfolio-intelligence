@@ -3,7 +3,7 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import { BENCHMARKS, dayChangePct, getQuotes, type Quote } from "@/lib/market/quotes";
 import { isMarketOpen } from "@/lib/market/hours";
 import { buildPortfolio, type LedgerEntry, type PortfolioView, type SnapshotInput } from "@/lib/portfolio/engine";
-import { readPolicy, type Policy } from "@/lib/policy/limits";
+import { readPolicy, type Policy , AGE_REMINDER_DAYS } from "@/lib/policy/limits";
 import { policyFromRules, type PolicyRuleRow } from "@/lib/policy/rules";
 import { toResearchRecord, type ResearchRecord, type VersionRow } from "@/lib/research/records";
 import { evaluateAlerts, type Alert } from "@/lib/alerts/rules";
@@ -105,7 +105,7 @@ export async function buildWorkspace(db: SupabaseClient, now = new Date()): Prom
   const classifications = { ...roles, ...Object.fromEntries(research.filter((r) => r.current?.parsed.classification).map((r) => [r.symbol, r.current!.parsed.classification])) };
   const portfolio = buildPortfolio(snapshots, quotes, policy, classifications, ledger, now);
   const benchmarks = BENCHMARKS.map((b) => ({ ...b, dayPct: dayChangePct(quotes.get(b.symbol)) }));
-  const alerts = evaluateAlerts({ portfolio, research, marketDayPct: benchmarks[0].dayPct, now, freshnessDays: policy?.researchFreshnessDays, policy });
+  const alerts = evaluateAlerts({ portfolio, research, marketDayPct: benchmarks[0].dayPct, now, freshnessDays: AGE_REMINDER_DAYS, policy });
   return { now, marketOpen: isMarketOpen(now), quotes, benchmarks, portfolio, research, policy, alerts, userId: auth?.claims?.sub ?? null, ledger };
 }
 

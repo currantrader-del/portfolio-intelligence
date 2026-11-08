@@ -1,3 +1,4 @@
+import { EVIDENCE_BENCHMARK } from "@/lib/policy/evidence";
 /**
  * Short-term trade ideas, held to a high bar and scored honestly. Pure: the instructions, the checks
  * a proposed idea must pass, how an open paper trade is marked and closed, and the scoreboard against
@@ -10,8 +11,9 @@ import { checkLevels, type TA } from "@/lib/market/ta";
 
 export const TRADE_VERSION = "trade-idea@2";
 export const TRADE_LIMITS = { turns: 22, searches: 10, ms: 11 * 60_000, maxTokens: 12000 };
-/** What VOO is assumed to earn per year; an idea must clear the same days of this, plus a margin. */
-export const VOO_YEARLY = 0.07;
+/** What VOO is expected to earn per year: the middle of published U.S. stock forecasts (see policy/evidence). */
+export const VOO_YEARLY = EVIDENCE_BENCHMARK.mid;
+/** Extra a short-term trade must expect over VOO for the same days, to cover costs and model error. A preference, not a fact. */
 export const EDGE_MARGIN = 0.03;
 export const MIN_DAYS = 5, MAX_DAYS = 185;
 

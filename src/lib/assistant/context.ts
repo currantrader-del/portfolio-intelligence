@@ -4,6 +4,7 @@
  * (approved and newer versions, with age), the pipeline, recent decisions and the latest briefing.
  * It is compact text (a few thousand tokens) and is cached between questions by the API.
  */
+import { AGE_REMINDER_DAYS } from "@/lib/policy/limits";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { Workspace } from "@/lib/workspace-core";
 import { researchAgeDays } from "@/lib/research/records";
@@ -34,21 +35,23 @@ export async function investorContext(ws: Workspace, db: SupabaseClient): Promis
   lines.push(`Single-company exposure incl. ETF look-through: ${exp.map((e) => `${e.symbol} ${pct(e.total)}${e.max != null ? ` (max ${pct(e.max, 0)}, ${ws.policy?.companies[e.symbol]?.status ?? "no limit"})` : ""}`).join("; ")}.`);
 
   lines.push("\nRESEARCH RECORDS (stored; historical, check the age)");
-  const fresh = ws.policy?.researchFreshnessDays ?? 120;
+  const fresh = AGE_REMINDER_DAYS;
   for (const r of ws.research) {
     const cur = r.current, last = r.latest;
     const age = researchAgeDays(r, ws.now);
     const newer = cur && last && last.id !== cur.id && last.research_as_of > cur.research_as_of ? last : null;
     const v = cur ?? last;
     const held = p.holdings.some((h) => h.symbol === r.symbol);
-    lines.push(`- ${r.symbol}${r.name ? ` (${r.name})` : ""}${held ? " [held]" : ` [${r.pipeline.stage}]`}: ${v ? `${cur ? "approved" : "NOT approved"} ${v.completeness} research dated ${v.research_as_of} (${age} days${age != null && age > fresh ? ", STALE" : ""})${v.parsed.action ? `, call ${v.parsed.action}` : ""}${v.parsed.referencePrice ? `, reference price ${v.parsed.referencePrice}` : ""}` : "no research"}${newer ? `; NEWER VERSION IN PROGRESS dated ${newer.research_as_of} (${newer.parsed.action ?? newer.completeness}): treat the approved call as under review` : ""}`);
+    lines.push(`- ${r.symbol}${r.name ? ` (${r.name})` : ""}${held ? " [held]" : ` [${r.pipeline.stage}]`}: ${v ? `${cur ? "approved" : "NOT approved"} ${v.completeness} research dated ${v.research_as_of} (${age} days${age != null && age > fresh ? ", old: check filings since" : ""})${v.parsed.action ? `, call ${v.parsed.action}` : ""}${v.parsed.referencePrice ? `, reference price ${v.parsed.referencePrice}` : ""}` : "no research"}${newer ? `; NEWER VERSION IN PROGRESS dated ${newer.research_as_of} (${newer.parsed.action ?? newer.completeness}): treat the approved call as under review` : ""}`);
   }
   const noResearch = p.holdings.filter((h) => !ws.research.some((r) => r.symbol === h.symbol) && !/ETF|fund|broad|International|Bonds|Small\/mid/i.test(h.bucket)).map((h) => h.symbol);
   if (noResearch.length) lines.push(`Held single companies with no research record: ${noResearch.join(", ")}.`);
 
   if (ws.policy) {
-    const lim = Object.values(ws.policy.companies).filter((x) => x.hardMax != null).map((x) => `${x.symbol} max ${pct(x.hardMax, 0)}${x.normal ? ` normal ${pct(x.normal.low, 0)}-${pct(x.normal.high, 0)}` : ""} (${x.provisional ? "provisional" : x.status})`);
-    lines.push(`\nPOLICY (${ws.policy.version}): ${lim.join("; ")}. Research freshness limit ${fresh} days. New cash does not have to be invested immediately; holding cash is always an option.`);
+    const lim = Object.values(ws.policy.companies).filter((x) => x.hardMax != null).map((x) => `${x.symbol} max ${pct(x.hardMax, 1)}${x.normal ? ` normal ${pct(x.normal.low, 1)}-${pct(x.normal.high, 1)}` : ""} (${x.provisional ? "provisional" : x.authority === "you" ? "approved by the investor" : x.authority === "imported" ? "imported from old archive, not confirmed" : x.status})`);
+    const b = ws.policy.benchmark;
+    lines.push(`\nPOLICY (${ws.policy.version}): ${lim.join("; ")}. Any other company has NO limit of its own: no new money until research sets one and the investor approves it (the ${ws.policy.portfolioCeiling != null ? pct(ws.policy.portfolioCeiling, 0) : "generic"} figure is only an absolute ceiling). Protected reserve $${ws.policy.protectedSavingsFloor.toLocaleString()}, never invested.`);
+    if (b) lines.push(`Return comparison: published 10-15 year U.S. stock forecasts ${pct(b.low, 1)}-${pct(b.high, 1)} (${b.sources.map((x) => `${x.firm} ${x.asOf}`).join("; ")}; ${b.status === "approved" ? "approved" : "not yet approved"}). A stock must beat the top of that range plus ${ws.policy.riskMarginFactor ?? 0.5} x its own scenario spread. Research needs a refresh when events happen (new results, financing, material 8-K, price moving into another zone of the research), not because of age. New cash does not have to be invested immediately; holding cash is always an option.`);
   }
   if (decisions?.length) {
     lines.push("\nRECENT DECISIONS");

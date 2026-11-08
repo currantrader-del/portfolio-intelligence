@@ -34,16 +34,18 @@ const research = (refPrice: string, completeness = "complete", asOf = "2026-10-2
 const row = (over: Partial<PolicyRuleRow>): PolicyRuleRow => ({
   id: Math.random().toString(36).slice(2), scope: "company", subject: "AAA", normal_low: null, normal_high: null, high_conviction_low: null, high_conviction_high: null,
   hard_max: null, value: null, conditions: null, source_label: "Test", source_date: null, source_status: "latest_approved", approval: "approved",
-  approved_at: null, approval_note: null, created_at: "2026-11-05", ...over,
+  approved_at: over.approval && over.approval !== "approved" ? null : "2026-11-05T12:00:00Z", approval_note: null, created_at: "2026-11-05", ...over,
 });
 const approvedRules = [
   row({ subject: "AAA", normal_low: 0.03, normal_high: 0.10, hard_max: 0.10 }),
   row({ scope: "bucket", subject: "US broad-market equity", normal_low: 0.25, normal_high: 0.40, hard_max: 0.5 }),
   row({ scope: "bucket", subject: "International equity", normal_low: 0.12, normal_high: 0.20, hard_max: 0.3 }),
-  row({ scope: "assumption", subject: "etf_expected_return", value: 0.07 }),
-  row({ scope: "assumption", subject: "hurdle_over_etf", value: 0.03 }),
+  row({ scope: "assumption", subject: "benchmark_return", normal_low: 0.048, normal_high: 0.075, value: 0.0665 }),
+  row({ scope: "assumption", subject: "risk_margin_factor", value: 0.5 }),
   row({ scope: "portfolio", subject: "protected_reserve", value: 10000 }),
 ];
+// SEC filings checked, nothing filed after the research date.
+const quiet = new Map([["AAA", { cik: "1", company: "AAA", filings: [{ form: "10-Q", filed: "2026-08-01", reportDate: null, description: "Quarterly report", items: [], isEarnings: true, url: "u", category: "periodic" as const, note: "" }], lastEarnings: null, nextEarningsEstimate: null, source: "s", fetchedAt: "t" }]]);
 
 describe("new capital: evidence gates", () => {
   it("is WAIT / REVIEW with placeholders, unknown savings and an unresearched holding", () => {
@@ -75,7 +77,7 @@ describe("new capital: evidence gates", () => {
     const ledger = [{ accountId: "a", tradeDate: "2026-10-01", kind: "deposit" as const, symbol: null, quantity: null, price: null, amount: 500 }];
     const p = buildPortfolio([withBasis, savings], new Map(), policy, {}, ledger, now);
     expect(p.quality.reconciliation).toMatchObject({ complete: true, label: "Reconciled" });
-    const r = newCapital({ amount: 400, portfolio: p, research: [research("$26")], policy, now });
+    const r = newCapital({ amount: 400, portfolio: p, research: [research("$26")], policy, now, filings: quiet });
     expect(r.gates.every((g) => g.ok)).toBe(true);
     expect(r.status).toBe("actionable");
     expect(r.recommendation.allocations[0]).toEqual({ symbol: "AAA", amount: 400 });
@@ -90,7 +92,7 @@ describe("new capital: a drop is not a buy signal", () => {
     const aaa = r.options.find((o) => o.symbol === "AAA")!;
     expect(aaa.label).toBe("Refresh required");
     expect(aaa.expectedReturn).toBeNull();
-    expect(aaa.notes.join(" ")).toMatch(/Not re-priced/);
+    expect(aaa.verdicts!.research.detail).toMatch(/38% below the \$40 research reference/);
     expect(r.recommendation.allocations.find((x) => x.symbol === "AAA")).toBeUndefined();
     expect(r.status).toBe("wait_review");
   });
@@ -107,7 +109,7 @@ describe("new capital: ceilings and money source", () => {
   it("fills a stock only to the top of its normal range", () => {
     const tight = policyFromRules([...approvedRules.filter((x) => x.subject !== "AAA"), row({ subject: "AAA", normal_low: 0.03, normal_high: 0.05, hard_max: 0.10 })]);
     const p = buildPortfolio([{ ...snap, positions: snap.positions.filter((x) => x.symbol !== "BBB") }, savings], new Map(), tight, {}, [], now);
-    const r = newCapital({ amount: 1250, portfolio: p, research: [research("$26")], policy: tight, now });
+    const r = newCapital({ amount: 1250, portfolio: p, research: [research("$26")], policy: tight, now, filings: quiet });
     // investable = 8300 + 2000 deployable savings = 10300; new money -> 11550; 5% = 577.5; minus 500 held = 77.5
     expect(r.recommendation.allocations[0]).toEqual({ symbol: "AAA", amount: 77 });
     expect(r.options.find((o) => o.symbol === "AAA")!.maxWeight).toBe(0.05);
@@ -137,6 +139,58 @@ describe("new capital: policy conflicts", () => {
     const p = buildPortfolio([snap, savings], new Map(), policy, {}, [], now);
     const r = newCapital({ amount: 400, portfolio: p, research: [research("$26")], policy, now });
     expect(r.gates.find((g) => g.key === "limits")!.ok).toBe(false);
+    expect(r.status).toBe("wait_review");
+  });
+});
+
+describe("new capital: event-driven refresh and independent verdicts", () => {
+  const policy = policyFromRules(approvedRules);
+  const withBasis = { ...snap, positions: snap.positions.filter((x) => x.symbol !== "BBB").map((x) => ({ ...x, costBasis: x.marketValue })) };
+  const ledger = [{ accountId: "a", tradeDate: "2026-10-01", kind: "deposit" as const, symbol: null, quantity: null, price: null, amount: 500 }];
+  const p = buildPortfolio([withBasis, savings], new Map(), policy, {}, ledger, now);
+
+  it("asks for a refresh after new results, even when the research is only weeks old", () => {
+    const filed = new Map([["AAA", { ...quiet.get("AAA")!, filings: [{ ...quiet.get("AAA")!.filings[0], form: "10-Q", filed: "2026-11-03" }] }]]);
+    const r = newCapital({ amount: 400, portfolio: p, research: [research("$26")], policy, now, filings: filed });
+    const aaa = r.options.find((o) => o.symbol === "AAA")!;
+    expect(aaa.label).toBe("Refresh required");
+    expect(aaa.verdicts!.research.detail).toMatch(/New results since the research: 10-Q filed 2026-11-03/);
+    expect(r.status).toBe("wait_review");
+  });
+  it("does not call research current when filings could not be checked", () => {
+    const r = newCapital({ amount: 400, portfolio: p, research: [research("$26")], policy, now });
+    expect(r.options.find((o) => o.symbol === "AAA")!.verdicts!.research.ok).toBe(false);
+    expect(r.gates.find((g) => g.key === "research")!.ok).toBe(false);
+  });
+  it("does not let an old but event-free research block the decision", () => {
+    const early = new Map([["AAA", { ...quiet.get("AAA")!, filings: [{ ...quiet.get("AAA")!.filings[0], filed: "2026-04-20" }] }]]);
+    const r = newCapital({ amount: 400, portfolio: p, research: [research("$26", "complete", "2026-05-01")], policy, now, filings: early });
+    expect(r.options.find((o) => o.symbol === "AAA")!.verdicts!.research.ok).toBe(true);
+  });
+  it("keeps the research's own 'hold' zone even when the return comparison clears", () => {
+    const holdZone = toResearchRecord("AAA", "AAA", "held", [{ id: "v2", research_as_of: "2026-10-20", completeness: "complete", origin: "x", is_current: true,
+      conclusion: { action: "HOLD", reference_price: "$26", reference_date: "2026-10-20",
+        valuation: { approx_holding_period_years: 4, bear_value: 20, base_value: 90, bull_value: 200, bear_probability: 0.3, base_probability: 0.5, bull_probability: 0.2 },
+        price_framework: [{ price_zone: "< $20", action: "Add" }, { price_zone: "$20–$40", action: "Hold / no add" }] } }]);
+    const aaa = newCapital({ amount: 400, portfolio: p, research: [holdZone], policy, now, filings: quiet }).options.find((o) => o.symbol === "AAA")!;
+    expect(aaa.label).toBe("Research says wait");
+    expect(aaa.verdicts!.limit.ok).toBe(true);
+    expect(aaa.verdicts!.valuation.ok).toBe(false);
+    expect(aaa.eligible).toBe(false);
+  });
+  it("gives no new money to a researched company without its own limit", () => {
+    const noLimit = policyFromRules([...approvedRules.filter((x) => x.subject !== "AAA"), row({ scope: "generic_company", subject: "generic", hard_max: 0.18 })]);
+    const p2 = buildPortfolio([withBasis, savings], new Map(), noLimit, {}, ledger, now);
+    const aaa = newCapital({ amount: 400, portfolio: p2, research: [research("$26")], policy: noLimit, now, filings: quiet }).options.find((o) => o.symbol === "AAA")!;
+    expect(aaa.label).toBe("No limit set");
+    expect(aaa.headroomDollars).toBe(0);
+    expect(aaa.verdicts!.limit.detail).toMatch(/does not inherit the generic 18% maximum/);
+  });
+  it("keeps the result on wait while limits are only imported, never confirmed by you", () => {
+    const importedOnly = policyFromRules(approvedRules.map((x) => (x.scope === "assumption" ? x : { ...x, approved_at: null })));
+    const p3 = buildPortfolio([withBasis, savings], new Map(), importedOnly, {}, ledger, now);
+    const r = newCapital({ amount: 400, portfolio: p3, research: [research("$26")], policy: importedOnly, now, filings: quiet });
+    expect(r.gates.find((g) => g.key === "limits")).toMatchObject({ ok: false });
     expect(r.status).toBe("wait_review");
   });
 });

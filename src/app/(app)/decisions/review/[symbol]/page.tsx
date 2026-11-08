@@ -2,6 +2,7 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { getWorkspace } from "@/lib/workspace";
 import { reviewPosition } from "@/lib/decision/review";
+import { getFilings } from "@/lib/market/sec";
 import { Tag } from "@/components/Tag";
 import { AskButton } from "@/components/AskPanel";
 import { pctStr, shortDate, toneOf, usd } from "@/lib/format";
@@ -11,7 +12,8 @@ export default async function ReviewPage({ params }: { params: Promise<{ symbol:
   const { symbol } = await params;
   const ws = await getWorkspace();
   const sym = symbol.toUpperCase();
-  const rv = reviewPosition(ws, sym);
+  const f = await getFilings(sym, ws.now).catch(() => null);
+  const rv = reviewPosition(ws, sym, f && !("error" in f) ? f : null);
   if (!rv) notFound();
   const alerts = ws.alerts.filter((a) => a.symbol === sym);
   const spy = ws.benchmarks.find((b) => b.symbol === "SPY")?.dayPct ?? null;

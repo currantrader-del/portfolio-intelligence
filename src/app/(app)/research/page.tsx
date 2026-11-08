@@ -1,3 +1,4 @@
+import { AGE_REMINDER_DAYS } from "@/lib/policy/limits";
 import { getWorkspace } from "@/lib/workspace";
 import { isEtf } from "@/lib/portfolio/classify";
 import { coverage } from "@/lib/research/status";
@@ -14,7 +15,7 @@ const md = (iso: string | null | undefined) => (iso ? shortDate(iso).replace(/, 
 export default async function ResearchPage({ searchParams }: { searchParams: Promise<{ stage?: string }> }) {
   const sp = await searchParams;
   const ws = await getWorkspace();
-  const freshDays = ws.policy?.researchFreshnessDays ?? 120;
+  const freshDays = AGE_REMINDER_DAYS;
   const holdings = ws.portfolio.holdings.filter((h) => !isEtf(h.symbol)).sort((a, b) => b.value - a.value);
   const ownedSet = new Set(holdings.map((h) => h.symbol));
 

@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { auditRules, policyFromRules, type PolicyRuleRow } from "./rules";
+import { auditRules, isRejected, policyFromRules, type PolicyRuleRow } from "./rules";
+import { companyLimit } from "./limits";
 
 // Synthetic rows; values mirror the shape of the real conflicts (two sources disagree on a maximum).
 let i = 0;
@@ -25,20 +26,69 @@ describe("policy conflicts", () => {
     const a = auditRules([row({ hard_max: 0.5, approval: "superseded" })]);
     expect(a.subjects[0]).toMatchObject({ status: "none", used: null });
   });
-  it("uses an approved rule over open candidates", () => {
-    const p = policyFromRules([row({ hard_max: 0.05 }), row({ hard_max: 0.2, approval: "unresolved" })]);
+  it("uses a rule you approved over open candidates", () => {
+    const p = policyFromRules([row({ hard_max: 0.05, approved_at: "2026-11-08" }), row({ hard_max: 0.2, approval: "unresolved" })]);
     expect(p.companies.AAA).toMatchObject({ status: "approved", hardMax: 0.05 });
   });
   it("treats two approved rows that disagree as a conflict", () => {
     const p = policyFromRules([row({ hard_max: 0.05 }), row({ hard_max: 0.12 })]);
     expect(p.companies.AAA).toMatchObject({ status: "conflict", hardMax: 0.05 });
   });
-  it("marks a lone proposed value as proposed, and assumptions without approval as not approved", () => {
-    const p = policyFromRules([row({ scope: "assumption", subject: "etf_expected_return", value: 0.07, approval: "proposed" })]);
-    expect(p.audit.assumptions.etfExpectedReturn).toMatchObject({ value: 0.07, status: "proposed" });
-    expect(p.audit.assumptions.hurdle).toMatchObject({ status: "none", source: "App default" });
-    expect(p.hurdleOverEtfPoints).toBeNull();
-    expect(p.audit.protectedReserve).toMatchObject({ value: 10000, status: "none" });
+  it("marks a lone proposed value as proposed, and falls back to the evidence benchmark when none is saved", () => {
+    const p = policyFromRules([row({ scope: "assumption", subject: "risk_margin_factor", value: 0.5, approval: "proposed" })]);
+    expect(p.audit.assumptions.riskMargin).toMatchObject({ value: 0.5, status: "proposed" });
+    expect(p.audit.assumptions.benchmark).toMatchObject({ status: "none", low: 0.048, high: 0.075 });
+    expect(p.audit.protectedReserve).toMatchObject({ value: 3000, status: "none" });
+  });
+  it("retires the old 7% / 3-point / 120-day placeholders: kept in history, never used", () => {
+    const a = auditRules([
+      row({ scope: "assumption", subject: "etf_expected_return", value: 0.07, approval: "proposed" }),
+      row({ scope: "assumption", subject: "hurdle_over_etf", value: 0.03, approval: "proposed" }),
+      row({ scope: "assumption", subject: "research_freshness_days", value: 120, approval: "proposed" }),
+    ]);
+    expect(a.subjects).toHaveLength(0);
+    expect(a.decisions).toHaveLength(0);
+    expect(a.retired).toHaveLength(3);
+  });
+});
+
+describe("your approvals vs imported approvals", () => {
+  it("labels an archive 'approved' row as imported, not as yours", () => {
+    const p = policyFromRules([row({ hard_max: 0.12, approved_at: null })]);
+    expect(p.companies.AAA).toMatchObject({ status: "imported", authority: "imported", hardMax: 0.12 });
+    expect(p.audit.imported.map((s) => s.subject)).toEqual(["AAA"]);
+  });
+  it("lets your approval control and shows a later proposal as a decision without changing the numbers", () => {
+    const p = policyFromRules([row({ hard_max: 0.1, approved_at: "2026-11-08T13:22:04Z" }), row({ hard_max: 0.08, approval: "proposed" })]);
+    expect(p.companies.AAA).toMatchObject({ status: "approved", authority: "you", hardMax: 0.1 });
+    expect(p.audit.decisions.map((s) => s.subject)).toEqual(["AAA"]);
+  });
+  it("RDDT case: an imported 6% ceiling plus completed research at 7% is an open conflict, using 6% until you decide", () => {
+    const p = policyFromRules([
+      row({ subject: "RDDT", hard_max: 0.06, approved_at: null, source_label: "Portfolio Baseline v2 (revised)" }),
+      row({ subject: "RDDT", normal_low: 0.03, normal_high: 0.05, high_conviction_low: 0.05, high_conviction_high: 0.065, hard_max: 0.07, approval: "unresolved", source_label: "RDDT research", source_date: "2026-09-13", approval_note: "Claude recommends: completed research" }),
+    ]);
+    expect(p.companies.RDDT).toMatchObject({ status: "conflict", authority: "strictest", hardMax: 0.06 });
+    const d = p.audit.decisions.find((s) => s.subject === "RDDT")!;
+    expect(d.recommended?.source_label).toBe("RDDT research");
+    expect(d.differences.join(" ")).toMatch(/Maximum: 6% \(Portfolio Baseline v2 \(revised\), undated\) vs 7% \(RDDT research, 2026-09-13\)/);
+  });
+  it("keeps a rejected proposal in history, marked rejected", () => {
+    const a = auditRules([row({ hard_max: 0.05, approved_at: "2026-11-08" }), row({ hard_max: 0.09, approval: "superseded", approval_note: "Claude recommends: x | Rejected by you on 2026-11-08." })]);
+    expect(a.decisions).toHaveLength(0);
+    expect(isRejected(a.subjects[0].history[0])).toBe(true);
+  });
+});
+
+describe("companies without their own limit", () => {
+  it("never inherit the generic maximum for new money", () => {
+    const p = policyFromRules([row({ scope: "generic_company", subject: "generic", hard_max: 0.18, approved_at: null })]);
+    expect(p.portfolioCeiling).toBe(0.18);
+    expect(companyLimit(p, "ZZZ")).toEqual({ hasLimit: false, newMoneyMax: 0, monitorMax: 0.18 });
+  });
+  it("cap a company's own limit at the absolute ceiling", () => {
+    const p = policyFromRules([row({ scope: "generic_company", subject: "generic", hard_max: 0.18 }), row({ hard_max: 0.25, approved_at: "2026-11-08" })]);
+    expect(companyLimit(p, "AAA")).toEqual({ hasLimit: true, newMoneyMax: 0.18, monitorMax: 0.18 });
   });
 });
 
@@ -59,7 +109,7 @@ describe("provisional limit", () => {
     expect(p.companies.AAA).toMatchObject({ hardMax: 0.08, provisional: true, status: "conflict" });
   });
   it("is not provisional once a row is approved", () => {
-    const p = policyFromRules([row({ hard_max: 0.07 }), row({ hard_max: 0.1, approval: "unresolved", approval_note: "Provisional" })]);
+    const p = policyFromRules([row({ hard_max: 0.07, approved_at: "2026-11-08" }), row({ hard_max: 0.1, approval: "unresolved", approval_note: "Provisional" })]);
     expect(p.companies.AAA).toMatchObject({ status: "approved", provisional: false, hardMax: 0.07 });
   });
 });

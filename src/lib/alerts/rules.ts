@@ -117,7 +117,7 @@ export function evaluateAlerts(args: {
     } else {
       const age = researchAgeDays(r, now);
       if (age !== null && age > freshDays) {
-        out.push({ id: `stale:${h.symbol}`, severity: "low", symbol: h.symbol, kind: "research_stale", title: `${h.symbol} research is ${age} days old`, detail: `Older than your ${freshDays}-day freshness rule.`, href: `/research/${h.symbol}` });
+        out.push({ id: `stale:${h.symbol}`, severity: "low", symbol: h.symbol, kind: "research_stale", title: `${h.symbol}: ${age} days since research`, detail: `A reminder to check filings and news since then. Age alone doesn't make the research wrong; new results or financings do.`, href: `/research/${h.symbol}` });
       }
     }
   }

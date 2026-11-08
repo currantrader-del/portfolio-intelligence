@@ -2,6 +2,8 @@
  * Tools the assistant may call. Every number it can cite comes from one of these,
  * and each result carries its source and timestamp.
  */
+import { AGE_REMINDER_DAYS } from "@/lib/policy/limits";
+import { loadDecisionFilings } from "@/lib/alerts/events";
 import type Anthropic from "@anthropic-ai/sdk";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { Workspace } from "@/lib/workspace-core";
@@ -140,7 +142,7 @@ export async function runTool(name: string, input: Record<string, unknown>, ws: 
       const h = p.holdings.find((x) => x.symbol === sym);
       const q = h ? null : await getQuote(sym);
       const price = h?.price ?? q?.price ?? null;
-      const check = v ? repriceCheck(v.parsed, price, researchAgeDays(r, ws.now), ws.policy?.researchFreshnessDays ?? 120) : null;
+      const check = v ? repriceCheck(v.parsed, price, researchAgeDays(r, ws.now), AGE_REMINDER_DAYS) : null;
       return {
         layer: "research_conclusion",
         symbol: sym,
@@ -180,7 +182,8 @@ export async function runTool(name: string, input: Record<string, unknown>, ws: 
       const amount = Number(input.amount);
       if (!(amount > 0)) return { error: "amount must be positive" };
       const source = input.source === "existing" ? "existing" : "new";
-      return { layer: "model_output", ...newCapital({ amount, source, portfolio: p, research: ws.research, policy: ws.policy, now: ws.now, quotes: ws.quotes }) };
+      const filings = await loadDecisionFilings(ws);
+      return { layer: "model_output", ...newCapital({ amount, source, portfolio: p, research: ws.research, policy: ws.policy, now: ws.now, quotes: ws.quotes, filings }) };
     }
     case "get_policy": {
       const a = ws.policy?.audit;
@@ -189,7 +192,11 @@ export async function runTool(name: string, input: Record<string, unknown>, ws: 
       return {
         layer: "policy",
         conflicts: a.conflicts.map((c) => ({ subject: c.subject, differences: c.differences, using_meanwhile: rule(c.used), candidates: c.candidates.map(rule) })),
-        subjects: a.subjects.map((s) => ({ scope: s.scope, subject: s.subject, status: s.status, in_use: rule(s.used), superseded: s.history.map(rule) })),
+        subjects: a.subjects.map((s) => ({ scope: s.scope, subject: s.subject, status: s.status, authority: s.authority, in_use: rule(s.used), superseded: s.history.map(rule) })),
+        open_decisions: a.decisions.map((s) => s.subject),
+        imported_not_confirmed: a.imported.map((s) => s.subject),
+        benchmark: a.assumptions.benchmark,
+        note: "authority 'you' = approved by the investor in the app; 'imported' = marked approved in the old archive only. Companies without their own limit get no new money.",
       };
     }
     case "get_alerts":

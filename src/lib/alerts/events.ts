@@ -57,3 +57,13 @@ export async function loadEventAlerts(symbols: string[], now: Date): Promise<{ a
   const filings = new Map(res.filter((r): r is readonly [string, FilingsResult] => !("error" in r[1])));
   return { alerts: eventAlerts(filings, now), filings };
 }
+
+/**
+ * Filings for every stock the decision engine may rank: held stocks plus researched names not yet owned.
+ * A symbol whose filings fail to load is simply absent, which the engine reads as "could not check".
+ */
+export async function loadDecisionFilings(ws: { portfolio: { holdings: { symbol: string }[] }; research: { symbol: string; current: unknown }[]; now: Date }): Promise<Map<string, FilingsResult>> {
+  const symbols = [...new Set([...ws.portfolio.holdings.map((h) => h.symbol), ...ws.research.filter((r) => r.current).map((r) => r.symbol)])].filter((s) => !isEtf(s)).slice(0, 20);
+  const res = await Promise.all(symbols.map(async (s) => [s, await getFilings(s, ws.now).catch((e: Error) => ({ error: e.message }))] as const));
+  return new Map(res.filter((r): r is readonly [string, FilingsResult] => !("error" in r[1])));
+}
