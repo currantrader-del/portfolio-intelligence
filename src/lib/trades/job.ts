@@ -11,6 +11,8 @@ import { dispatchJob, save } from "@/lib/intel/jobs";
 import { runAgent } from "@/lib/assistant/agent";
 import { extractJson } from "@/lib/research/aiResearch";
 import { getQuote, getQuotes } from "@/lib/market/quotes";
+import { getHistory } from "@/lib/market/history";
+import { analyze } from "@/lib/market/ta";
 import { TRADE_LIMITS, TRADE_SYSTEM, TRADE_VERSION, evaluate, tradeQuestion, validateIdea, type Entry, type Mark, type Result, type TradeIdea } from "./trades";
 
 export const BENCH = "VOO";
@@ -71,11 +73,15 @@ export async function runTradeScan(db: SupabaseClient, requestId: string, notify
     const json = extractJson(ans.answer) as { ideas?: unknown[]; none_reason?: string | null } | null;
     if (!json || !Array.isArray(json.ideas)) return out({ ok: false, error: `The answer was not in the expected format${ans.stopped ? ` (stopped: ${ans.stopped})` : ""}`, ideaIds: [], rejected: [], noneReason: null, ...meta });
     const raws = json.ideas.slice(0, 2);
-    const prices = await getQuotes(raws.map((r) => String((r as { symbol?: unknown })?.symbol ?? "").toUpperCase()).filter(Boolean));
+    const syms = raws.map((r) => String((r as { symbol?: unknown })?.symbol ?? "").toUpperCase()).filter(Boolean);
+    const [prices, charts] = await Promise.all([
+      getQuotes(syms),
+      Promise.all(syms.map(async (s) => [s, await getHistory(s, "1y").then((h) => (h ? analyze(h.bars) : null)).catch(() => null)] as const)).then((x) => new Map(x)),
+    ]);
     const ideaIds: string[] = [], rejected: StoredScan["rejected"] = [], made: Trade[] = [];
     for (const raw of raws) {
       const sym = String((raw as { symbol?: unknown })?.symbol ?? "").toUpperCase();
-      const v = validateIdea(raw, { today: etDay(now), price: prices.get(sym)?.price ?? null });
+      const v = validateIdea(raw, { today: etDay(now), price: prices.get(sym)?.price ?? null, ta: charts.get(sym) ?? null });
       if ("rejected" in v) { rejected.push({ symbol: v.symbol, why: v.rejected }); continue; }
       if (!prices.get(sym)) { rejected.push({ symbol: sym, why: "no live price to lock in" }); continue; }
       const entry = await lockEntry(v.idea, now);

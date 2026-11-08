@@ -88,3 +88,27 @@ it("only records a search that actually researched", () => {
   expect(researched([{ tool: "get_quote" }, { tool: "get_technicals" }], 0)).toBe(false);
   expect(researched([{ tool: "get_quote" }, { tool: "get_technicals" }, { tool: "web_search" }], 1)).toBe(true);
 });
+
+describe("chart checks", () => {
+  const ta = (o: Partial<import("@/lib/market/ta").TA> = {}) => ({
+    last: 100, asOf: today, trend: "uptrend" as const, sma50: 97, sma200: 90, rsi14: 55, rsiLabel: "neutral" as const, atr14: 2.5, atrPct: 0.025,
+    support: [{ price: 94, touches: 3, lastTouched: today }], resistance: [{ price: 130, touches: 2, lastTouched: today }],
+    volumeVs50d: 1.2, upDownVolume20d: 1.4, hasRange: true, hasVolume: true, ...o,
+  });
+  it("accepts a stop beyond support and records the chart", () => {
+    const r = validateIdea(base, { today, price: 100, ta: ta() });
+    if ("rejected" in r) throw new Error(r.rejected);
+    expect(r.idea.chart).toMatchObject({ trend: "uptrend", support: 94, resistance: 130 });
+    expect(r.idea.chart!.notes[0]).toMatch(/beyond support at \$94/);
+  });
+  it("turns down a stop above support or resistance that caps the move", () => {
+    expect(why2(ta({ support: [{ price: 91, touches: 3, lastTouched: today }] }))).toMatch(/chart: the stop \(\$92\) sits above support at \$91/);
+    expect(why2(ta({ resistance: [{ price: 105, touches: 4, lastTouched: today }] }))).toMatch(/chart: resistance at \$105/);
+  });
+  it("notes stretched RSI and unconfirmed volume without rejecting", () => {
+    const r = validateIdea(base, { today, price: 100, ta: ta({ rsi14: 78, rsiLabel: "overbought", upDownVolume20d: 0.6 }) });
+    if ("rejected" in r) throw new Error(r.rejected);
+    expect(r.idea.chart!.notes.join(" ")).toMatch(/overbought.*Volume does not confirm/);
+  });
+  const why2 = (t: ReturnType<typeof ta>) => { const r = validateIdea(base, { today, price: 100, ta: t }); return "rejected" in r ? r.rejected : "accepted"; };
+});

@@ -6,7 +6,9 @@
  * Not day trading: at most two ideas per search, "no trade" is the expected answer, holding periods of
  * one week to six months, long stock or bought calls/puts only (no shorting, no selling options).
  */
-export const TRADE_VERSION = "trade-idea@1";
+import { checkLevels, type TA } from "@/lib/market/ta";
+
+export const TRADE_VERSION = "trade-idea@2";
 export const TRADE_LIMITS = { turns: 16, searches: 8, ms: 9 * 60_000, maxTokens: 12000 };
 /** What VOO is assumed to earn per year; an idea must clear the same days of this, plus a margin. */
 export const VOO_YEARLY = 0.07;
@@ -24,6 +26,8 @@ export type TradeIdea = {
   sizeUsd: number | null; sources: { title: string; url: string }[];
   /** Computed by the app, not the model. */
   expectedPct: number; hurdlePct: number; rewardRisk: number;
+  /** The chart when the idea was made, computed in code (absent on ideas made before technicals). */
+  chart?: { trend: TA["trend"]; rsi14: number | null; rsiLabel: TA["rsiLabel"]; atr14: number | null; support: number | null; resistance: number | null; volumeVs50d: number | null; upDownVolume20d: number | null; notes: string[] } | null;
 };
 
 export const TRADE_SYSTEM = `You are the trade scout inside Portfolio Intelligence, working for one private investor whose profile, goals, portfolio, cash, policy and research are given below. Your job is to find, at most, the one or two best short-term trades available right now, and far more often to conclude that there is none worth taking.
@@ -34,6 +38,7 @@ The bar (all must hold, or propose nothing):
 - Confidence medium or high, stated honestly with a probability of reaching the target before the stop.
 - A defined entry, target and stop on the stock price, and an end date. Reward at least 1.5x the risk.
 - Prefer companies with research on file; use get_research, get_quote, get_technicals, get_filings, get_fundamentals, and web_search for the catalyst, the date and the consensus.
+- Use the chart from get_technicals (computed by the app): put the stop beyond the nearest support (resistance, for a put) and more than one normal day's range (ATR) away; set the target at or before the next resistance (support, for a put) unless the thesis is a breakout and you say so; note when RSI is stretched or volume does not confirm the move. The app checks these levels and turns down ideas that break them. Technicals help with timing and levels; they are never the reason for a trade by themselves.
 - Instruments: buying the stock, or buying a call or put (never selling options, never shorting). Choose an option only when it clearly suits the setup (a dated catalyst, defined risk); pick a real listed monthly expiry after the end date, and a strike near the money. Options can lose 100%; say so in risks.
 - Before you propose anything, argue against it as a skeptic would. If the case does not survive, drop it.
 
@@ -84,7 +89,7 @@ export function occSymbol(symbol: string, expiry: string, type: "call" | "put", 
  * Checks one proposed idea against the bar. The app recomputes the numbers itself; the model's
  * confidence is not enough. `price` is the app's own quote for the stock, when it has one.
  */
-export function validateIdea(raw: unknown, ctx: { today: string; price: number | null }): { idea: TradeIdea } | { rejected: string; symbol: string } {
+export function validateIdea(raw: unknown, ctx: { today: string; price: number | null; ta?: TA | null }): { idea: TradeIdea } | { rejected: string; symbol: string } {
   const r = (raw ?? {}) as Record<string, unknown>;
   const symbol = str(r.symbol).toUpperCase();
   const no = (why: string) => ({ rejected: why, symbol: symbol || "?" });
@@ -137,7 +142,21 @@ export function validateIdea(raw: unknown, ctx: { today: string; price: number |
   const risks = (Array.isArray(r.risks) ? r.risks : []).map(str).filter(Boolean).slice(0, 6);
   if (option && !risks.some((x) => /100%|whole premium|expire.*worthless|worthless/i.test(x))) risks.push("The option can expire worthless: the whole premium can be lost.");
 
-  return { idea: { symbol, instrument, option, direction, entryRef, target, stop, endDate, confidence, probability, thesis, whyNow, risks, wouldChange: str(r.would_change), sizeUsd: num(r.size_usd), sources: sources.slice(0, 8), expectedPct, hurdlePct, rewardRisk } };
+  // The chart, computed in code: the stop must sit beyond the level that should hold, outside normal daily noise,
+  // and the first level in the way must still pay at least the risk.
+  let chart: TradeIdea["chart"] = null;
+  if (ctx.ta) {
+    const lv = checkLevels(ctx.ta, { direction, entry: entryRef, target, stop });
+    if (lv.problems.length) return no(`chart: ${lv.problems[0]}`);
+    const ta = ctx.ta;
+    const notes = [...lv.notes];
+    if (ta.rsiLabel === (direction === "up" ? "overbought" : "oversold")) notes.push(`RSI ${ta.rsi14} is ${ta.rsiLabel}: the move may be stretched in the trade's direction.`);
+    if (ta.upDownVolume20d !== null && (direction === "up" ? ta.upDownVolume20d < 0.8 : ta.upDownVolume20d > 1.25)) notes.push(`Volume does not confirm: ${direction === "up" ? "down days" : "up days"} carried more volume over 20 days (${ta.upDownVolume20d}).`);
+    if (!ta.hasRange) notes.push("The price source gave no daily highs and lows; levels use closing prices.");
+    chart = { trend: ta.trend, rsi14: ta.rsi14, rsiLabel: ta.rsiLabel, atr14: ta.atr14, support: ta.support[0]?.price ?? null, resistance: ta.resistance[0]?.price ?? null, volumeVs50d: ta.volumeVs50d, upDownVolume20d: ta.upDownVolume20d, notes };
+  }
+
+  return { idea: { symbol, instrument, option, direction, entryRef, target, stop, endDate, confidence, probability, thesis, whyNow, risks, wouldChange: str(r.would_change), sizeUsd: num(r.size_usd), sources: sources.slice(0, 8), expectedPct, hurdlePct, rewardRisk, chart } };
 }
 
 /** What was locked in when the idea was made. */

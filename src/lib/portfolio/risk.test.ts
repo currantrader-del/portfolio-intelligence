@@ -17,7 +17,8 @@ describe("history parsing", () => {
   });
   it("reads Stooq CSV", () => {
     const h = parseStooqHistory("AAA", "Date,Open,High,Low,Close,Volume\n2026-01-02,1,1,1,10,5\n2026-01-05,1,1,1,11,5\nbad,row")!;
-    expect(h.bars).toEqual([{ date: "2026-01-02", close: 10 }, { date: "2026-01-05", close: 11 }]);
+    expect(h.bars.map((b) => ({ date: b.date, close: b.close }))).toEqual([{ date: "2026-01-02", close: 10 }, { date: "2026-01-05", close: 11 }]);
+    expect(h.bars[0]).toMatchObject({ open: 1, high: 1, low: 1, volume: 5 });
   });
 });
 

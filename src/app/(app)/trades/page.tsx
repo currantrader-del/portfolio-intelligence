@@ -34,6 +34,12 @@ function TradeRow({ t, r }: { t: Trade; r: Result }) {
           <p><span className="text-ink font-semibold">Why now: </span>{i.whyNow}</p>
           <p className="num">Stock at entry ${t.entry.underlying.toFixed(2)}{t.entry.premium ? ` · option $${t.entry.premium.toFixed(2)}${t.entry.premiumSource === "estimate" ? " (estimated, no live quote)" : ""}` : ""} · target ${i.target} · stop ${i.stop} · ends {shortDate(i.endDate)}</p>
           <p className="t-xs">{i.confidence} confidence · {(i.probability * 100).toFixed(0)}% chance of target first · expected {pct(i.expectedPct)} on the stock vs {pct(i.hurdlePct)} needed to beat VOO plus margin · reward {i.rewardRisk.toFixed(1)}x risk{i.sizeUsd ? ` · suggested size ${usd(i.sizeUsd)}` : ""}</p>
+          {i.chart && (
+            <div className="t-xs flex flex-col gap-0.5">
+              <p><span className="text-ink font-semibold">Chart at entry: </span>{i.chart.trend}{i.chart.rsi14 !== null ? ` · RSI ${i.chart.rsi14}${i.chart.rsiLabel && i.chart.rsiLabel !== "neutral" ? ` (${i.chart.rsiLabel})` : ""}` : ""}{i.chart.atr14 ? ` · normal day ±$${i.chart.atr14.toFixed(2)}` : ""}{i.chart.support ? ` · support $${i.chart.support}` : ""}{i.chart.resistance ? ` · resistance $${i.chart.resistance}` : ""}{i.chart.volumeVs50d !== null ? ` · volume ${i.chart.volumeVs50d}× normal` : ""}</p>
+              {i.chart.notes.map((n) => <p key={n}>{n}</p>)}
+            </div>
+          )}
           {r.underlyingPct !== null && t.idea.option && <p className="t-xs">Stock moved {pct(r.underlyingPct)} since entry{r.priced === "none" ? "; no live option price right now" : r.priced === "intrinsic" ? "; option valued at expiry" : ""}.</p>}
           <div><span className="text-ink font-semibold">Risks</span><ul className="list-disc pl-5 t-xs">{i.risks.map((x) => <li key={x}>{x}</li>)}</ul></div>
           {i.wouldChange && <p className="t-xs"><span className="text-ink font-semibold">Would drop it if: </span>{i.wouldChange}</p>}

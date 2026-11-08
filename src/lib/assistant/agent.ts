@@ -10,6 +10,7 @@ import type { Workspace } from "@/lib/workspace-core";
 import { runTool, TOOLS } from "./tools";
 import { investorContext } from "./context";
 import { getHistory } from "@/lib/market/history";
+import { analyze } from "@/lib/market/ta";
 import { htmlText } from "@/lib/intel/verify";
 import type { Briefing } from "@/lib/intel/jobs";
 import type { DeskResult } from "@/lib/intel/desks";
@@ -60,7 +61,7 @@ const EXTRA_TOOLS: Anthropic.Beta.BetaTool[] = [
   },
   {
     name: "get_technicals",
-    description: "Price trend for any ticker from daily closes (delayed): last price, returns over 1 month, 3 months, 6 months and year to date, distance from the 50- and 200-day averages and from the 52-week high and low, 20-day volatility, and 3-month performance relative to SPY.",
+    description: "Price trend for any ticker from daily closes (delayed): last price, returns over 1 month, 3 months, 6 months and year to date, distance from the 50- and 200-day averages and from the 52-week high and low, 20-day volatility, 3-month performance relative to SPY, and computed technicals: trend (price vs 50/200-day averages), 14-day RSI, average true range (a normal day's move), support and resistance levels from swing highs/lows with how often each was touched, and volume versus its 50-day average with up-day/down-day volume. Use the levels to place stops beyond support and targets before resistance.",
     input_schema: { type: "object", properties: { symbol: { type: "string" } }, required: ["symbol"], additionalProperties: false },
     strict: true,
   },
@@ -87,6 +88,7 @@ export async function technicals(symbol: string) {
   const s = spy?.bars.map((b) => b.close) ?? [];
   const spy3m = s.length > 63 ? s[s.length - 1] / s[s.length - 64] - 1 : null;
   const m3 = back(63);
+  const ta = analyze(h.bars);
   return {
     layer: "market_data", symbol: symbol.toUpperCase(), provider: h.provider, as_of: h.bars[h.bars.length - 1].date, last,
     returns: { "1m": r4(back(21)), "3m": r4(m3), "6m": r4(back(126)), ytd: ytdStart ? r4(last / ytdStart.close - 1) : null },
@@ -95,6 +97,12 @@ export async function technicals(symbol: string) {
     from_52w_high: r4(last / Math.max(...c) - 1), from_52w_low: r4(last / Math.min(...c) - 1),
     vol_20d_annualized: Number.isFinite(sd) ? r4(sd * Math.sqrt(252)) : null,
     vs_spy_3m: m3 != null && spy3m != null ? r4(m3 - spy3m) : null,
+    ...(ta ? {
+      trend: ta.trend, sma_50: ta.sma50, sma_200: ta.sma200, rsi_14: ta.rsi14, rsi_reading: ta.rsiLabel,
+      atr_14: ta.atr14, atr_pct: ta.atrPct, support: ta.support, resistance: ta.resistance,
+      volume_vs_50d_avg: ta.volumeVs50d, up_down_volume_20d: ta.upDownVolume20d,
+      data_notes: [ta.hasRange ? null : "no daily highs/lows from the source: ranges and levels use closes", ta.hasVolume ? null : "no volume from the source"].filter(Boolean),
+    } : {}),
   };
 }
 
