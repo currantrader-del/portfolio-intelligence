@@ -22,6 +22,7 @@ export const MORE = [
 
 const TITLES: [RegExp, string][] = [
   [/^\/portfolio\/reconcile/, "Reconcile"],
+  [/^\/portfolio\/exposure/, "Exposure"],
   [/^\/decisions\/new-capital/, "New cash"],
   [/^\/decisions\/review\//, "Position review"],
   [/^\/research\/[^/]+/, "Company"],

@@ -206,6 +206,7 @@ export default async function PortfolioPage({ searchParams }: { searchParams: Pr
             })}
           </ul>
           <p className="t-xs">Index weights as of {LOOKTHROUGH_AS_OF}, not live. Conflicted limits use the stricter source until you choose.</p>
+          <LinkRow href="/portfolio/exposure">Sector, industry, theme and country exposure</LinkRow>
           <LinkRow href="/risk">Concentration and stress tests</LinkRow>
         </Card>
       </div>

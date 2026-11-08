@@ -13,6 +13,7 @@ import { runPlanJob, startPlan } from "../../src/lib/plan/job";
 import { runMorning } from "../../src/lib/intel/start";
 import { pushTradeNews, runWatch, watchSettings } from "../../src/lib/watch/job";
 import { runTradeScan } from "../../src/lib/trades/job";
+import { runExposureReview } from "../../src/lib/exposure/reviewJob";
 
 /**
  * The owner's session for the scheduled morning run, which has no browser. The service key (server-only,
@@ -75,6 +76,9 @@ export default async (req: Request) => {
         if (s.enabled && s.topic) await pushTradeNews(s.topic, origin, made, "new");
       });
       console.log(`intel job: trade scan saved ${id}`);
+    } else if (body.job === "exposure" && body.requestId) {
+      const id = await runExposureReview(db, body.requestId);
+      console.log(`intel job: exposure review saved ${id}`);
     } else if (body.job === "plan" && body.requestId) {
       const id = await runPlanJob(db, body.requestId);
       console.log(`intel job: plan saved ${id}`);

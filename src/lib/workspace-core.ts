@@ -7,6 +7,8 @@ import { readPolicy, type Policy , AGE_REMINDER_DAYS } from "@/lib/policy/limits
 import { policyFromRules, type PolicyRuleRow } from "@/lib/policy/rules";
 import { toResearchRecord, type ResearchRecord, type VersionRow } from "@/lib/research/records";
 import { evaluateAlerts, type Alert } from "@/lib/alerts/rules";
+import { computeExposure, type ExposureReport } from "@/lib/exposure/engine";
+import { checkLimits, type LimitCheck } from "@/lib/exposure/limits";
 
 export type Workspace = {
   now: Date;
@@ -21,6 +23,9 @@ export type Workspace = {
   ledger: LedgerEntry[];
   /** Latest 2- and 10-year Treasury yields (FRED, from the last market snapshot): the risk-free alternative. */
   yields: Yields;
+  /** Sector, industry, country and theme exposure with ETF look-through, and the exposure limits checked against it. */
+  exposure: ExposureReport;
+  exposureLimits: LimitCheck[];
 };
 
 export type Yields = { y2: { value: number; date: string } | null; y10: { value: number; date: string } | null };
@@ -119,8 +124,18 @@ export async function buildWorkspace(db: SupabaseClient, now = new Date()): Prom
   const classifications = { ...roles, ...Object.fromEntries(research.filter((r) => r.current?.parsed.classification).map((r) => [r.symbol, r.current!.parsed.classification])) };
   const portfolio = buildPortfolio(snapshots, quotes, policy, classifications, ledger, now);
   const benchmarks = BENCHMARKS.map((b) => ({ ...b, dayPct: dayChangePct(quotes.get(b.symbol)) }));
-  const alerts = evaluateAlerts({ portfolio, research, marketDayPct: benchmarks[0].dayPct, now, freshnessDays: AGE_REMINDER_DAYS, policy });
-  return { now, marketOpen: isMarketOpen(now), quotes, benchmarks, portfolio, research, policy, alerts, userId: auth?.claims?.sub ?? null, ledger, yields };
+  const exposure = computeExposure(portfolio.holdings.map((h) => ({ symbol: h.symbol, value: h.value })), portfolio.cash, now);
+  const exposureLimits = checkLimits(exposure, policy?.audit?.subjects.flatMap((s) => [...(s.approvedRow ? [s.approvedRow] : []), ...s.candidates]) ?? []);
+  const alerts = [...evaluateAlerts({ portfolio, research, marketDayPct: benchmarks[0].dayPct, now, freshnessDays: AGE_REMINDER_DAYS, policy }), ...exposureAlerts(exposureLimits)];
+  return { now, marketOpen: isMarketOpen(now), quotes, benchmarks, portfolio, research, policy, alerts, userId: auth?.claims?.sub ?? null, ledger, yields, exposure, exposureLimits };
+}
+
+/** Alerts for APPROVED exposure limits only: a proposal is not policy yet, so it never raises an alert. */
+export function exposureAlerts(checks: LimitCheck[]): Alert[] {
+  return checks.filter((c) => c.status === "approved" && (c.state === "over_ceiling" || c.state === "review")).map((c) => ({
+    id: `exposure-${c.subject}`, severity: c.state === "over_ceiling" ? ("high" as const) : ("medium" as const), symbol: null, kind: "over_limit" as const,
+    title: `${c.label} ${c.state === "over_ceiling" ? "is over its ceiling" : "is above its review level"}`, detail: c.message, href: "/portfolio/exposure",
+  }));
 }
 
 

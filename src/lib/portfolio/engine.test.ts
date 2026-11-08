@@ -48,8 +48,9 @@ describe("portfolio engine", () => {
     ] });
     const p = buildPortfolio([s], new Map(), null);
     const nvda = p.exposures.find((e) => e.symbol === "NVDA")!;
-    expect(nvda.viaEtfs).toBeCloseTo(75 / 1100, 6);
-    expect(nvda.total).toBeCloseTo(175 / 1100, 6);
+    // VOO holds 8.39% NVIDIA (Vanguard/stockanalysis, 2026-09-30).
+    expect(nvda.viaEtfs).toBeCloseTo(83.9 / 1100, 6);
+    expect(nvda.total).toBeCloseTo(183.9 / 1100, 6);
   });
 
   it("rolls holdings forward with recorded trades and keeps the estimate label", () => {

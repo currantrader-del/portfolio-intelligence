@@ -35,6 +35,10 @@ export async function investorContext(ws: Workspace, db: SupabaseClient): Promis
   const exp = p.exposures.filter((e) => e.total > 0.01).slice(0, 12);
   lines.push(`Single-company exposure incl. ETF look-through: ${exp.map((e) => `${e.symbol} ${pct(e.total)}${e.max != null ? ` (max ${pct(e.max, 0)}, ${ws.policy?.companies[e.symbol]?.status ?? "no limit"})` : ""}`).join("; ")}.`);
 
+  const ex = ws.exposure;
+  const top = (k: "sector" | "industry" | "theme" | "country" | "market", n: number) => ex.dims[k].lines.slice(0, n).map((l) => `${l.key} ${pct(l.pct)}${l.upperPct !== undefined ? ` (up to ${pct(l.upperPct)})` : ""}`).join("; ");
+  lines.push(`Look-through exposure, % of stocks (use get_exposure for detail): sectors ${top("sector", 4)}. Industries ${top("industry", 3)}. Themes (overlap) ${top("theme", 3)}. Markets ${top("market", 3)}. Countries ${top("country", 4)}.`);
+  if (ws.exposureLimits.length) lines.push(`Exposure limits: ${ws.exposureLimits.map((c) => `${c.label} ${pct(c.value)} of investable (${c.status}, ${c.state.replace(/_/g, " ")})`).join("; ")}.`);
   lines.push("\nRESEARCH RECORDS (stored; historical, check the age)");
   const fresh = AGE_REMINDER_DAYS;
   for (const r of ws.research) {

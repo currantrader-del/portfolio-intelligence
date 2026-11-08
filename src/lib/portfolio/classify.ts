@@ -3,6 +3,8 @@
  * Look-through weights are reference inputs, labelled approximate, not live data.
  * Update LOOKTHROUGH_AS_OF when the table is refreshed.
  */
+import { FUNDS, canonical } from "@/lib/exposure/reference";
+
 export type Bucket =
   | "US broad-market equity"
   | "International equity"
@@ -33,13 +35,18 @@ export function bucketOf(symbol: string, classification?: string | null): Bucket
   return "Quality/growth individual stocks";
 }
 
-/** Fraction of each ETF held in a company. S&P 500 weights are approximate (Oct 2026). GOOGL combines both share classes. */
-export const LOOKTHROUGH_AS_OF = "2026-10 (approximate)";
-export const LOOKTHROUGH: Record<string, Record<string, number>> = {
-  VOO: { NVDA: 0.075, GOOGL: 0.04, NOW: 0.004 },
-  IVV: { NVDA: 0.075, GOOGL: 0.04, NOW: 0.004 },
-  SPY: { NVDA: 0.075, GOOGL: 0.04, NOW: 0.004 },
-};
+/**
+ * Fraction of each ETF held in a company, from the dated fund reference data (src/lib/exposure/reference.ts):
+ * each fund's largest published holdings, with share classes combined (GOOGL = Class A + C).
+ * Companies outside a fund's listed holdings count as zero here, so look-through can be slightly understated.
+ */
+export const LOOKTHROUGH: Record<string, Record<string, number>> = Object.fromEntries(
+  Object.values(FUNDS).filter((f) => f.top?.length).map((f) => [f.symbol, Object.fromEntries(f.top!.map((t) => [canonical(t.symbol), t.weight]))]),
+);
+export const LOOKTHROUGH_AS_OF = `${FUNDS.VOO.topSource!.asOf} (fund holdings; see Exposure for each source)`;
+// IVV and SPY track the same index as VOO.
+LOOKTHROUGH.IVV = LOOKTHROUGH.VOO;
+LOOKTHROUGH.SPY = LOOKTHROUGH.VOO;
 
 /** A broad-market ETF used as the "do the simple thing" alternative in decisions. */
 export const DEFAULT_ETF_FOR_BUCKET: Partial<Record<Bucket, string>> = {
