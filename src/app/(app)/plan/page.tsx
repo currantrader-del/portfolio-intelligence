@@ -4,6 +4,10 @@ import { Card, CardHead, Disclose, Pill } from "@/components/ui";
 import { PlanRunner } from "@/components/PlanRunner";
 import { planStatus } from "@/lib/plan/job";
 import { shortDate } from "@/lib/format";
+import { OutdatedNotice } from "@/components/OutdatedNotice";
+import { loadContextEvents } from "@/lib/freshness/contextEvents";
+import { outdatedVerdict } from "@/lib/freshness/outdated";
+import { getWorkspace } from "@/lib/workspace";
 
 export const dynamic = "force-dynamic";
 
@@ -19,19 +23,26 @@ export default async function PlanPage() {
   const last = st.latest;
   const plan = last?.ok ? last.plan : null;
   const when = last ? new Date(last.at) : null;
+  // The stored plan is never rewritten; it is flagged when what it was built on changed since.
+  const check = plan && last ? outdatedVerdict({
+    writtenAt: last.at, events: await loadContextEvents(db, last.at).catch(() => []),
+    text: [plan.summary, plan.cash.now, plan.cash.waitFor, ...plan.nextActions].join(" "),
+    currentReserve: (await getWorkspace()).portfolio.cashDetail.protectedReserve,
+  }) : null;
 
   return (
     <div className="flex flex-col gap-3 lg:gap-4 max-w-3xl">
       <div className="flex flex-col gap-1">
         <span className="cap">Portfolio plan</span>
         <h1 className="h1">Your plan</h1>
-        <p className="t-sm">Built from your research, holdings, cash, policy and the latest market briefing. It rebuilds after each AI research and every Monday. It proposes; you decide, and it never trades.</p>
+        <p className="t-sm">Built from your research, holdings, cash, policy and the latest market briefing. It rebuilds after each AI research, after a policy change and every Monday. Older plans are kept as history. It proposes; you decide, and it never trades.</p>
       </div>
 
       <Card className="!gap-2">
         <PlanRunner running={st.running} hasPlan={!!plan} />
-        {when && <p className="t-xs">Last built {shortDate(last!.at)} {when.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit", timeZone: "America/New_York" })} ET · {last!.trigger === "research" ? "after new research" : last!.trigger === "weekly" ? "weekly" : "by you"} · ${last!.costUsd.toFixed(2)}</p>}
+        {when && <p className="t-xs">Last built {shortDate(last!.at)} {when.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit", timeZone: "America/New_York" })} ET · {last!.trigger === "research" ? "after new research" : last!.trigger === "weekly" ? "weekly" : last!.trigger === "policy" ? "after a policy change" : "by you"} · ${last!.costUsd.toFixed(2)}</p>}
         {last && !last.ok && <p role="alert" className="t-sm warn">The last build failed: {last.error}</p>}
+        {check && <OutdatedNotice v={check} what="plan" />}
       </Card>
 
       {!plan ? (

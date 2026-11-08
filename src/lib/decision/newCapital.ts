@@ -152,17 +152,23 @@ export function newCapital(args: {
   const deployable = Math.max(0, portfolio.cashDetail.deployable);
   // Cash already held can only be sized up to what is deployable after the protected reserve.
   const amount = source === "existing" ? Math.min(requested, Math.floor(deployable * 100) / 100) : requested;
+  // "Already deposited" is checked against the cash the app can see. Once the deposit is recorded it is part of
+  // the brokerage cash, so it must not be added to the portfolio a second time.
+  const recordedCash = Math.round(Math.max(0, portfolio.cashDetail.brokerage) * 100) / 100;
+  const depositShows = source === "deposited" && recordedCash + 0.5 >= amount;
   const funds: NewCapitalResult["funds"] = source === "planned"
     ? { requested, used: amount, verified: false, detail: `$${requested.toLocaleString()} of planned new money, not yet deposited. This is what to do once it arrives, not an order to place now` }
     : source === "deposited"
-      ? { requested, used: amount, verified: true, detail: `You confirmed $${requested.toLocaleString()} of new money has arrived in your brokerage account` }
+      ? depositShows
+        ? { requested, used: amount, verified: true, detail: `You said $${requested.toLocaleString()} of new money arrived, and the recorded brokerage cash ($${recordedCash.toLocaleString()}) covers it` }
+        : { requested, used: amount, verified: false, detail: `You said $${requested.toLocaleString()} of new money arrived, but the app shows only $${recordedCash.toLocaleString()} of brokerage cash. Record the deposit (or add a current statement) so the money can be checked` }
       : { requested, used: amount, verified: portfolio.cashDetail.savings !== null, detail: amount < requested
           ? `You asked about $${requested.toLocaleString()}, but only $${amount.toLocaleString()} is deployable after the $${portfolio.cashDetail.protectedReserve.toLocaleString()} protected reserve, so this is sized on $${amount.toLocaleString()}`
           : `$${amount.toLocaleString()} of cash you hold (deployable after the protected reserve: $${deployable.toLocaleString()})` };
   const audit = policy?.audit;
   const yields = args.yields ?? { y2: null, y10: null };
   // Money already counted as deployable cash only moves within the portfolio; new money grows it.
-  const isNew = source !== "existing";
+  const isNew = source === "planned" || (source === "deposited" && !depositShows);
   const postTotal = isNew ? portfolio.total + amount : portfolio.total;
   const warnings: string[] = [];
   if (portfolio.quality.status === "estimated") warnings.push(portfolio.quality.headline + ". " + portfolio.quality.reasons[0]);
@@ -429,8 +435,9 @@ export function newCapital(args: {
   const refresh = stockOptions.filter((o) => o.label === "Refresh required" || o.label === "Research needed");
   const receivingStocks = allocations.map((x) => x.symbol).filter((s) => ![...etfOptions].some((e) => e.symbol === s));
   const gates: Gate[] = [
-    { key: "funds", label: "The money is verified", ok: source === "planned" ? false : portfolio.cashDetail.savings !== null && amount >= 1,
+    { key: "funds", label: "The money is verified", ok: source === "planned" ? false : source === "deposited" && !depositShows ? false : portfolio.cashDetail.savings !== null && amount >= 1,
       detail: source === "planned" ? `${funds.detail}. Choose "New, already deposited" once it has arrived`
+        : source === "deposited" && !depositShows ? funds.detail
         : portfolio.cashDetail.savings === null ? "Enter your savings balance so the protected reserve and deployable cash are known"
         : amount < 1 ? `No deployable cash: the $${portfolio.cashDetail.protectedReserve.toLocaleString()} protected reserve takes everything held` : funds.detail },
     { key: "holdings", label: "Holdings and balances are verified", ok: confirmed || (!unverified.length && !gaps.length),
@@ -460,7 +467,7 @@ export function newCapital(args: {
     ? `Lean: add to ${eligible.slice(0, 2).map((o) => o.symbol).join(" and ")}, where the research supports it, nothing material has changed and you approved the limit${etf && allocations.some((x) => x.symbol === etf.symbol) ? `; the rest to ${etf.symbol}` : ""}.`
     : `Lean: ${etf?.symbol ?? "VOO"} or keep cash. ${choiceWords ? `${choiceWords}. ` : ""}No stock qualifies for new money right now${why ? ` (${why})` : ""}.`;
   const split = allocations.map((x) => `$${x.amount.toLocaleString()} ${x.symbol}`).join(" + ");
-  const openWords = gates.filter((g) => !g.ok).map((g) => g.key === "funds" ? (source === "planned" ? "the money arrives" : "your cash is confirmed") : g.key === "holdings" ? "your balances are verified" : "open research is reassessed");
+  const openWords = gates.filter((g) => !g.ok).map((g) => g.key === "funds" ? (source === "planned" ? "the money arrives" : source === "deposited" ? "the deposit shows in your recorded cash" : "your cash is confirmed") : g.key === "holdings" ? "your balances are verified" : "open research is reassessed");
   const openList = openWords.length > 1 ? `${openWords.slice(0, -1).join(", ")} and ${openWords[openWords.length - 1]}` : openWords[0] ?? "";
   return {
     amount,

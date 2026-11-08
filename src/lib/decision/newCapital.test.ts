@@ -63,7 +63,8 @@ describe("new capital: evidence gates", () => {
 
   it("needs verified holdings: a stale statement, or trades recorded since one, is not a reconciliation", () => {
     const policy = policyFromRules(approvedRules);
-    const stale = { ...snap, asOf: "2026-10-15T21:00:00Z", positions: snap.positions.filter((x) => x.symbol !== "BBB") };
+    // The $400 deposit shows in the account's cash, so only the holdings check is open.
+    const stale = { ...snap, cashValue: 400, asOf: "2026-10-15T21:00:00Z", positions: snap.positions.filter((x) => x.symbol !== "BBB") };
     const p = buildPortfolio([stale, savings], new Map(), policy, {}, [], now);
     const r = newCapital({ amount: 400, source: "deposited", portfolio: p, research: [research("$26")], policy, now, filings: quiet });
     expect(r.gates.find((g) => g.key === "holdings")).toMatchObject({ ok: false, detail: expect.stringMatching(/Broker: statement 2026-10-15 \(20 days\)/) });
@@ -84,7 +85,7 @@ describe("new capital: evidence gates", () => {
 
   it("is ready to execute only when the money, the holdings and the research are verified", () => {
     const policy = policyFromRules(approvedRules);
-    const withBasis = { ...snap, positions: snap.positions.filter((x) => x.symbol !== "BBB").map((x) => ({ ...x, costBasis: x.marketValue })) };
+    const withBasis = { ...snap, cashValue: 400, positions: snap.positions.filter((x) => x.symbol !== "BBB").map((x) => ({ ...x, costBasis: x.marketValue })) };
     const ledger = [{ accountId: "a", tradeDate: "2026-10-01", kind: "deposit" as const, symbol: null, quantity: null, price: null, amount: 500 }];
     const p = buildPortfolio([withBasis, savings], new Map(), policy, {}, ledger, now);
     expect(p.quality.reconciliation).toMatchObject({ complete: true, label: "Reconciled" });
@@ -265,9 +266,31 @@ describe("new capital: hypothetical vs verified money", () => {
     expect(planned.recommendation.headline).toMatch(/, once the money arrives$/);
     const legacyNew = newCapital({ amount: 1250, source: "new", portfolio: p, research: [research("$26")], policy, now, filings: quiet });
     expect(legacyNew.source).toBe("planned"); // "new" from older callers is treated as unverified
-    const deposited = newCapital({ amount: 1250, source: "deposited", portfolio: p, research: [research("$26")], policy, now, filings: quiet });
+    // Once the deposit shows in the brokerage cash it is executable, and it is not counted twice.
+    const pDep = buildPortfolio([{ ...withBasis, cashValue: 1250 }, savings], new Map(), policy, {}, [], now);
+    const deposited = newCapital({ amount: 1250, source: "deposited", portfolio: pDep, research: [research("$26")], policy, now, filings: quiet });
     expect(deposited.status).toBe("ready");
     expect(deposited.recommendation.allocations).toEqual(planned.recommendation.allocations);
+  });
+
+  it("does not call $1,250 'deposited' money ready when the app shows only $221 of brokerage cash", () => {
+    const p221 = buildPortfolio([{ ...withBasis, cashValue: 221.24 }, { ...savings, cashValue: 10000, totalValue: 10000 }], new Map(), policy, {}, [], now);
+    const r = newCapital({ amount: 1250, source: "deposited", holdingsConfirmed: true, portfolio: p221, research: [research("$26")], policy, now, filings: quiet });
+    expect(r.status).toBe("conditional");
+    expect(r.funds.verified).toBe(false);
+    expect(r.gates.find((g) => g.key === "funds")).toMatchObject({ ok: false, detail: expect.stringMatching(/only \$221\.24 of brokerage cash\. Record the deposit/) });
+    expect(r.recommendation.headline).toMatch(/once the deposit shows in your recorded cash$/);
+  });
+
+  it("does not add a recorded deposit to the portfolio a second time", () => {
+    const ledger = [{ accountId: "a", tradeDate: "2026-11-05", kind: "deposit" as const, symbol: null, quantity: null, price: null, amount: 1250 }];
+    const pRec = buildPortfolio([withBasis, savings], new Map(), policy, {}, ledger, now);
+    expect(pRec.cashDetail.brokerage).toBe(1250);
+    const dep = newCapital({ amount: 1250, source: "deposited", portfolio: pRec, research: [research("$26")], policy, now, filings: quiet });
+    const planned = newCapital({ amount: 1250, source: "planned", portfolio: p, research: [research("$26")], policy, now, filings: quiet });
+    expect(dep.funds.verified).toBe(true);
+    // Same money, same resulting portfolio: the recorded deposit is already in the total.
+    expect(dep.recommendation.allocations).toEqual(planned.recommendation.allocations);
   });
 });
 

@@ -67,8 +67,9 @@ export async function InvestmentSummary({ ws, symbol }: { ws: Workspace; symbol:
                 <div className="flex items-center justify-between gap-3"><span className="t-sm">Expected return</span><span className="num font-semibold">{er === null ? "—" : `≈ ${pctStr(er)} a year`}</span></div>
                 {cmp && (
                   <div className="flex flex-col gap-1">
-                    <div className="flex items-center justify-between gap-3 t-sm"><span>Modeled return vs VOO and Treasuries</span><span className={cmp.judgment === "favourable" ? "gain" : cmp.judgment === "unfavourable" ? "warn" : ""}>{cmp.judgment === "favourable" ? "Favourable" : cmp.judgment === "unfavourable" ? "Unfavourable" : "Mixed"}</span></div>
+                    <div className="flex items-center justify-between gap-3 t-sm"><span>Valuation only: modeled return vs VOO and Treasuries</span><span className={cmp.judgment === "favourable" ? "gain" : cmp.judgment === "unfavourable" ? "warn" : ""}>{cmp.judgment === "favourable" ? "Favourable" : cmp.judgment === "unfavourable" ? "Unfavourable" : "Mixed"}</span></div>
                     <ul className="t-xs flex flex-col gap-0.5">{cmp.factors.map((f) => <li key={f.label}><span className="text-ink">{f.label}:</span> {f.finding}</li>)}</ul>
+                    <span className="t-xs">How attractive the valuation looks is one input, not the recommendation. What to do comes from the research&apos;s action{any?.parsed.action ? ` (${cap1(any.parsed.action)})` : ""} and, for new money, the comparison on Decisions.</span>
                   </div>
                 )}
                 {st?.status === "unverified" && <span className="t-xs warn">{check?.reason}</span>}
@@ -85,7 +86,7 @@ export async function InvestmentSummary({ ws, symbol }: { ws: Workspace; symbol:
         <div className="flex flex-col gap-1.5">
           <div className="flex items-center justify-between gap-3"><span className="t-sm">Your exposure</span><span className="t-sm num text-ink">{pctStr(exp.total)} <span className="t-xs">of max {pctStr(exp.max, 0)}</span></span></div>
           <Bar thin value={exp.total} max={exp.max} markers={lim?.normal ? [lim.normal.low, lim.normal.high] : []} label={`${pctStr(exp.total)} of a ${pctStr(exp.max, 0)} maximum`} />
-          <span className="t-xs">{pctStr(exp.direct)} direct · {pctStr(exp.viaEtfs)} through ETFs (approx.) · room {usd(exp.headroomDollars)}</span>
+          <span className="t-xs">{pctStr(exp.direct)} direct · {pctStr(exp.viaEtfs)} through ETFs (approx.){exp.totalMax - exp.total > 0.0005 ? `; could be up to ${pctStr(exp.totalMax)} in total because fund holdings are only partly published` : ""} · room {usd(exp.headroomDollars)}{exp.totalMax - exp.total > 0.0005 ? " (on the upper figure)" : ""}</span>
         </div>
       ) : (
         <div className="flex items-center justify-between gap-3"><span className="t-sm">Your exposure</span><span className="t-sm">Not held</span></div>

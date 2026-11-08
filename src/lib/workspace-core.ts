@@ -5,7 +5,7 @@ import { isMarketOpen } from "@/lib/market/hours";
 import { buildPortfolio, type LedgerEntry, type PortfolioView, type SnapshotInput } from "@/lib/portfolio/engine";
 import { readPolicy, type Policy , AGE_REMINDER_DAYS } from "@/lib/policy/limits";
 import { policyFromRules, type PolicyRuleRow } from "@/lib/policy/rules";
-import { toResearchRecord, type ResearchRecord, type VersionRow } from "@/lib/research/records";
+import { toResearchRecord, type FilingCheckInfo, type ResearchRecord, type VersionRow } from "@/lib/research/records";
 import { evaluateAlerts, type Alert } from "@/lib/alerts/rules";
 import { computeExposure, type ExposureReport } from "@/lib/exposure/engine";
 import { checkLimits, type LimitCheck } from "@/lib/exposure/limits";
@@ -79,15 +79,30 @@ export async function loadSnapshots(db: SupabaseClient): Promise<SnapshotInput[]
 }
 
 export async function loadResearch(db: SupabaseClient): Promise<ResearchRecord[]> {
-  const { data } = await db
-    .from("companies")
-    .select("symbol, name, watchlist_status, pipeline_stage, pipeline_note, stage_updated_at, screen, screened_at, research_versions(id, research_as_of, completeness, origin, is_current, conclusion)")
-    .order("symbol");
+  const [{ data }, checks] = await Promise.all([
+    db.from("companies")
+      .select("symbol, name, watchlist_status, pipeline_stage, pipeline_note, stage_updated_at, screen, screened_at, research_versions(id, research_as_of, completeness, origin, is_current, conclusion)")
+      .order("symbol"),
+    loadFilingChecks(db).catch(() => new Map<string, FilingCheckInfo>()),
+  ]);
   return (data ?? []).map((c) =>
     toResearchRecord(c.symbol, c.name, c.watchlist_status, (c.research_versions ?? []) as VersionRow[], {
       stage: c.pipeline_stage ?? "idea", note: c.pipeline_note ?? null, stageUpdatedAt: c.stage_updated_at ?? null, screen: c.screen ?? null, screenedAt: c.screened_at ?? null,
-    }),
+    }, checks.get(c.symbol) ?? null),
   );
+}
+
+/** Latest SEC filing check per company, so research labels can say whether new filings were read. */
+export async function loadFilingChecks(db: SupabaseClient): Promise<Map<string, FilingCheckInfo>> {
+  const { data } = await db.from("model_runs").select("computed_at, inputs, outputs").eq("kind", "research_filing_check").order("computed_at", { ascending: false }).limit(200);
+  const out = new Map<string, FilingCheckInfo>();
+  for (const row of data ?? []) {
+    const sym = String((row.inputs as { symbol?: string })?.symbol ?? "").toUpperCase();
+    if (!sym || out.has(sym)) continue;
+    const o = row.outputs as { status?: string; statusReason?: string; document?: { form: string; filed: string } | null; findings?: { material: boolean; text: string }[] } | null;
+    out.set(sym, { at: row.computed_at as string, status: o?.status ?? "unknown", reason: o?.statusReason ?? "", document: o?.document ? { form: o.document.form, filed: o.document.filed } : null, material: (o?.findings ?? []).filter((f) => f.material).map((f) => f.text) });
+  }
+  return out;
 }
 
 /**

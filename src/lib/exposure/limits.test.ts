@@ -50,7 +50,7 @@ describe("exposure limits", () => {
   });
 
   it("never turns room under a limit into a buy, and flags NVIDIA at its limit", () => {
-    const list = insights(rep, checkLimits(rep, asRules("proposed")), [{ symbol: "NVDA", direct: 0.148, viaEtfs: 0.028, total: 0.176, max: 0.18, hasLimit: true, headroomDollars: 160 }]);
+    const list = insights(rep, checkLimits(rep, asRules("proposed")), [{ symbol: "NVDA", direct: 0.148, viaEtfs: 0.028, total: 0.176, max: 0.18, hasLimit: true, headroomDollars: 160, viaEtfsMax: 0.028, totalMax: 0.176, lookthroughGaps: [] }]);
     expect(list.some((i) => /buy/i.test(i.action))).toBe(false);
     const nv = list.find((i) => i.id === "company-NVDA")!;
     expect(nv.action).toBe("maintain");

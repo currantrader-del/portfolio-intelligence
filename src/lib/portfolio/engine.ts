@@ -12,6 +12,38 @@
 import type { Quote } from "@/lib/market/quotes";
 import { companyLimit, type Policy, type Range } from "@/lib/policy/limits";
 import { bucketOf, LOOKTHROUGH, type Bucket } from "./classify";
+import { COMPANIES, FUNDS, canonical } from "@/lib/exposure/reference";
+
+const FUND_ALIAS: Record<string, string> = { IVV: "VOO", SPY: "VOO" };
+const OUTSIDE_US = /outside the US|ex[- ]US|emerging/i;
+
+/**
+ * How much more of a company the held ETFs could contain beyond their itemized top holdings. A company not in
+ * a fund's published top list can weigh at most as much as the smallest listed holding, so that weight is a
+ * hard upper bound. Funds that cannot hold the company (bond funds, a country or size mandate that excludes
+ * it) add nothing; a fund with no itemized holdings at all is listed as unknown. Pure.
+ */
+export function lookthroughUpperBound(symbol: string, etfs: { symbol: string; value: number }[]): { extra: number; funds: string[]; unknown: string[] } {
+  const sym = canonical(symbol);
+  const co = COMPANIES[sym];
+  let extra = 0;
+  const funds: string[] = [], unknown: string[] = [];
+  for (const e of etfs) {
+    const f = FUNDS[FUND_ALIAS[e.symbol] ?? e.symbol];
+    if (!f || f.assetClass === "bond" || e.value <= 0) continue;
+    if (f.top?.some((t) => canonical(t.symbol) === sym)) continue; // already counted from the itemized list
+    if (co && f.countries) {
+      const itemized = Object.values(f.countries).reduce((a, x) => a + x, 0);
+      if (!(f.countries[co.country] > 0) && (itemized > 0.99 || (co.country === "United States" && OUTSIDE_US.test(f.mandate)))) continue;
+    }
+    if (co && f.size && f.sizeBasis === "mandate" && !(f.size[co.size] && f.size[co.size]! > 0)) continue;
+    if (!f.top?.length) { unknown.push(e.symbol); continue; }
+    if (f.holdingsCount && f.top.length >= f.holdingsCount) continue;
+    extra += Math.min(...f.top.map((t) => t.weight)) * e.value;
+    funds.push(e.symbol);
+  }
+  return { extra, funds, unknown };
+}
 
 export type SnapshotInput = {
   accountId: string;
@@ -96,7 +128,13 @@ export function reconciliationGaps(args: { brokerAsOfs: string[]; savingsEntered
 }
 
 export type BucketRow = { bucket: Bucket; value: number; weight: number; normal: Range; hardMax: number | null; status: "below" | "within" | "above" | "over_max" | "no_limit" };
-export type CompanyExposure = { symbol: string; direct: number; viaEtfs: number; total: number; max: number; hasLimit: boolean; headroomDollars: number };
+export type CompanyExposure = {
+  symbol: string; direct: number; viaEtfs: number; total: number; max: number; hasLimit: boolean; headroomDollars: number;
+  /** Upper bound of the ETF share when fund holdings are only partly itemized (equals viaEtfs when fully known). */
+  viaEtfsMax: number; totalMax: number;
+  /** Funds whose holdings lists are incomplete for this company: bounded, or unknown. */
+  lookthroughGaps: string[];
+};
 
 export type PortfolioView = {
   total: number; // investable capital: the denominator for every weight
@@ -263,6 +301,8 @@ export function buildPortfolio(
       const lim = companyLimit(policy, h.symbol);
       const max = lim.monitorMax;
       const totalExp = h.value + via;
+      const bound = lookthroughUpperBound(h.symbol, holdings.filter((e) => e.symbol !== h.symbol));
+      const totalExpMax = totalExp + bound.extra;
       return {
         symbol: h.symbol,
         direct: total ? h.value / total : 0,
@@ -270,8 +310,12 @@ export function buildPortfolio(
         total: total ? totalExp / total : 0,
         max,
         hasLimit: lim.hasLimit,
-        // No company-specific limit means no room for new money, whatever the generic ceiling says.
-        headroomDollars: lim.hasLimit ? round2(Math.max(0, lim.newMoneyMax * total - totalExp)) : 0,
+        // No company-specific limit means no room for new money, whatever the generic ceiling says. Room is
+        // measured against the upper bound, so incomplete fund data can never create room that may not exist.
+        headroomDollars: lim.hasLimit ? round2(Math.max(0, lim.newMoneyMax * total - totalExpMax)) : 0,
+        viaEtfsMax: total ? (via + bound.extra) / total : 0,
+        totalMax: total ? totalExpMax / total : 0,
+        lookthroughGaps: [...bound.funds.map((f) => `${f}: only its largest holdings are published, so ${h.symbol} could be up to the smallest listed weight`), ...bound.unknown.map((f) => `${f}: holdings not itemized`)],
       };
     });
 

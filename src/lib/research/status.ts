@@ -2,8 +2,49 @@
  * One reading of "how usable is the research on this company today", shared by every page.
  * The label decides the pill; the detail explains it in a sentence.
  */
-import { researchAgeDays, type ResearchRecord } from "./records";
+import { researchAgeDays, type FilingCheckInfo, type ResearchRecord, type VersionRow } from "./records";
 import { repriceCheck } from "./valuation";
+
+/**
+ * How deep the research behind a record actually goes. Six sections written by Claude are automated
+ * preliminary research, not verified research: the label says what was checked, not how long it is.
+ *   preliminary         automated (AI) research, or any record that lists questions it could not verify
+ *   company_research    a complete record with no open questions, not produced automatically
+ *   filings_checked     ...and the app's SEC filing check after the research found nothing unresolved
+ *   documents_reviewed  ...and you marked the source documents as fully reviewed (not recorded yet, so never claimed)
+ */
+export type ResearchDepth = {
+  level: "preliminary" | "company_research" | "filings_checked" | "documents_reviewed";
+  label: string;
+  automated: boolean;
+  openQuestions: string[];
+  filings: { state: "checked" | "unresolved" | "not_checked"; detail: string };
+};
+
+const AUTOMATED_ORIGINS = new Set(["claude_full", "claude_targeted_update"]);
+
+/** A new report filed after the research that the filing check flagged and no newer research has resolved. */
+export function unresolvedFiling(researchAsOf: string, fc: FilingCheckInfo | null | undefined): string | null {
+  if (!fc || fc.status !== "WAIT / REVIEW" || !fc.document || fc.document.filed <= researchAsOf) return null;
+  return `${fc.document.form} filed ${fc.document.filed}, after the research${fc.material.length ? `: ${fc.material.length} material change${fc.material.length > 1 ? "s" : ""} (${fc.material[0]})` : `: ${fc.reason.replace(/\.$/, "")}`}`;
+}
+
+export function researchDepth(v: Pick<VersionRow, "research_as_of" | "completeness" | "origin" | "conclusion">, fc: FilingCheckInfo | null | undefined): ResearchDepth {
+  const nv = (v.conclusion as { not_verified?: unknown })?.not_verified;
+  const openQuestions = Array.isArray(nv) ? nv.filter((x): x is string => typeof x === "string" && x.trim().length > 0) : [];
+  const automated = AUTOMATED_ORIGINS.has(v.origin);
+  const pending = unresolvedFiling(v.research_as_of, fc);
+  const checkedAfter = fc && fc.at.slice(0, 10) >= v.research_as_of;
+  const filings: ResearchDepth["filings"] = pending
+    ? { state: "unresolved", detail: pending }
+    : checkedAfter && fc!.status === "CURRENT"
+      ? { state: "checked", detail: `SEC filings checked by the app on ${fc!.at.slice(0, 10)}: nothing unresolved` }
+      : { state: "not_checked", detail: checkedAfter ? `The app's filing check on ${fc!.at.slice(0, 10)} could not confirm everything (${fc!.reason.replace(/\.$/, "")})` : "The app has not checked SEC filings since this research" };
+  const complete = v.completeness === "complete";
+  const level: ResearchDepth["level"] = automated || openQuestions.length || !complete ? "preliminary" : filings.state === "checked" ? "filings_checked" : "company_research";
+  const label = level === "preliminary" ? (automated ? "Automated research (preliminary)" : "Preliminary research") : level === "filings_checked" ? "Company research, filings checked" : "Company research";
+  return { level, label, automated, openQuestions, filings };
+}
 
 export type Coverage = { key: "current" | "incomplete" | "refresh" | "conflict" | "none"; label: string; tone: "gain" | "warn" | "neutral"; dot: "solid" | "hollow"; detail: string };
 
@@ -16,9 +57,20 @@ export function coverage(r: ResearchRecord | undefined, price: number | null, no
   const age = researchAgeDays(r, now);
   const check = price ? repriceCheck(v.parsed, price, age, reminderDays) : { ok: true, reason: null, note: undefined };
   if (!check.ok) return { key: "refresh", label: "Refresh", tone: "warn", dot: "hollow", detail: check.reason ?? "Needs a refresh" };
-  return complete
-    ? { key: "current", label: "Current", tone: "gain", dot: "solid", detail: (age ?? 0) > reminderDays ? `Complete research; ${age} days old, so check filings since then (age alone doesn't make it wrong)` : "Complete research, no large price move since" }
-    : { key: "incomplete", label: "Incomplete", tone: "warn", dot: "hollow", detail: "Partial archive: some phases are missing" };
+  // A material new filing the research has not absorbed means it is not current, however complete it looks.
+  const pending = unresolvedFiling(v.research_as_of, r.filingCheck);
+  if (pending) return { key: "refresh", label: "Refresh", tone: "warn", dot: "hollow", detail: `Unresolved new filing: ${pending}` };
+  if (!complete) return { key: "incomplete", label: "Incomplete", tone: "warn", dot: "hollow", detail: "Partial archive: some phases are missing" };
+  const d = researchDepth(v, r.filingCheck);
+  const ageNote = (age ?? 0) > reminderDays ? ` ${age} days old, so check filings since then (age alone doesn't make it wrong).` : "";
+  if (d.level === "preliminary") {
+    const q = d.openQuestions.length;
+    return {
+      key: "current", label: q ? `Preliminary · ${q} open` : "Preliminary", tone: "warn", dot: "hollow",
+      detail: `${d.label}: usable for comparison, not verified.${q ? ` ${q} question${q > 1 ? "s" : ""} it could not verify, e.g. ${d.openQuestions[0]}.` : ""} ${d.filings.detail}.${ageNote}`,
+    };
+  }
+  return { key: "current", label: "Current", tone: "gain", dot: "solid", detail: `${d.label}; no large price move since. ${d.filings.detail}.${ageNote}` };
 }
 
 /**
@@ -31,7 +83,7 @@ export function suggestStage(args: { stage: string; held: boolean; coverageKey: 
   if (held || stage === "owned") return null;
   let s: { stage: "screening" | "researching" | "ready" | "passed"; reason: string } | null = null;
   if (hasResearch && coverageKey === "current" && action && /\b(avoid|pass|do not (buy|own)|don't buy|sell|exit)\b/i.test(action)) s = { stage: "passed", reason: `The research says: ${action}` };
-  else if (hasResearch && coverageKey === "current") s = { stage: "ready", reason: "Research is complete and current, so it can be compared for new money." };
+  else if (hasResearch && coverageKey === "current") s = { stage: "ready", reason: "Research is on file and current, so it can be compared for new money (automated research stays preliminary until its open questions are checked)." };
   else if (hasResearch) s = { stage: "researching", reason: coverageKey === "incomplete" ? "Research is on file but incomplete." : "Research is on file but needs a refresh before it can be relied on." };
   else if (screenVerdict === "Weak on screen") s = { stage: "passed", reason: "Weak on the first screen and no research on file." };
   else if (screenVerdict) s = { stage: "screening", reason: `Screened: ${screenVerdict.toLowerCase()}. Next is AI research.` };

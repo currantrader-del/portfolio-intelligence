@@ -8,6 +8,28 @@ import { save } from "@/lib/intel/jobs";
 import { auditRules, type PolicyRuleRow } from "@/lib/policy/rules";
 import { reviewImported } from "@/lib/policy/importReview";
 import { fail, type ActionResult } from "@/lib/action-result";
+import { headers } from "next/headers";
+import { startPlan } from "@/lib/plan/job";
+import { DAILY_CAP, spentToday } from "@/lib/intel/start";
+
+/**
+ * A changed policy makes the stored plan outdated, so the plan is rebuilt in the background (the old plan
+ * is kept as history). Best effort: skipped without an API key, over the daily cost limit, or if one is running.
+ */
+async function rebuildPlan(db: SupabaseClient) {
+  try {
+    if (!process.env.ANTHROPIC_API_KEY) return;
+    const spent = await spentToday(db);
+    if (spent.answers >= DAILY_CAP.answers || spent.total >= DAILY_CAP.total) return;
+    const { data: s } = await db.auth.getSession();
+    const h = await headers();
+    const host = h.get("x-forwarded-host") ?? h.get("host");
+    if (!s.session?.access_token || !host) return;
+    await startPlan(db, `${h.get("x-forwarded-proto") ?? "https"}://${host}`, s.session.access_token, "policy");
+  } catch (e) {
+    console.error(`policy: plan rebuild did not start: ${(e as Error).message}`);
+  }
+}
 
 /**
  * Policy changes. Nothing is ever deleted and no earlier note is overwritten: each change APPENDS to the
@@ -41,6 +63,7 @@ export async function approveRule(formData: FormData): Promise<ActionResult> {
   for (const o of (others ?? []) as Row[]) await setRow(db, o, { approval: "superseded" }, `Superseded ${today()}: you chose "${rule.source_label}".`);
   await setRow(db, rule as Row, { approval: "approved", approved_at: when }, `Approved by you in the app on ${today()}.${note ? ` ${note}` : ""}`);
   await log(db, { action: "approve", rule_id: id, scope: rule.scope, subject: rule.subject, note }, [rule as Row, ...((others ?? []) as Row[])], []);
+  await rebuildPlan(db);
   revalidatePath("/", "layout");
   redirect(`/policy?saved=${encodeURIComponent(`approved:${rule.subject}`)}`);
 }
@@ -68,6 +91,7 @@ export async function confirmImported(formData: FormData): Promise<ActionResult>
   const when = new Date().toISOString();
   for (const r of (rows ?? []) as Row[]) await setRow(db, r, { approved_at: when }, `Confirmed by you in the app on ${today()} (imported from "${r.source_label}").`);
   await log(db, { action: "confirm_imported", ids }, (rows ?? []) as Row[], []);
+  await rebuildPlan(db);
   revalidatePath("/", "layout");
   redirect(`/policy?saved=${encodeURIComponent(`confirmed:${(rows ?? []).length}`)}`);
 }
@@ -97,6 +121,7 @@ export async function reviseImported(formData: FormData): Promise<ActionResult> 
   }
   await setRow(db, { ...old, approval: "superseded" }, {}, `Superseded ${today()}: you approved Claude's revision (row ${added.id}).`);
   await log(db, { action: "revise_imported", rule_id: id, scope: item.scope, subject: item.subject, revised: item.revised, reason: item.reason }, [item.row as unknown as Row], []);
+  await rebuildPlan(db);
   revalidatePath("/", "layout");
   redirect(`/policy?saved=${encodeURIComponent(`approved:${item.subject}`)}`);
 }

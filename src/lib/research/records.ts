@@ -6,6 +6,9 @@ export type PipelineInfo = { stage: Stage; note: string | null; stageUpdatedAt: 
 export type VersionRow = {
   id: string; research_as_of: string; completeness: string; origin: string; is_current: boolean; conclusion: Record<string, unknown>;
 };
+/** The latest SEC filing check the app ran for the company (model_runs "research_filing_check"). */
+export type FilingCheckInfo = { at: string; status: string; reason: string; document: { form: string; filed: string } | null; material: string[] };
+
 export type ResearchRecord = {
   symbol: string;
   name: string | null;
@@ -15,11 +18,12 @@ export type ResearchRecord = {
   conflict: boolean; // more than one dated record and none marked current
   versions: number;
   pipeline: PipelineInfo;
+  filingCheck?: FilingCheckInfo | null;
 };
 
 const NO_PIPELINE: PipelineInfo = { stage: "idea", note: null, stageUpdatedAt: null, screen: null, screenedAt: null };
 
-export function toResearchRecord(symbol: string, name: string | null, watchlistStatus: string, versions: VersionRow[], pipeline: PipelineInfo = NO_PIPELINE): ResearchRecord {
+export function toResearchRecord(symbol: string, name: string | null, watchlistStatus: string, versions: VersionRow[], pipeline: PipelineInfo = NO_PIPELINE, filingCheck: FilingCheckInfo | null = null): ResearchRecord {
   const sorted = [...versions].sort((a, b) => b.research_as_of.localeCompare(a.research_as_of));
   const cur = sorted.find((v) => v.is_current) ?? null;
   const latest = sorted[0] ?? null;
@@ -32,6 +36,7 @@ export function toResearchRecord(symbol: string, name: string | null, watchlistS
     conflict: !cur && sorted.length > 0,
     versions: sorted.length,
     pipeline,
+    filingCheck,
   };
 }
 
