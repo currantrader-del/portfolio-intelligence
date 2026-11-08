@@ -1,3 +1,4 @@
+import { ActionForm, SubmitButton } from "@/components/forms";
 import Link from "next/link";
 import { getWorkspace } from "@/lib/workspace";
 import { Tag } from "@/components/Tag";
@@ -67,13 +68,13 @@ function DecisionCard({ s }: { s: SubjectAudit }) {
       </Disclose>
       <div className="flex flex-col gap-2">
         {open.map((c) => (
-          <form key={c.id} className="flex flex-wrap items-center gap-2">
+          <ActionForm key={c.id} actions={{ approve: approveRule, reject: rejectRule }} successFor={{ approve: "Approved", reject: "Rejected" }} className="flex flex-wrap items-center gap-2">
             <input type="hidden" name="rule_id" value={c.id} />
             <label className="sr-only" htmlFor={`n-${c.id}`}>Note (optional)</label>
-            <input id={`n-${c.id}`} name="note" placeholder="Note (optional)" className="flex-1 min-w-36 rounded-lg border border-line-strong bg-ground px-3 min-h-10 text-sm" />
-            <button formAction={approveRule} className="btn btn-sm btn-primary">Approve{open.length > 1 ? ` ${c.source_label.split(" (")[0]}` : ""}</button>
-            <button formAction={rejectRule} className="btn btn-sm">Reject</button>
-          </form>
+            <input id={`n-${c.id}`} name="note" placeholder="Note (optional)" className="flex-1 min-w-36 rounded-lg border border-line-strong bg-ground px-3 min-h-11 text-sm" />
+            <SubmitButton pendingKey="approve" pendingText="Approving…" className="btn btn-sm btn-primary">Approve{open.length > 1 ? ` ${c.source_label.split(" (")[0]}` : ""}</SubmitButton>
+            <SubmitButton pendingKey="reject" pendingText="Rejecting…" className="btn btn-sm">Reject</SubmitButton>
+          </ActionForm>
         ))}
         <p className="text-xs text-muted">Approve makes it the controlling rule; the current one is kept in history. Reject keeps what controls now and records your choice.</p>
       </div>
@@ -101,10 +102,10 @@ function ImportedReview({ retain, exceptions }: { retain: ImportReviewItem[]; ex
           {retain.map((x) => <li key={x.row.id} className="py-1.5 flex flex-col gap-0.5"><span className="flex flex-wrap justify-between gap-x-3"><span>{subjectName(x)}</span><span className="font-mono text-[13px]">{numbers(x.row)}</span></span><span className="text-xs text-muted">{x.reason}</span></li>)}
         </ul>
       </Disclose>
-      <form action={confirmImported} className="flex gap-2">
+      <ActionForm action={confirmImported} success="Confirmed" className="flex flex-col gap-2">
         {retain.map((x) => <input key={x.row.id} type="hidden" name="rule_id" value={x.row.id} />)}
-        <button className="btn btn-sm btn-primary">Confirm the {retain.length} retained rules as mine</button>
-      </form>
+        <SubmitButton className="btn btn-sm btn-primary self-start" pendingText="Confirming…">Confirm the {retain.length} retained rules as mine</SubmitButton>
+      </ActionForm>
       <h3 className="text-sm font-semibold mt-1">Exceptions</h3>
       <ul className="flex flex-col gap-3">
         {exceptions.map((x) => (
@@ -113,17 +114,17 @@ function ImportedReview({ retain, exceptions }: { retain: ImportReviewItem[]; ex
             <span className="text-sm"><span className="text-muted">Imported, in control now:</span> <span className="font-mono text-[13px]">{numbers(x.row)}</span></span>
             {x.revised && <span className="text-sm"><span className="text-muted">Proposed, not in effect:</span> <span className="font-mono text-[13px]">{numbers({ ...x.row, ...x.revised })}</span></span>}
             <p className="text-xs text-muted">{x.reason}</p>
-            <form className="flex flex-wrap gap-2">
+            <ActionForm actions={{ revise: reviseImported, keep: confirmImported }} successFor={{ revise: "Revision approved", keep: "Confirmed" }} className="flex flex-wrap gap-2">
               <input type="hidden" name="rule_id" value={x.row.id} />
               {x.revised ? (
                 <>
-                  <button formAction={reviseImported} className="btn btn-sm btn-primary">Approve revision</button>
-                  <button formAction={confirmImported} className="btn btn-sm">Keep the imported rule instead</button>
+                  <SubmitButton pendingKey="revise" pendingText="Approving…" className="btn btn-sm btn-primary">Approve revision</SubmitButton>
+                  <SubmitButton pendingKey="keep" pendingText="Confirming…" className="btn btn-sm">Keep the imported rule instead</SubmitButton>
                 </>
               ) : (
-                <button formAction={confirmImported} className="btn btn-sm btn-primary">Confirm as interim ceiling</button>
+                <SubmitButton pendingKey="keep" pendingText="Confirming…" className="btn btn-sm btn-primary">Confirm as interim ceiling</SubmitButton>
               )}
-            </form>
+            </ActionForm>
           </li>
         ))}
       </ul>
@@ -207,7 +208,7 @@ export default async function PolicyPage({ searchParams }: { searchParams: Promi
 
       <Disclose summary="Change a limit" className="card">
         <p className="text-sm text-ink-2">Your new rule becomes the controlling one. The previous rule stays in history, with your reason.</p>
-        <form action={addRule} className="grid gap-2 sm:grid-cols-2">
+        <ActionForm action={addRule} success="New limit approved" className="grid gap-2 sm:grid-cols-2">
           <label className="field">Applies to<select name="scope" className="input"><option value="company">A company</option><option value="bucket">A bucket</option></select></label>
           <label className="field">Ticker or bucket name<input name="subject" required className="input" /></label>
           <label className="field">Normal low %<input name="normal_low" inputMode="decimal" className="input font-mono" /></label>
@@ -216,8 +217,8 @@ export default async function PolicyPage({ searchParams }: { searchParams: Promi
           <label className="field">High conviction high %<input name="hc_high" inputMode="decimal" className="input font-mono" /></label>
           <label className="field">Maximum %<input name="hard_max" inputMode="decimal" className="input font-mono" /></label>
           <label className="field">Reason (required)<input name="reason" required className="input" /></label>
-          <button className="sm:col-span-2 btn btn-primary">Save and approve</button>
-        </form>
+          <SubmitButton className="sm:col-span-2 btn btn-primary">Save and approve</SubmitButton>
+        </ActionForm>
       </Disclose>
 
       <Disclose summary={`History and sources (${history.length} earlier versions)`} className="card">
@@ -237,10 +238,10 @@ export default async function PolicyPage({ searchParams }: { searchParams: Promi
       <Disclose summary="About you and your goals" className="card">
         <div id="profile" className="flex flex-col gap-2">
           <p className="text-sm text-muted">In your own words. The assistant, research and plan read this every time.{profile.updatedAt ? ` Last changed ${profile.updatedAt.slice(0, 10)}.` : ""}</p>
-          <form action={saveProfile} className="flex flex-col gap-2">
+          <ActionForm action={saveProfile} success="Profile saved" className="flex flex-col gap-2">
             <textarea name="text" defaultValue={profile.text} rows={8} maxLength={3000} className="input py-2 leading-relaxed" />
-            <div><button className="btn btn-sm btn-primary">Save</button></div>
-          </form>
+            <div><SubmitButton className="btn btn-sm btn-primary">Save</SubmitButton></div>
+          </ActionForm>
         </div>
       </Disclose>
     </div>

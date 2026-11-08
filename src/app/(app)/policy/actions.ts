@@ -7,6 +7,7 @@ import { createClient } from "@/lib/supabase/server";
 import { save } from "@/lib/intel/jobs";
 import { auditRules, type PolicyRuleRow } from "@/lib/policy/rules";
 import { reviewImported } from "@/lib/policy/importReview";
+import { fail, type ActionResult } from "@/lib/action-result";
 
 /**
  * Policy changes. Nothing is ever deleted and no earlier note is overwritten: each change APPENDS to the
@@ -28,12 +29,12 @@ async function log(db: SupabaseClient, inputs: Record<string, unknown>, before: 
 }
 
 /** Makes one rule the controlling rule for its subject. Other live rules for that subject become superseded (kept). */
-export async function approveRule(formData: FormData) {
+export async function approveRule(formData: FormData): Promise<ActionResult> {
   const id = String(formData.get("rule_id") ?? "");
   const note = String(formData.get("note") ?? "").trim().slice(0, 500);
   const db = await createClient();
   const { data: rule, error } = await db.from("policy_rules").select("id, scope, subject, source_label, approval, approval_note, approved_at").eq("id", id).single();
-  if (error || !rule) throw new Error("Rule not found");
+  if (error || !rule) return fail("That rule is no longer there. Reload the page.");
   const { data: others } = await db.from("policy_rules").select("id, scope, subject, source_label, approval, approval_note, approved_at")
     .eq("scope", rule.scope).eq("subject", rule.subject).neq("id", id).in("approval", ["approved", "unresolved", "proposed"]);
   const when = new Date().toISOString();
@@ -45,13 +46,13 @@ export async function approveRule(formData: FormData) {
 }
 
 /** Rejects an open proposal. The row is kept (superseded, marked rejected); whatever controlled before still controls. */
-export async function rejectRule(formData: FormData) {
+export async function rejectRule(formData: FormData): Promise<ActionResult> {
   const id = String(formData.get("rule_id") ?? "");
   const note = String(formData.get("note") ?? "").trim().slice(0, 500);
   const db = await createClient();
   const { data: rule, error } = await db.from("policy_rules").select("id, scope, subject, source_label, approval, approval_note, approved_at").eq("id", id).single();
-  if (error || !rule) throw new Error("Rule not found");
-  if (rule.approval !== "unresolved" && rule.approval !== "proposed") throw new Error("Only an open proposal can be rejected");
+  if (error || !rule) return fail("That rule is no longer there. Reload the page.");
+  if (rule.approval !== "unresolved" && rule.approval !== "proposed") return fail("Only an open proposal can be rejected. Reload the page to see its current state.");
   await setRow(db, rule as Row, { approval: "superseded" }, `Rejected by you on ${today()}.${note ? ` ${note}` : ""}`);
   await log(db, { action: "reject", rule_id: id, scope: rule.scope, subject: rule.subject, note }, [rule as Row], []);
   revalidatePath("/", "layout");
@@ -59,9 +60,9 @@ export async function rejectRule(formData: FormData) {
 }
 
 /** Confirms the listed imported rules as your own (they were marked "approved" in the old archive, never by you). */
-export async function confirmImported(formData: FormData) {
+export async function confirmImported(formData: FormData): Promise<ActionResult> {
   const ids = formData.getAll("rule_id").map(String).filter(Boolean);
-  if (!ids.length) throw new Error("Nothing to confirm");
+  if (!ids.length) return fail("Nothing to confirm.");
   const db = await createClient();
   const { data: rows } = await db.from("policy_rules").select("id, scope, subject, source_label, approval, approval_note, approved_at").in("id", ids).eq("approval", "approved").is("approved_at", null);
   const when = new Date().toISOString();
@@ -75,13 +76,13 @@ export async function confirmImported(formData: FormData) {
  * Applies Claude's proposed revision of one imported rule, after you approve it. The revision is computed
  * here from the review (never from form input); the imported rule is kept as superseded.
  */
-export async function reviseImported(formData: FormData) {
+export async function reviseImported(formData: FormData): Promise<ActionResult> {
   const id = String(formData.get("rule_id") ?? "");
   const db = await createClient();
   const { data: all, error } = await db.from("policy_rules").select("*");
   if (error) throw error;
   const item = reviewImported(auditRules((all ?? []) as PolicyRuleRow[])).exceptions.find((x) => x.row.id === id && x.revised);
-  if (!item) throw new Error("No proposed revision for this rule");
+  if (!item) return fail("There is no longer a proposed revision for this rule. Reload the page.");
   // One approved row per subject (database index): supersede the imported rule first, restore it if the insert fails.
   const old = item.row as unknown as Row;
   const { error: supErr } = await db.from("policy_rules").update({ approval: "superseded" }).eq("id", old.id);
@@ -104,17 +105,17 @@ const pct = (v: FormDataEntryValue | null) => {
   const s = String(v ?? "").replace(/[%\s]/g, "");
   if (!s) return null;
   const n = Number(s);
-  if (!Number.isFinite(n) || n < 0 || n > 100) throw new Error("Percentages must be between 0 and 100");
+  if (!Number.isFinite(n) || n < 0 || n > 100) return NaN;
   return Math.round(n * 100) / 10000;
 };
 
 /** A controlled change: a new rule you write, approved now, with the old one kept as superseded. */
-export async function addRule(formData: FormData) {
+export async function addRule(formData: FormData): Promise<ActionResult> {
   const scope = String(formData.get("scope") ?? "");
   const subject = String(formData.get("subject") ?? "").trim();
   const reason = String(formData.get("reason") ?? "").trim().slice(0, 500);
-  if (!["company", "bucket"].includes(scope) || !subject) throw new Error("Choose what the rule applies to");
-  if (!reason) throw new Error("Say why the rule is changing");
+  if (!["company", "bucket"].includes(scope) || !subject) return fail("Choose what the rule applies to and enter a ticker or bucket name.");
+  if (!reason) return fail("Say why the rule is changing.");
   const db = await createClient();
   const row: Record<string, unknown> = { scope, subject: scope === "company" ? subject.toUpperCase() : subject, source_label: "Your change in the app", source_date: today(), source_status: "user_entry", conditions: reason, approval: "proposed" };
   row.normal_low = pct(formData.get("normal_low"));
@@ -122,7 +123,8 @@ export async function addRule(formData: FormData) {
   row.high_conviction_low = pct(formData.get("hc_low"));
   row.high_conviction_high = pct(formData.get("hc_high"));
   row.hard_max = pct(formData.get("hard_max"));
-  if (row.hard_max === null && row.normal_high === null) throw new Error("Enter at least a maximum or a normal range");
+  if ([row.normal_low, row.normal_high, row.high_conviction_low, row.high_conviction_high, row.hard_max].some((v) => typeof v === "number" && Number.isNaN(v))) return fail("Percentages must be numbers between 0 and 100.");
+  if (row.hard_max === null && row.normal_high === null) return fail("Enter at least a maximum or a normal range.");
   const { data, error } = await db.from("policy_rules").insert(row).select("id").single();
   if (error) throw error;
   const fd = new FormData();
@@ -132,7 +134,7 @@ export async function addRule(formData: FormData) {
 }
 
 /** Saves the investor's profile as a new version (earlier versions are kept). */
-export async function saveProfile(formData: FormData) {
+export async function saveProfile(formData: FormData): Promise<ActionResult> {
   const text = String(formData.get("text") ?? "").trim().slice(0, 3000);
   const db = await createClient();
   await save(db, "investor_profile", "profile@1", {}, { text });

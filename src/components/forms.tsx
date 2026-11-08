@@ -79,8 +79,13 @@ function failureMessage(): string {
  * "Saved" note) and a toast confirms it; on failure the message appears under the form and every field
  * keeps its value.
  */
-export function ActionForm({ action, children, className, success = "Saved", resetOnSuccess = false, id, "aria-label": ariaLabel }: {
-  action: Action; children: ReactNode; className?: string;
+export function ActionForm({ action, actions, successFor, children, className, success = "Saved", resetOnSuccess = false, id, "aria-label": ariaLabel }: {
+  action?: Action;
+  /** One action per submit button, keyed by that button's `pendingKey` (for example Approve / Reject). */
+  actions?: Record<string, Action>;
+  /** Confirmation text per submit button key, when the buttons do different things. */
+  successFor?: Record<string, string>;
+  children: ReactNode; className?: string;
   /** The confirmation once the server has finished. null when the page itself reports the outcome (it may be a failure). */
   success?: string | null;
   resetOnSuccess?: boolean; id?: string; "aria-label"?: string;
@@ -97,18 +102,22 @@ export function ActionForm({ action, children, className, success = "Saved", res
     const by = (e.nativeEvent as SubmitEvent).submitter as HTMLButtonElement | null;
     let fd: FormData;
     try { fd = new FormData(form, by ?? undefined); } catch { fd = new FormData(form); }
+    const key = by?.dataset.key ?? null;
+    const run = (key && actions?.[key]) || action;
+    if (!run) return;
+    const done = (key && successFor?.[key]) || success;
     lock.current = true;
-    setSubmitter(by?.dataset.key ?? null);
+    setSubmitter(key);
     setResult(null);
     start(async () => {
       try {
-        const r = await action(fd);
+        const r = await run(fd);
         if (r && typeof r === "object" && "error" in r) { setResult({ kind: "error", text: r.error }); return; }
-        if (success) { setResult({ kind: "ok", text: success }); toast(success); }
+        if (done) { setResult({ kind: "ok", text: done }); toast(done); }
         if (resetOnSuccess) form.reset();
       } catch (err) {
         // A redirect means the server finished and is sending the updated page: let Next.js handle it.
-        try { unstable_rethrow(err); } catch (nav) { if (success) toast(success); throw nav; }
+        try { unstable_rethrow(err); } catch (nav) { if (done) toast(done); throw nav; }
         setResult({ kind: "error", text: failureMessage() });
       } finally {
         lock.current = false;

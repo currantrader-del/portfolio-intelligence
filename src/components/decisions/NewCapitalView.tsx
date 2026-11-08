@@ -1,3 +1,5 @@
+import Form from "next/form";
+import { ActionForm, SubmitButton } from "@/components/forms";
 import Link from "next/link";
 import type { Workspace } from "@/lib/workspace";
 import { newCapital, type OptionLabel } from "@/lib/decision/newCapital";
@@ -34,9 +36,9 @@ export async function NewCapitalView({ ws, amount, source, action }: { ws: Works
   return (
     <div className="grid grid-cols-1 gap-3 lg:gap-4 lg:grid-cols-12 items-start">
       <div className="lg:col-span-6 flex flex-col gap-3 lg:gap-4 min-w-0">
-        <form action={action} className="card card-tight !flex-row items-end gap-2">
+        <Form action={action} className="card card-tight !flex-row items-end gap-2">
           <label className="field flex-1">Amount
-            <span className="flex items-center rounded-[12px] border border-line-strong bg-ground px-3 min-h-11"><span className="text-muted">$</span><input name="amount" defaultValue={amount} inputMode="decimal" aria-label="Amount in dollars" className="w-full bg-transparent px-1 num outline-none text-ink" /></span>
+            <span className="flex items-center rounded-[12px] border border-line-strong bg-ground px-3 min-h-11"><span className="text-muted">$</span><input name="amount" defaultValue={amount} inputMode="decimal" aria-label="Amount in dollars" className="w-full min-h-11 bg-transparent px-1 num outline-none text-ink" /></span>
           </label>
           <label className="field flex-1">From
             <select name="source" defaultValue={source} className="input">
@@ -45,7 +47,7 @@ export async function NewCapitalView({ ws, amount, source, action }: { ws: Works
             </select>
           </label>
           <button className="btn shrink-0">Update</button>
-        </form>
+        </Form>
 
         <Card labelledBy="res-h">
           <CardHead id="res-h" cap="Result" right={wait ? <Pill>Wait</Pill> : checks ? <Pill tone="warn">Check {open.length} first</Pill> : <DataLabel kind="recommendation">Recommended</DataLabel>} />
@@ -140,7 +142,7 @@ export async function NewCapitalView({ ws, amount, source, action }: { ws: Works
             <Link href="/policy" className="t-sm">Sources and your limits on the Policy page</Link>
           </Disclose>
           <Disclose summary="Record what you decide">
-            <form action={recordNewCapital} className="flex flex-col gap-2.5">
+            <ActionForm action={recordNewCapital} success="Decision saved" className="flex flex-col gap-2.5">
               <input type="hidden" name="amount" value={amount} />
               <input type="hidden" name="source" value={source} />
               <fieldset className="flex flex-col gap-1">
@@ -149,14 +151,14 @@ export async function NewCapitalView({ ws, amount, source, action }: { ws: Works
                   ? [["deferred", "Wait and confirm cash first"], ["declined", "Act anyway, differently (describe below)"], ["partially_followed", "Act on part of the illustrative split"]]
                   : [["followed", "Follow the recommendation"], ["partially_followed", "Follow part of it"], ["declined", "Do something else"], ["deferred", "Decide later / keep cash"]]
                 ).map(([v, l]) => (
-                  <label key={v} className="inline-flex items-center gap-2.5 min-h-10 t-sm text-ink"><input type="radio" name="user_action" value={v} required className="w-[18px] h-[18px] accent-[var(--accent)]" /> {l}</label>
+                  <label key={v} className="inline-flex items-center gap-2.5 min-h-11 t-sm text-ink"><input type="radio" name="user_action" value={v} required className="w-[18px] h-[18px] accent-[var(--accent)]" /> {l}</label>
                 ))}
               </fieldset>
               <label className="field">What you actually traded, if anything (optional)<input name="execution" placeholder="e.g. bought 3 VOO at $612 in your brokerage" className="input" /></label>
               <label className="field">Why (optional)<textarea name="note" rows={2} className="input" /></label>
-              <button className="btn btn-primary">Save this decision</button>
+              <SubmitButton className="btn btn-primary">Save this decision</SubmitButton>
               <p className="t-xs">Saving records the inputs, timestamps, alternatives, assumptions and your choice. The app never places trades.</p>
-            </form>
+            </ActionForm>
           </Disclose>
         </Card>
         <AskButton question={`Explain the ${usd(amount)} new capital recommendation, what to check before acting, and the strongest case against each alternative.`} className="btn w-full">Ask why</AskButton>
