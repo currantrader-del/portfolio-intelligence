@@ -16,8 +16,34 @@ import { newCapital } from "@/lib/decision/newCapital";
 import { expectedReturnAt, repriceCheck, scenarioReturnsAt, zoneFor } from "@/lib/research/valuation";
 import { researchAgeDays } from "@/lib/research/records";
 import { LOOKTHROUGH_AS_OF } from "@/lib/portfolio/classify";
+import { getSecProfile } from "@/lib/market/sec";
+import { computeExposure, describeSecurity, queryExposure, type DimensionKey } from "@/lib/exposure/engine";
+import { checkLimits, NOT_PROPOSED, PROPOSALS } from "@/lib/exposure/limits";
+import { BENCHMARK, THEMES } from "@/lib/exposure/reference";
 
 export const TOOLS: Anthropic.Beta.BetaTool[] = [
+  {
+    name: "get_exposure",
+    description: "The portfolio's TRUE exposure with ETF look-through, split into direct (shares owned) and indirect (through funds), with each fund's dated source. Dimensions: asset (stocks/bonds/cash), sector (11 GICS sectors vs MSCI ACWI), industry (e.g. Semiconductors & Semiconductor Equipment, Software), theme (AI infrastructure, AI platforms and hyperscalers, Software and cloud, Digital advertising, Speculative / early-stage tech, Bitcoin mining; themes overlap and must not be added), country, market (US / Developed ex-US / Emerging), region (North America, Europe, Asia-Pacific...), size, style (growth/value), cycle (cyclical/sensitive/defensive), company. Industry and theme figures are lower bounds with an 'up to' upper bound. Optional filters combine dimensions (e.g. country 'United States' + sector 'Information Technology' = US technology; country 'Taiwan' + industry semis). Optional what_if adds a hypothetical purchase (any ticker the app has classified) and returns before/after against the exposure limits. Also returns fund overlaps, top-10 company concentration, interest-rate sensitivity, the exposure limits (approved or proposed) and data gaps. Use for any question about how much of the portfolio is in a sector, industry, theme, country or company.",
+    input_schema: { type: "object", properties: {
+      dimension: { type: "string", enum: ["all", "asset", "sector", "industry", "theme", "country", "market", "region", "size", "style", "cycle", "company"], description: "Which split to return in full; 'all' returns the top lines of every split." },
+      country: { type: "string", description: "Filter, e.g. 'United States', 'Taiwan', 'China', 'Japan'; empty for none" },
+      market: { type: "string", description: "Filter: 'US', 'Developed ex-US' or 'Emerging'; empty for none" },
+      sector: { type: "string", description: "Filter: a GICS sector name; empty for none" },
+      industry: { type: "string", description: "Filter: a GICS industry name; empty for none" },
+      theme: { type: "string", description: "Filter: a theme label; empty for none" },
+      company: { type: "string", description: "Filter: a ticker; empty for none" },
+      what_if_symbol: { type: "string", description: "Ticker of a hypothetical purchase; empty for none" },
+      what_if_dollars: { type: "number", description: "Dollars of the hypothetical purchase, paid from cash; 0 for none" },
+    }, required: ["dimension", "country", "market", "sector", "industry", "theme", "company", "what_if_symbol", "what_if_dollars"], additionalProperties: false },
+    strict: true,
+  },
+  {
+    name: "classify_security",
+    description: "How the app classifies any ticker for exposure: for a fund, its published sector, country and largest-holding weights with source dates; for a company, its GICS-style sector, industry, home market, size, style and themes. For a ticker the app has not classified, returns SEC EDGAR's SIC industry code and location; then use web_search for the fund's holdings or the company's business before drawing conclusions.",
+    input_schema: { type: "object", properties: { symbol: { type: "string" } }, required: ["symbol"], additionalProperties: false },
+    strict: true,
+  },
   {
     name: "get_portfolio",
     description: "Current holdings across all accounts with weights, today's move, contribution to the portfolio's move, cost basis, policy buckets and single-company exposure including ETF look-through. Use for any question about what is owned or how the portfolio is doing.",
@@ -132,6 +158,53 @@ export async function runTool(name: string, input: Record<string, unknown>, ws: 
         company_exposure: p.exposures.map((e) => ({ symbol: e.symbol, direct: r4(e.direct), via_etfs: r4(e.viaEtfs), total: r4(e.total), max: e.max, limit_status: ws.policy?.companies[e.symbol]?.status ?? "none", limit_source: ws.policy?.companies[e.symbol]?.source ?? null, headroom_dollars: e.headroomDollars })),
         lookthrough_weights_as_of: LOOKTHROUGH_AS_OF,
       };
+    case "get_exposure": {
+      const str = (k: string) => String(input[k] ?? "").trim();
+      const dimension = str("dimension") || "all";
+      const filters = Object.fromEntries(["country", "market", "sector", "industry", "theme", "company"].map((k) => [k, str(k)]).filter(([, v]) => v));
+      const holdings = p.holdings.map((h) => ({ symbol: h.symbol, value: h.value }));
+      const onFile = ws.policy?.audit?.subjects.flatMap((s) => [...(s.approvedRow ? [s.approvedRow] : []), ...s.candidates]) ?? [];
+      // Until the drafted limits are sent to Policy, test what-ifs against the drafts (reported as "proposed").
+      const rules = onFile.some((r) => r.subject.startsWith("exposure:")) ? onFile : PROPOSALS.map((x) => ({ scope: "portfolio" as const, subject: x.subject, approval: "proposed" as const, normal_low: x.normal?.low ?? null, normal_high: x.normal?.high ?? null, value: x.review, hard_max: x.ceiling }));
+      const rep = ws.exposure;
+      const pick = (k: DimensionKey, n: number) => { const d = rep.dims[k]; return { label: d.label, base: d.base, base_value: d.baseValue, additive: d.additive, not_itemized_pct: r4(d.notItemizedPct), notes: d.notes, lines: d.lines.slice(0, n).map((l) => ({ key: l.key, pct: r4(l.pct), up_to_pct: l.upperPct !== undefined ? r4(l.upperPct) : undefined, direct: l.direct, through_funds: l.indirect, benchmark_pct: l.benchmarkPct ?? undefined, from: l.contributors.slice(0, 6) })) }; };
+      const dims = dimension === "all" ? Object.fromEntries((Object.keys(rep.dims) as DimensionKey[]).map((k) => [k, pick(k, k === "company" ? 12 : 8)])) : { [dimension]: pick(dimension as DimensionKey, 40) };
+      const wSym = str("what_if_symbol").toUpperCase(), wAmt = Number(input.what_if_dollars ?? 0);
+      let whatIf: unknown = null;
+      if (wSym && wAmt > 0) {
+        const after = computeExposure([...holdings, { symbol: wSym, value: wAmt }], Math.max(0, p.cash - wAmt), ws.now);
+        const known = describeSecurity(wSym);
+        whatIf = {
+          purchase: { symbol: wSym, dollars: wAmt, classified: !!known, note: known ? null : `${wSym} is not classified by the app, so it only shows up as 'not itemized'; use classify_security and web_search to judge its exposure.` },
+          limits_after: checkLimits(after, rules).map((c) => ({ subject: c.subject, status: c.status, value: r4(c.value), up_to: c.upper !== null ? r4(c.upper) : null, state: c.state, message: c.message })),
+          filter_after: Object.keys(filters).length ? queryExposure([...holdings, { symbol: wSym, value: wAmt }], Math.max(0, p.cash - wAmt), filters) : null,
+        };
+      }
+      return {
+        layer: "model_output", computed_at: rep.computedAt, holdings_quality: p.quality.status,
+        method: "Direct holdings at their value; each fund split by its published sector, country and largest-holding weights. Each dimension adds to 100% of stocks with a 'not itemized' remainder, except themes, which overlap.",
+        investable_capital: rep.investable, stocks: rep.equity, bonds: rep.bonds, cash: rep.cash,
+        filter_result: Object.keys(filters).length ? { filters, ...queryExposure(holdings, p.cash, filters) } : null,
+        what_if: whatIf,
+        dimensions: dims,
+        themes_defined: Object.values(THEMES),
+        fund_overlaps: rep.overlaps,
+        top10_companies: { pct_of_stocks: r4(rep.concentration.top10Pct), list: rep.concentration.top10.map((x) => ({ ...x, pct: r4(x.pct) })), msci_acwi_top10: BENCHMARK.top10 },
+        interest_rates: rep.rates,
+        limits: ws.exposureLimits.map((c) => ({ subject: c.subject, status: c.status, value_pct_of_investable: r4(c.value), up_to: c.upper !== null ? r4(c.upper) : null, normal: c.normal, review_above: c.review, ceiling: c.ceiling, state: c.state, message: c.message })),
+        limits_proposed_in_app: ws.exposureLimits.length ? undefined : PROPOSALS.map((x) => ({ subject: x.subject, review: x.review, ceiling: x.ceiling, normal: x.normal, evidence: x.evidence, why: x.why, status: "drafted, not yet sent for approval" })),
+        not_limited_and_why: NOT_PROPOSED,
+        sources: rep.sources.map((s) => ({ fund: s.fund, what: s.what, source: s.source.label, url: s.source.url, as_of: s.source.asOf, age_days: s.ageDays, stale: s.stale })),
+        gaps: rep.gaps,
+      };
+    }
+    case "classify_security": {
+      const sym = String(input.symbol ?? "").toUpperCase();
+      const known = describeSecurity(sym);
+      if (known) return { layer: "reference_data", ...known, note: known.kind === "fund" ? "Fund weights are as of the source dates shown; check them before relying on small differences." : "Classification is the app's GICS-style label." };
+      const sec = await getSecProfile(sym);
+      return { layer: "sec_edgar", symbol: sym, classified_by_app: false, sec, next_step: "Not in the app's reference data. For a fund, search the issuer's holdings page for sector and country weights and the largest holdings (with their date). For a company, confirm its business from its 10-K before assigning a sector or theme." };
+    }
     case "get_research": {
       const sym = String(input.symbol ?? "").toUpperCase();
       const r = ws.research.find((x) => x.symbol === sym);

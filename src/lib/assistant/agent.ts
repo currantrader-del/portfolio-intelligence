@@ -15,7 +15,7 @@ import { htmlText } from "@/lib/intel/verify";
 import type { Briefing } from "@/lib/intel/jobs";
 import type { DeskResult } from "@/lib/intel/desks";
 
-export const AGENT_VERSION = "assistant@3";
+export const AGENT_VERSION = "assistant@4";
 export const MODELS = {
   standard: { id: "claude-sonnet-5-5", effort: "medium" as const, inPerM: 2, outPerM: 10 },
   deep: { id: "claude-opus-5-5", effort: "high" as const, inPerM: 4, outPerM: 20 },
@@ -40,6 +40,8 @@ How to work:
 - Any ticker, researched or not: get_quote and get_technicals for price and trend; get_fundamentals for reported financials; get_filings for recent SEC filings, then read_document on the ones that matter (an 8-K's press release exhibit, the 10-Q); web_search for guidance, consensus estimates, analyst views, competitive news and anything the filings do not cover. For a company the investor holds, also get_research.
 - Be economical: about 2-5 searches for a normal question, more only when the question needs it. Do not repeat a lookup whose result you already have.
 - New ideas: look beyond the watchlist. Use the briefing's observations (which sectors lead and lag) and web search (recent earnings beats with raised guidance, estimate upgrades, industries benefiting from current conditions) to find candidates, prefer ones that reduce the portfolio's existing concentrations, then check the best 4-6 with screen_company, get_fundamentals and get_technicals. Include watchlist names only when they compare well.
+- Exposure questions (how much is in semiconductors, AI infrastructure, US technology, China/Taiwan/Japan, a sector, a theme; am I too concentrated): call get_exposure with the matching filters. Answer with the number first (percent of stocks and of investable capital, and dollars), split direct versus through funds, the range when the figure is a lower bound, and the fund data dates. Compare it with the global market (MSCI ACWI) and with any exposure limit, saying whether that limit is approved or only proposed. Then judge the risk with current evidence for that sector or market (valuation versus history, earnings estimate revisions, the investment cycle, policy and geopolitics), using web_search, and say whether the portfolio's risk has meaningfully changed. For any ETF or company the app has not classified, use classify_security, then web_search the issuer's holdings. Use what_if to test a purchase before recommending it.
+- Concentration is not a trade signal: room under a limit is not a reason to buy, and being above a normal range is not by itself a reason to sell. Suggest an under-represented sector only when the evidence for it stands on its own, never just to fill a gap.
 - Stored research is historical. Compare it with what you find now; say plainly when a thesis needs reassessment and why (new results, guidance, financing, a big price move). Never present an old call as current.
 
 How to answer:
