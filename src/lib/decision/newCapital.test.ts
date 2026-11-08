@@ -28,7 +28,7 @@ const research = (refPrice: string, completeness = "complete", asOf = "2026-10-2
   id: "v1", research_as_of: asOf, completeness, origin: "chatgpt_original", is_current: true,
   conclusion: { action: "HOLD / NO ADD", classification: "Growth", reference_price: refPrice, reference_date: asOf,
     valuation: { approx_holding_period_years: 4, bear_value: 20, base_value: 90, bull_value: 200, bear_probability: 0.3, base_probability: 0.5, bull_probability: 0.2 },
-    price_framework: [{ price_zone: "< $35", action: "Strong Add research trigger" }] },
+    price_framework: [{ price_zone: "< $35", action: "Add" }] },
 }]);
 
 const row = (over: Partial<PolicyRuleRow>): PolicyRuleRow => ({
@@ -48,11 +48,11 @@ const approvedRules = [
 const quiet = new Map([["AAA", { cik: "1", company: "AAA", filings: [{ form: "10-Q", filed: "2026-08-01", reportDate: null, description: "Quarterly report", items: [], isEarnings: true, url: "u", category: "periodic" as const, note: "" }], lastEarnings: null, nextEarningsEstimate: null, source: "s", fetchedAt: "t" }]]);
 
 describe("new capital: evidence gates", () => {
-  it("waits only when the cash itself is not known, and still lists every open check", () => {
+  it("gives analysis only when the cash is not known, and still lists every open check", () => {
     const p = buildPortfolio([snap], new Map(), legacy, {}, [], now);
     const r = newCapital({ amount: 1250, portfolio: p, research: [research("$26")], policy: legacy, now });
-    expect(r.status).toBe("wait");
-    expect(r.recommendation.headline).toBe("Wait: confirm your cash first");
+    expect(r.status).toBe("analysis_only");
+    expect(r.lean).toMatch(/^Lean: /);
     expect(r.recommendation.illustrative).toBe(true);
     const open = r.gates.filter((g) => !g.ok).map((g) => g.key);
     expect(open).toEqual(expect.arrayContaining(["cash", "research"]));
@@ -61,19 +61,24 @@ describe("new capital: evidence gates", () => {
     expect(r.options.find((o) => o.kind === "cash")!.label).toBe("Valid option");
   });
 
-  it("still recommends, with checks, while the portfolio is not reconciled", () => {
+  it("keeps dollar amounts illustrative while holdings are stale, but not for bookkeeping gaps", () => {
     const policy = policyFromRules(approvedRules);
-    const p = buildPortfolio([{ ...snap, positions: snap.positions.filter((x) => x.symbol !== "BBB") }, savings], new Map(), policy, {}, [], now);
-    expect(p.quality.reconciliation.complete).toBe(false);
-    expect(p.quality.reconciliation.gaps.join(" ")).toMatch(/No transactions recorded/);
-    expect(p.quality.reconciliation.gaps.join(" ")).toMatch(/Cost basis missing for 3 positions/);
-    const r = newCapital({ amount: 400, portfolio: p, research: [research("$26")], policy, now });
-    expect(r.gates.find((g) => g.key === "holdings")).toMatchObject({ ok: false });
-    expect(r.status).toBe("recommend_with_checks");
-    expect(r.recommendation.illustrative).toBe(false);
+    const stale = { ...snap, asOf: "2026-10-15T21:00:00Z", positions: snap.positions.filter((x) => x.symbol !== "BBB") };
+    const p = buildPortfolio([stale, savings], new Map(), policy, {}, [], now);
+    const r = newCapital({ amount: 400, portfolio: p, research: [research("$26")], policy, now, filings: quiet });
+    expect(r.gates.find((g) => g.key === "holdings")).toMatchObject({ ok: false, detail: expect.stringMatching(/Broker is only known through 2026-10-15 \(20 days\)/) });
+    expect(r.status).toBe("analysis_only");
+    expect(r.recommendation.illustrative).toBe(true);
+    expect(r.lean).toMatch(/^Lean: add to AAA/);
+    // Trades recorded since the statement (confirmations) make the holdings known through the latest trade.
+    const ledger = [{ accountId: "a", tradeDate: "2026-11-03", kind: "deposit" as const, symbol: null, quantity: null, price: null, amount: 100 }];
+    const p2 = buildPortfolio([stale, savings], new Map(), policy, {}, ledger, now);
+    expect(p2.quality.reconciliation.complete).toBe(false); // cost basis missing: noted, not blocking
+    const r2 = newCapital({ amount: 400, portfolio: p2, research: [research("$26")], policy, now, filings: quiet });
+    expect(r2.gates.find((g) => g.key === "holdings")).toMatchObject({ ok: true, detail: expect.stringMatching(/not blocking: .*Cost basis missing/) });
   });
 
-  it("recommends without checks only when every check passes", () => {
+  it("gives actionable dollar amounts only when every readiness check passes", () => {
     const policy = policyFromRules(approvedRules);
     const withBasis = { ...snap, positions: snap.positions.filter((x) => x.symbol !== "BBB").map((x) => ({ ...x, costBasis: x.marketValue })) };
     const ledger = [{ accountId: "a", tradeDate: "2026-10-01", kind: "deposit" as const, symbol: null, quantity: null, price: null, amount: 500 }];
@@ -81,7 +86,8 @@ describe("new capital: evidence gates", () => {
     expect(p.quality.reconciliation).toMatchObject({ complete: true, label: "Reconciled" });
     const r = newCapital({ amount: 400, portfolio: p, research: [research("$26")], policy, now, filings: quiet });
     expect(r.gates.every((g) => g.ok)).toBe(true);
-    expect(r.status).toBe("recommend");
+    expect(r.status).toBe("actionable");
+    expect(r.recommendation.illustrative).toBe(false);
     expect(r.recommendation.allocations[0]).toEqual({ symbol: "AAA", amount: 400 });
     expect(r.options.find((o) => o.symbol === "AAA")!.assessment!.judgment).toBe("favourable");
   });
@@ -97,7 +103,7 @@ describe("new capital: a drop is not a buy signal", () => {
     expect(aaa.expectedReturn).toBeNull();
     expect(aaa.verdicts!.research.detail).toMatch(/38% below the \$40 research reference/);
     expect(r.recommendation.allocations.find((x) => x.symbol === "AAA")).toBeUndefined();
-    expect(r.status).toBe("recommend_with_checks");
+    expect(r.status).toBe("analysis_only");
   });
 
   it("treats partial research as needing completion, not as a smaller buy", () => {
@@ -131,7 +137,7 @@ describe("new capital: ceilings and money source", () => {
 });
 
 describe("new capital: policy conflicts", () => {
-  it("uses the stricter limit as a temporary safety limit and lists the open decision as a check", () => {
+  it("uses the stricter limit as a temporary safety limit and gives no new money until you decide", () => {
     const rules = [...approvedRules.filter((x) => x.subject !== "AAA"),
       row({ subject: "AAA", normal_low: 0.03, normal_high: 0.05, hard_max: 0.10, approval: "unresolved", source_label: "Baseline" }),
       row({ subject: "AAA", normal_low: 0.03, normal_high: 0.05, hard_max: 0.07, approval: "unresolved", source_label: "Company research", source_date: "2026-09-10" })];
@@ -142,8 +148,9 @@ describe("new capital: policy conflicts", () => {
     const p = buildPortfolio([snap, savings], new Map(), policy, {}, [], now);
     const r = newCapital({ amount: 400, portfolio: p, research: [research("$26")], policy, now, filings: quiet });
     expect(policy.companies.AAA.authority).toBe("safety");
-    expect(r.gates.find((g) => g.key === "limits")!.ok).toBe(false);
-    expect(r.status).toBe("recommend_with_checks");
+    const aaa = r.options.find((o) => o.symbol === "AAA")!;
+    expect(aaa.label).toBe("Limit not approved");
+    expect(r.toVerify.join(" ")).toMatch(/AAA: decide which allocation limit controls/);
   });
 });
 
@@ -159,7 +166,7 @@ describe("new capital: event-driven refresh and independent verdicts", () => {
     const aaa = r.options.find((o) => o.symbol === "AAA")!;
     expect(aaa.label).toBe("Refresh required");
     expect(aaa.verdicts!.research.detail).toMatch(/New results since the research: 10-Q filed 2026-11-03/);
-    expect(r.status).toBe("recommend_with_checks");
+    expect(r.status).toBe("analysis_only");
     expect(r.recommendation.allocations.find((x) => x.symbol === "AAA")).toBeUndefined();
   });
   it("does not call research current when filings could not be checked", () => {
@@ -178,7 +185,10 @@ describe("new capital: event-driven refresh and independent verdicts", () => {
         valuation: { approx_holding_period_years: 4, bear_value: 20, base_value: 90, bull_value: 200, bear_probability: 0.3, base_probability: 0.5, bull_probability: 0.2 },
         price_framework: [{ price_zone: "< $20", action: "Add" }, { price_zone: "$20–$40", action: "Hold / no add" }] } }]);
     const aaa = newCapital({ amount: 400, portfolio: p, research: [holdZone], policy, now, filings: quiet }).options.find((o) => o.symbol === "AAA")!;
-    expect(aaa.label).toBe("Research says wait");
+    expect(aaa.label).toBe("Research says hold");
+    expect(aaa.assessment!.judgment).toBe("favourable");
+    expect(aaa.agreement).toBe("model_more_positive");
+    expect(aaa.verdicts!.valuation.detail).toMatch(/HOLD conclusion stands/);
     expect(aaa.verdicts!.limit.ok).toBe(true);
     expect(aaa.verdicts!.valuation.ok).toBe(false);
     expect(aaa.eligible).toBe(false);
@@ -191,26 +201,45 @@ describe("new capital: event-driven refresh and independent verdicts", () => {
     expect(aaa.headroomDollars).toBe(0);
     expect(aaa.verdicts!.limit.detail).toMatch(/does not inherit the generic 18% maximum/);
   });
-  it("recommends with a check, rather than blocking, while limits are only imported", () => {
+  it("gives no new money under a limit you have not approved: a missing approval is not just a warning", () => {
     const importedOnly = policyFromRules(approvedRules.map((x) => (x.scope === "assumption" ? x : { ...x, approved_at: null })));
     const p3 = buildPortfolio([withBasis, savings], new Map(), importedOnly, {}, ledger, now);
     const r = newCapital({ amount: 400, portfolio: p3, research: [research("$26")], policy: importedOnly, now, filings: quiet });
-    expect(r.gates.find((g) => g.key === "limits")).toMatchObject({ ok: false, detail: expect.stringMatching(/Imported, not confirmed by you: AAA/) });
-    expect(r.status).toBe("recommend_with_checks");
+    const aaa = r.options.find((o) => o.symbol === "AAA")!;
+    expect(aaa.label).toBe("Limit not approved");
+    expect(aaa.eligible).toBe(false);
+    expect(r.recommendation.allocations.find((x) => x.symbol === "AAA")).toBeUndefined();
+    expect(r.toVerify.join(" ")).toMatch(/AAA: confirm or revise its imported limit/);
+    // With no stock qualifying, a core ETF below the bottom of its range leads; otherwise VOO is the default.
+    expect(r.recommendation.allocations).toEqual([{ symbol: "VXUS", amount: 400 }]);
+    expect(r.options.find((o) => o.symbol === "VXUS")!.notes[0]).toMatch(/Below the bottom of its normal range/);
   });
-  it("sizes to the high-conviction range only when you approved it and the case is favourable and current", () => {
-    const hc = (approved_at: string | null) => policyFromRules([...approvedRules.filter((x) => x.subject !== "AAA"),
-      row({ subject: "AAA", normal_low: 0.03, normal_high: 0.05, high_conviction_low: 0.05, high_conviction_high: 0.08, hard_max: 0.1, approved_at, conditions: "Only after de-risking." })]);
+  it("treats a conditional add in the research as no add until the condition is confirmed", () => {
+    const cond = toResearchRecord("AAA", "AAA", "held", [{ id: "v3", research_as_of: "2026-10-20", completeness: "complete", origin: "x", is_current: true,
+      conclusion: { action: "Hold / no add", reference_price: "$26", reference_date: "2026-10-20",
+        valuation: { approx_holding_period_years: 4, bear_value: 20, base_value: 90, bull_value: 200, bear_probability: 0.3, base_probability: 0.5, bull_probability: 0.2 },
+        price_framework: [{ price_zone: "< $35", action: "Consider a small add only if Q4 results confirm the turnaround." }] } }]);
+    const r = newCapital({ amount: 400, portfolio: p, research: [cond], policy, now, filings: quiet });
+    const aaa = r.options.find((o) => o.symbol === "AAA")!;
+    expect(aaa.stance).toMatchObject({ kind: "conditional", condition: "only if Q4 results confirm the turnaround" });
+    expect(aaa.label).toBe("Condition not met");
+    expect(aaa.eligible).toBe(false);
+    expect(r.toVerify.join(" ")).toMatch(/condition for adding must be confirmed first: only if Q4 results/);
+  });
+  it("sizes to the high-conviction range only when you approved it, its condition is met, and research and model support adding", () => {
+    const hc = (approved_at: string | null, conditions: string | null) => policyFromRules([...approvedRules.filter((x) => x.subject !== "AAA"),
+      row({ subject: "AAA", normal_low: 0.03, normal_high: 0.05, high_conviction_low: 0.05, high_conviction_high: 0.08, hard_max: 0.1, approved_at, conditions })]);
     const run = (pol: ReturnType<typeof hc>, filings?: typeof quiet) => newCapital({ amount: 400, portfolio: buildPortfolio([withBasis, savings], new Map(), pol, {}, ledger, now), research: [research("$26")], policy: pol, now, filings }).options.find((o) => o.symbol === "AAA")!;
-    const yours = run(hc("2026-11-08T13:00:00Z"), quiet);
+    const yours = run(hc("2026-11-08T13:00:00Z", "A ceiling, not a reason to add."), quiet);
     expect(yours.highConviction).toBe(true);
     expect(yours.maxWeight).toBe(0.08);
-    expect(yours.toVerify.join(" ")).toMatch(/confirm the high-conviction condition in its research: Only after de-risking/);
-    const imported = run(hc(null), quiet);
+    const conditional = run(hc("2026-11-08T13:00:00Z", "High conviction only after meaningful de-risking"), quiet);
+    expect(conditional.highConviction).toBe(false);
+    expect(conditional.maxWeight).toBe(0.05);
+    expect(conditional.notes.join(" ")).toMatch(/not available: its condition is not confirmed \(only after meaningful de-risking\)/);
+    const imported = run(hc(null, null), quiet);
     expect(imported.highConviction).toBe(false);
-    expect(imported.maxWeight).toBe(0.05);
-    expect(imported.notes.join(" ")).toMatch(/not used: you have not approved it/);
-    const unchecked = run(hc("2026-11-08T13:00:00Z"));
-    expect(unchecked.highConviction).toBe(false);
+    expect(imported.notes.join(" ")).toMatch(/not available: you have not approved it/);
+    expect(run(hc("2026-11-08T13:00:00Z", null)).highConviction).toBe(false); // filings unchecked
   });
 });

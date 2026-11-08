@@ -55,7 +55,7 @@ describe("comparison with the alternatives reproduces the stored research", () =
     expect(c.probBeatVooHigh).toBeCloseTo(0.65, 4);
     expect(c.probLoss).toBeCloseTo(0.35, 4);
     expect(c.judgment).toBe("favourable");
-    expect(c.factors.map((f) => f.label)).toEqual(["Expected return vs VOO", "Vs a risk-free Treasury", "Odds of beating VOO", "Downside", "Valuation uncertainty", "Horizon match", "Concentration"]);
+    expect(c.factors.map((f) => f.label)).toEqual(["Expected return vs VOO", "Vs a risk-free Treasury", "Odds of beating VOO", "Downside", "Valuation uncertainty", "Same horizon", "Concentration"]);
     expect(c.factors.find((f) => f.label === "Downside")!.leans).toBe("against");
   });
   it("calls it mixed when the expected return sits inside the VOO forecasts, and unfavourable below all of them", () => {

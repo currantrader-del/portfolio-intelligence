@@ -10,27 +10,25 @@ import { pctStr, usd } from "@/lib/format";
 import { Card, CardHead, DataLabel, Disclose, Dot, Pill } from "@/components/ui";
 
 const LABEL_TONE: Record<OptionLabel, "gain" | "warn" | "neutral" | "solid" | "alert"> = {
-  Candidate: "solid", "Valid option": "neutral", "Refresh required": "warn", "Research needed": "warn", "No limit set": "warn", "At limit": "warn", "Not ahead of VOO": "neutral", "Research says wait": "neutral", "Trim review": "alert",
+  Candidate: "solid", "Valid option": "neutral", "Refresh required": "warn", "Research needed": "warn", "No limit set": "warn", "At limit": "warn", "Not ahead of VOO": "neutral", "Research says hold": "neutral", "Condition not met": "warn", "Limit not approved": "warn", "Trim review": "alert",
 };
 const KIND: Record<string, string> = { stock: "Existing position", new_stock: "New position", etf: "Diversified ETF", cash: "Always available", trim: "Reduce exposure" };
 const GATE_LINK: Record<string, { href: string; label: string }> = {
   holdings: { href: "/portfolio/reconcile", label: "Update holdings" },
   cash: { href: "/portfolio/reconcile", label: "Enter savings" },
-  limits: { href: "/policy", label: "Choose limits" },
   research: { href: "/research", label: "Refresh research" },
 };
 
 /**
  * Investment Decision card set for new cash. The engine decides; this only lays it out.
- * It always shows the best answer on the evidence, with the checks still open beside it. Only when the cash
- * itself is unknown is the split marked as not a recommendation.
+ * The analysis (what the research and the numbers say, and the leaning) always shows. Dollar amounts are
+ * actionable only when holdings, cash and material events are all settled; otherwise they are illustrative.
  */
 export async function NewCapitalView({ ws, amount, source, action }: { ws: Workspace; amount: number; source: "new" | "existing"; action: string }) {
   const filings = await loadDecisionFilings(ws);
   const r = newCapital({ amount, source, portfolio: ws.portfolio, research: ws.research, policy: ws.policy, now: ws.now, quotes: ws.quotes, filings, yields: ws.yields });
   const rec = r.recommendation;
-  const wait = r.status === "wait";
-  const checks = r.status === "recommend_with_checks";
+  const wait = r.status !== "actionable";
   const open = r.gates.filter((g) => !g.ok);
 
   return (
@@ -50,10 +48,11 @@ export async function NewCapitalView({ ws, amount, source, action }: { ws: Works
         </Form>
 
         <Card labelledBy="res-h">
-          <CardHead id="res-h" cap="Result" right={wait ? <Pill>Wait</Pill> : checks ? <Pill tone="warn">Check {open.length} first</Pill> : <DataLabel kind="recommendation">Recommended</DataLabel>} />
+          <CardHead id="res-h" cap="Result" right={wait ? <Pill tone="warn">Analysis · not ready to act</Pill> : <DataLabel kind="recommendation">Ready to act</DataLabel>} />
           <div className="flex flex-col gap-1">
             <span className="text-[20px] font-semibold tracking-tight leading-snug">{rec.headline}</span>
-            <span className="t-sm">{wait ? "Your cash position is not known well enough to size anything. Holding cash is always a valid choice." : checks ? `The best use of the money on the current evidence, confidence ${rec.confidence}/10. Confirm the ${open.length === 1 ? "open check" : `${open.length} open checks`} below before acting.` : `Every input is current and every limit used is one you approved. Confidence ${rec.confidence}/10.`}</span>
+            <span className="t-sm">{r.lean}</span>
+            <span className="t-xs">{wait ? `This is the analysis on current evidence. Dollar amounts wait for ${open.length === 1 ? "the open check" : `the ${open.length} open checks`} below, because they change what can responsibly be bought. Holding cash is always a valid choice.` : `Holdings, cash and research are current, and every limit used is one you approved. Confidence ${rec.confidence}/10.`}</span>
           </div>
           <ul className="flex flex-col gap-2">
             {r.gates.map((g) => (
@@ -107,7 +106,7 @@ export async function NewCapitalView({ ws, amount, source, action }: { ws: Works
                     {o.price !== null && <span>{usd(o.price, 2)}{o.priceSource === "statement" ? " (statement)" : " (delayed)"}</span>}
                     {o.expectedReturn !== null && <span>exp. {pctStr(o.expectedReturn)}/yr (research model)</span>}
                     {o.forecast && <span>forecasts {o.forecast.forecasts.map((f) => (f.kind === "range" ? `${pctStr(f.low)}–${pctStr(f.high)}` : pctStr(f.low))).join(" · ")}</span>}
-                    {o.assessment && <span>vs VOO: {o.assessment.judgment}</span>}
+                    {o.assessment && <span>model vs VOO: {o.assessment.judgment}</span>}{o.stance && <span>research: {o.stance.kind === "add" ? "add" : o.stance.kind === "conditional" ? "add only if a condition is met" : o.stance.kind}</span>}
                     {o.weightNow !== null && <span>now {pctStr(o.weightNow)}{o.maxWeight !== null ? ` of ${pctStr(o.maxWeight, 0)}` : ""}</span>}
                   </div>
                   {o.zoneAction && <span>Research price band today: {o.zoneAction} (a prompt to research, not a trade).</span>}
@@ -119,7 +118,7 @@ export async function NewCapitalView({ ws, amount, source, action }: { ws: Works
               </details>
             ))}
           </div>
-          <span className="t-xs">Expected returns are model estimates from your research scenarios at today&apos;s price. Each stock is compared with VOO&apos;s published forecasts (shown separately, never averaged), a Treasury for the same horizon, its downside and its concentration. A drop is never a buy signal by itself.</span>
+          <span className="t-xs">The research&apos;s own conclusion at today&apos;s price decides the action; the modeled return never overrides it. Expected returns are model estimates from the research scenarios at today&apos;s price, and the scenario probabilities are the research&apos;s subjective assumptions. Each stock is compared with VOO&apos;s published forecasts (shown separately, never averaged), a Treasury for the same horizon, its downside and its concentration. A drop is never a buy signal by itself.</span>
         </Card>
 
         <Card flush>

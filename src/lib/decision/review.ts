@@ -6,7 +6,7 @@ import type { Workspace } from "@/lib/workspace";
 import { scenarioReturnsAt, zoneFor } from "@/lib/research/valuation";
 import { researchAgeDays } from "@/lib/research/records";
 import type { FilingsResult } from "@/lib/market/sec";
-import { assessVsAlternatives, refreshState, riskFreeFor, zoneKind } from "@/lib/policy/evidence";
+import { assessVsAlternatives, refreshState, researchStance, riskFreeFor } from "@/lib/policy/evidence";
 
 export const REVIEW_CODE_VERSION = "position-review@3";
 
@@ -31,6 +31,8 @@ export function reviewPosition(ws: Workspace, symbol: string, filings?: FilingsR
     limit: hasLimit ? { normalHigh: lim?.normal?.high ?? null, hcHigh: lim?.highConviction?.high ?? null, max } : null, completeness: v.completeness, confidence: v.parsed.confidence,
   }) : null;
   const favourable = cmp?.judgment === "favourable";
+  const stance = v ? researchStance(v.parsed, h.price) : null;
+  const approvedLimit = lim?.authority === "you";
   const er = st?.status === "refresh" ? null : cmp?.expected ?? null;
   const zone = v ? zoneFor(v.parsed.zones, h.price) : null;
 
@@ -67,7 +69,11 @@ export function reviewPosition(ws: Workspace, symbol: string, filings?: FilingsR
       reason: `Something has happened since the research (${st.triggers.filter((t) => t.kind !== "unverified").map((t) => t.detail).join("; ")}). The old scenarios are not relied on until a targeted update says whether it touches the thesis. A lower price alone is never a reason to add.`,
       confidence: 4,
     };
-  } else if (cmp && favourable && hasLimit && addDollars > 1 && v.completeness === "complete" && (!zone || zoneKind(zone.action) === "buy") && st?.status === "current") {
+  } else if (stance?.kind === "conditional") {
+    suggestion = { key: "hold", label: "Hold. Add only once the research's condition is met.", reason: `The research at this price says: ${stance.text}. Its condition (${stance.condition}) is not confirmed, so adding is not supported yet.${cmp ? ` ${cmp.summary}` : ""}`, confidence: 5 };
+  } else if (stance && stance.kind !== "add" && stance.kind !== "trim") {
+    suggestion = { key: "hold", label: "Hold. Don't add.", reason: `The completed research concludes: ${stance.text}.${cmp ? ` ${cmp.summary}` : ""}${favourable ? " The modeled return alone looks better, but the research's conclusion weighs uncertainty, downside and conditions the model leaves out, so it stands." : ""}`, confidence: 5 };
+  } else if (cmp && favourable && hasLimit && approvedLimit && addDollars > 1 && v.completeness === "complete" && stance?.kind === "add" && st?.status === "current") {
     reasons.push(cmp.summary);
     if (zone) reasons.push(`The price is in the research's "${zone.label}" band (${zone.action}).`);
     suggestion = { key: "add", label: "Consider adding", reason: reasons.join(" "), confidence: /specul/i.test(v.parsed.classification ?? "") ? 5 : 6 };
@@ -76,7 +82,7 @@ export function reviewPosition(ws: Workspace, symbol: string, filings?: FilingsR
   } else {
     suggestion = { key: "hold", label: "Hold", reason: v.completeness !== "complete" ? "Research is partial, so it doesn't support a sizing change."
       : st?.status === "unverified" ? "SEC filings could not be checked, so the research can't be confirmed current. No change until it is."
-      : !hasLimit ? "No company limit of its own, so no room to add." : zone && zoneKind(zone.action) !== "buy" ? `The research's own zone at this price says: ${zone.action}.` : "Nothing in the numbers calls for a change.", confidence: 5 };
+      : !hasLimit ? "No company limit of its own, so no room to add." : !approvedLimit ? "Its limit is not one you approved, so no room to add." : "Nothing in the numbers calls for a change.", confidence: 5 };
   }
 
   return {

@@ -58,7 +58,10 @@ export type AccountView = {
   statementComputed: number; // positions at statement values + cash, to check the statement adds up
   statementGap: number | null; // statementTotal - statementComputed
   tradesAfter: number; // ledger rows applied after the statement
-  ageDays: number;
+  ageDays: number; // days since the statement
+  /** Latest of the statement date and the last recorded transaction (confirmations) in this account. */
+  knownThrough: string;
+  knownAgeDays: number;
 };
 
 export type CashView = {
@@ -173,10 +176,12 @@ export function buildPortfolio(
       bySymbol.set(sym, cur);
     }
     const gap = s.totalValue === null ? null : round2(s.totalValue - stmtComputed);
+    const knownThrough = after.reduce((m, t) => (t.tradeDate > m ? t.tradeDate : m), s.asOf.slice(0, 10));
     accounts.push({
       id: s.accountId, name: s.accountName, role: s.accountRole, asOf: s.asOf, sourceKind: s.sourceKind ?? "statement", value: round2(acctValue),
       statementTotal: s.totalValue, statementComputed: round2(stmtComputed), statementGap: gap, tradesAfter: after.length,
       ageDays: Math.max(0, Math.floor((now.getTime() - new Date(s.asOf).getTime()) / 86_400_000)),
+      knownThrough, knownAgeDays: Math.max(0, Math.floor((now.getTime() - new Date(knownThrough === s.asOf.slice(0, 10) ? s.asOf : `${knownThrough}T21:00:00Z`).getTime()) / 86_400_000)),
     });
     if (gap !== null && Math.abs(gap) > 1) missing.push(`${s.accountName}: statement total differs from its positions plus cash by ${gap > 0 ? "" : "-"}$${Math.abs(gap).toFixed(2)}`);
   }

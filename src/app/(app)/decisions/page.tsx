@@ -71,6 +71,7 @@ async function Past({ saved, ws }: { saved: boolean; ws: Awaited<ReturnType<type
                 {d.status === "recommend" && <Pill small tone="copper">Recommended</Pill>}
                 {d.status === "recommend_with_checks" && <Pill small tone="warn">Recommended, with checks</Pill>}
                 {d.status === "wait" && <Pill small tone="warn">Wait</Pill>}
+                {d.status === "analysis_only" && <Pill small tone="warn">Analysis only</Pill>}
               </div>
             </div>
             {r.summary && <p className="t-sm">{r.summary}</p>}

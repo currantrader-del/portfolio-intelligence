@@ -68,7 +68,7 @@ export const TOOLS: Anthropic.Beta.BetaTool[] = [
   },
   {
     name: "simulate_new_capital",
-    description: "Runs the deterministic new-capital engine for an amount in dollars. Compares researched holdings, ETFs, researched new positions, holding cash and trims; checks current holdings, known cash, approved limits and current research. Returns status recommend, recommend_with_checks (best answer on the evidence, with checks to confirm first) or wait (cash not known), the checks, what to verify, labelled alternatives with each stock's comparison against VOO and Treasuries, and the recommended split.",
+    description: "Runs the deterministic new-capital engine for an amount in dollars. Compares researched holdings, ETFs, researched new positions, holding cash and trims; checks current holdings, known cash, approved limits and current research. Returns status actionable (dollar amounts can be acted on) or analysis_only (the opinion and leaning stand, but dollar amounts wait for holdings, cash or material events), a one-line lean, the readiness checks, what to verify, and labelled alternatives. Each stock carries the research's own stance at today's price (add / conditional / hold / trim), the modeled return vs VOO and Treasuries, and whether they agree. The research's conclusion decides the action; a favourable model never overrides it.",
     input_schema: { type: "object", properties: { amount: { type: "number", description: "Dollars" }, source: { type: "string", enum: ["new", "existing"], description: "new = money coming in; existing = cash already held" } }, required: ["amount", "source"], additionalProperties: false },
     strict: true,
   },
