@@ -17,7 +17,41 @@ const cap1 = (s: string | null | undefined) => (s ? s.charAt(0).toUpperCase() + 
  * labels kept separate. The research's scenario values are never changed here; only the price
  * and the time left move. When research cannot be re-priced, no return is shown.
  */
-export async function InvestmentSummary({ ws, symbol }: { ws: Workspace; symbol: string }) {
+/** The short, decision-first text for the top of a research page, taken from the research in use. */
+export type Brief = {
+  /** Where the text comes from, e.g. "Nov 8 full investigation". */
+  from: string;
+  /** Action/confidence as the record in use shows them (reviewer annotations applied). Falls back to the parsed record. */
+  action?: string | null;
+  confidence?: string | null;
+  headline?: string | null;
+  thesis: string | null;
+  risks: string[];
+  wouldChange: string[];
+  /** Material open items: open evidence gaps, unreconciled inputs, questions that could change the conclusion. */
+  unresolved: string[];
+  /** A newer investigation waiting for your decision (not used until approved). */
+  pending?: { date: string; action: string | null; confidence: string | null; running: boolean } | null;
+};
+
+const SHOWN = 3;
+function ShortList({ title, items, tone }: { title: string; items: string[]; tone?: "warn" }) {
+  if (!items.length) return null;
+  const more = items.slice(SHOWN);
+  return (
+    <div className="t-sm flex flex-col gap-0.5">
+      <span className={`t-xs ${tone ?? ""}`}>{title}{items.length > SHOWN ? ` · ${items.length}` : ""}</span>
+      <ul className="list-disc pl-4 flex flex-col gap-0.5">{items.slice(0, SHOWN).map((x, i) => <li key={i}>{x}</li>)}</ul>
+      {more.length > 0 && (
+        <Disclose summary={<span className="t-xs">{more.length} more</span>} className="-my-1">
+          <ul className="list-disc pl-4 flex flex-col gap-0.5">{more.map((x, i) => <li key={i}>{x}</li>)}</ul>
+        </Disclose>
+      )}
+    </div>
+  );
+}
+
+export async function InvestmentSummary({ ws, symbol, brief }: { ws: Workspace; symbol: string; brief?: Brief | null }) {
   const r = ws.research.find((x) => x.symbol === symbol);
   const h = ws.portfolio.holdings.find((x) => x.symbol === symbol);
   const q = ws.quotes.get(symbol) ?? (await getQuote(symbol));
@@ -46,15 +80,21 @@ export async function InvestmentSummary({ ws, symbol }: { ws: Workspace; symbol:
     <Card labelledBy="inv-h">
       <CardHead id="inv-h" cap="Investment summary" right={<span className="pill" style={{ color: cov.tone === "gain" ? "var(--gain)" : cov.tone === "warn" ? "var(--warn-ink)" : undefined, background: cov.tone === "warn" ? "var(--warn-bg)" : undefined }} title={cov.detail}><span className={`dot ${cov.dot === "hollow" ? "dot-hollow" : ""}`} aria-hidden="true" />Research in use: {cov.label.toLowerCase()}{r?.approval === "automatic" ? ", not approved" : r?.approval === "provisional" ? ", provisional" : ""}</span>} />
       {r && r.authoritative === false && (r.current || r.latest) && <p className="t-sm rounded-[12px] bg-warn-bg text-warn-ink px-3 py-2">No approved research for {symbol}. The record below is {r.authority === "preliminary_screen" ? "a preliminary screen" : "research you have not approved"}, shown for context only: the app makes no add, buy-zone or target recommendation from it.</p>}
-      {r?.pendingReview && <p className="t-xs warn">This uses the research in use. A newer investigation ({r.pendingReview.research_as_of}) is waiting for your decision and is not used until you approve it.</p>}
+      {any?.parsed.classification && <span className="t-xs -mt-1">Classification: <span className="text-ink">{any.parsed.classification}</span></span>}
       {any ? (
-        <div className="grid grid-cols-3 gap-2">
-          <Metric label="Action" value={cap1(any.parsed.action)} />
-          <Metric label="Confidence" value={cap1(any.parsed.confidence)} />
+        <div className="grid grid-cols-3 gap-x-2 gap-y-3">
+          <Metric label="Action" value={brief?.action || cap1(any.parsed.action)} />
+          <Metric label="Confidence" value={cap1(brief?.confidence ?? any.parsed.confidence)} />
           <Metric label="Research" value={shortDate(any.research_as_of).replace(/, \d{4}$/, "")} note={age !== null ? `${age} days old` : undefined} />
+          <Metric label="Price" value={price ? usd(price, 2) : "—"} note={!q && h ? "statement price" : "delayed"} />
+          <Metric label="Estimated value" value={v?.parsed.weightedValue ? usd(v.parsed.weightedValue, 2) : "—"} note={v?.parsed.weightedValue ? (v.parsed.horizonDate ? `weighted, by ${shortDate(v.parsed.horizonDate).replace(/^[A-Za-z]+ \d+, /, "")}` : "weighted") : undefined} />
+          <Metric label="Expected return" value={er === null ? "—" : `≈ ${pctStr(er)}`} note={er === null ? (v && !check?.ok ? "not re-priced" : undefined) : "a year"} />
         </div>
       ) : (
         <p className="t-sm">No research on file for {symbol}. Run the screen below, then start full research before comparing it for new money.</p>
+      )}
+      {r?.pendingReview && (
+        <p className="t-xs warn">Newer research awaiting your approval: the {shortDate(r.pendingReview.research_as_of)} investigation{brief?.pending && !brief.pending.running && brief.pending.action ? ` (${brief.pending.action}${brief.pending.confidence ? `, ${brief.pending.confidence.toLowerCase()} confidence` : ""})` : ""}. The figures above use the research in use until you approve it; the decision is below.</p>
       )}
 
       {v && (
@@ -66,13 +106,13 @@ export async function InvestmentSummary({ ws, symbol }: { ws: Workspace; symbol:
             {zone && <span className="t-xs">Band today: {zone.label} · {zone.action}. {r?.authoritative === false ? "From unapproved research: context only." : "A prompt to research, not a trade."}</span>}
             {check?.ok ? (
               <>
-                <div className="flex items-center justify-between gap-3"><span className="t-sm">Expected return</span><span className="num font-semibold">{er === null ? "—" : `≈ ${pctStr(er)} a year`}</span></div>
                 {cmp && (
-                  <div className="flex flex-col gap-1">
-                    <div className="flex items-center justify-between gap-3 t-sm"><span>Valuation only: modeled return vs VOO and Treasuries</span><span className={cmp.judgment === "favourable" ? "gain" : cmp.judgment === "unfavourable" ? "warn" : ""}>{cmp.judgment === "favourable" ? "Favourable" : cmp.judgment === "unfavourable" ? "Unfavourable" : "Mixed"}</span></div>
-                    <ul className="t-xs flex flex-col gap-0.5">{cmp.factors.map((f) => <li key={f.label}><span className="text-ink">{f.label}:</span> {f.finding}</li>)}</ul>
-                    <span className="t-xs">How attractive the valuation looks is one input, not the recommendation. What to do comes from the research&apos;s action{any?.parsed.action ? ` (${cap1(any.parsed.action)})` : ""} and, for new money, the comparison on Decisions.</span>
-                  </div>
+                  <Disclose className="-my-1" summary={<span className="flex items-center justify-between gap-3 t-sm w-full"><span>Valuation only: modeled return vs VOO and Treasuries</span><span className={cmp.judgment === "favourable" ? "gain" : cmp.judgment === "unfavourable" ? "warn" : ""}>{cmp.judgment === "favourable" ? "Favourable" : cmp.judgment === "unfavourable" ? "Unfavourable" : "Mixed"}</span></span>}>
+                    <div className="flex flex-col gap-1">
+                      <ul className="t-xs flex flex-col gap-0.5">{cmp.factors.map((f) => <li key={f.label}><span className="text-ink">{f.label}:</span> {f.finding}</li>)}</ul>
+                      <span className="t-xs">How attractive the valuation looks is one input, not the recommendation. What to do comes from the research&apos;s action{any?.parsed.action ? ` (${brief?.action || cap1(any.parsed.action)})` : ""} and, for new money, the comparison on Decisions.</span>
+                    </div>
+                  </Disclose>
                 )}
                 {st?.status === "unverified" && <span className="t-xs warn">{check?.reason}</span>}
               </>
@@ -88,10 +128,28 @@ export async function InvestmentSummary({ ws, symbol }: { ws: Workspace; symbol:
         <div className="flex flex-col gap-1.5">
           <div className="flex items-center justify-between gap-3"><span className="t-sm">Your exposure</span><span className="t-sm num text-ink">{pctStr(exp.total)} <span className="t-xs">of max {pctStr(exp.max, 0)}</span></span></div>
           <Bar thin value={exp.total} max={exp.max} markers={lim?.normal ? [lim.normal.low, lim.normal.high] : []} label={`${pctStr(exp.total)} of a ${pctStr(exp.max, 0)} maximum`} />
+          {lim && (lim.normal || lim.highConviction) && <span className="t-xs">Your limits: {lim.normal ? `normal ${pctStr(lim.normal.low, 0)}–${pctStr(lim.normal.high, 0)}` : ""}{lim.normal && lim.highConviction ? " · " : ""}{lim.highConviction ? `high conviction up to ${pctStr(lim.highConviction.high, 0)}` : ""} · maximum {pctStr(exp.max, 0)}</span>}
           <span className="t-xs">{pctStr(exp.direct)} direct · {pctStr(exp.viaEtfs)} through ETFs (approx.){exp.totalMax - exp.total > 0.0005 ? `; could be up to ${pctStr(exp.totalMax)} in total because fund holdings are only partly published` : ""} · room {usd(exp.headroomDollars)}{exp.totalMax - exp.total > 0.0005 ? " (on the upper figure)" : ""}</span>
         </div>
       ) : (
         <div className="flex items-center justify-between gap-3"><span className="t-sm">Your exposure</span><span className="t-sm">Not held</span></div>
+      )}
+
+      {brief && (brief.thesis || brief.headline || brief.risks.length > 0 || brief.unresolved.length > 0 || brief.wouldChange.length > 0) && (
+        <>
+          <div className="divider" />
+          <div className="flex flex-col gap-2.5">
+            {(brief.thesis || brief.headline) && (
+              <div className="t-sm flex flex-col gap-0.5">
+                <span className="t-xs">Main thesis · {brief.from}</span>
+                <p className="leading-relaxed text-ink">{brief.thesis || brief.headline}</p>
+              </div>
+            )}
+            <ShortList title="Principal risks" items={brief.risks} />
+            <ShortList title="Material unresolved issues" items={brief.unresolved} tone="warn" />
+            <ShortList title="What would change the recommendation" items={brief.wouldChange} />
+          </div>
+        </>
       )}
 
       {scen.length > 0 && (

@@ -29,47 +29,50 @@ const VERDICT: Record<string, string> = { survives: "survives", survives_with_ch
 const usd = (n: number | null | undefined, d = 2) => (n === null || n === undefined ? "—" : `$${n.toLocaleString("en-US", { maximumFractionDigits: d, minimumFractionDigits: d })}`);
 const pct = (n: number | null | undefined) => (n === null || n === undefined ? "—" : `${(n * 100).toFixed(1)}%`);
 
-/** The concise investment summary from an investigation, with the full evidence underneath. */
-export function InvestigationReport({ symbol, v, sources, inUse, validation }: { symbol: string; v: InvVersion; sources: SourceRow[]; inUse?: { research_as_of: string; label: string } | null; validation?: ValidationReport | null }) {
+type Ev = { findings?: Finding[]; questions?: Question[]; conflicts?: Conflict[]; objections?: Objection[]; valuation?: { specs: ScenarioSpec[]; result: ValuationResult; revenue_basis: string } | null; phases?: { n: number; title: string; status: string; gate: string[]; attempts: number; cost_usd: number; ms: number }[];
+  review?: ReviewVerdict | null; draft?: { action: string | null; confidence: string | null; weighted_value: number | null; annualized_return: number | null } | null;
+  stress?: { label: string; weighted_value: number | null; annualized_return: number | null; note: string }[]; consistency?: ConsistencyCheck | null };
+
+const typeOf = (v: InvVersion) => (v.conclusion.research_type === "material_event_refresh" ? "Material-event refresh" : "Full investigation");
+
+/** Completeness and approval pills for an investigation. */
+export function InvestigationPills({ v }: { v: InvVersion }) {
+  const state = String(v.conclusion.review_state ?? "");
+  const completion = v.conclusion.completion as { kind?: string } | undefined;
+  return (
+    <>
+      <Pill small tone={v.completeness === "complete" ? "gain" : "warn"}>{v.completeness === "complete" ? "Complete" : completion?.kind === "material_uncertainty" ? "Incomplete: material uncertainty" : "Incomplete"}</Pill>
+      {v.is_current ? <Pill small tone={state === "adopted_provisional" ? "warn" : "gain"} dot="solid">{state === "adopted_provisional" ? "In use, provisional" : "In use"}</Pill> : state === "awaiting_approval" ? <Pill small tone="copper">Awaiting your decision</Pill> : state === "set_aside" ? <Pill small>Set aside</Pill> : null}
+    </>
+  );
+}
+
+/**
+ * The investigation's own conclusion (headline, summary fields, reasons, risks, reviewer corrections, open
+ * items) and, while it waits for you, the approval controls. `bare` renders it without its card, for use
+ * inside a collapsible section. The evidence is in InvestigationEvidence.
+ */
+export function InvestigationConclusion({ symbol, v, inUse, validation, bare }: { symbol: string; v: InvVersion; inUse?: { research_as_of: string; label: string } | null; validation?: ValidationReport | null; bare?: boolean }) {
   const c = v.conclusion;
   const sm = c.investment_summary as InvestmentSummary | null | undefined;
-  const ev = (c.evidence ?? {}) as { findings?: Finding[]; questions?: Question[]; conflicts?: Conflict[]; objections?: Objection[]; valuation?: { specs: ScenarioSpec[]; result: ValuationResult; revenue_basis: string } | null; phases?: { n: number; title: string; status: string; gate: string[]; attempts: number; cost_usd: number; ms: number }[];
-    review?: ReviewVerdict | null; draft?: { action: string | null; confidence: string | null; weighted_value: number | null; annualized_return: number | null } | null;
-    stress?: { label: string; weighted_value: number | null; annualized_return: number | null; note: string }[]; consistency?: ConsistencyCheck | null };
   const completion = c.completion as { complete: boolean; reasons: string[]; kind?: string } | undefined;
   const adoption = c.adoption as { mode?: string; open_items?: string[] } | undefined;
-  const usage = c.usage as { cost_usd: number; runtime_ms: number; calls: number; searches: number; by_model: Record<string, { calls: number; costUsd: number }>; input_tokens: number; output_tokens: number } | undefined;
   const state = String(c.review_state ?? "");
-  const type = c.research_type === "material_event_refresh" ? "Material-event refresh" : "Full investigation";
-  const docs = sources.filter((s) => s.details?.doc_id);
-  const snippets = sources.filter((s) => s.details?.review_status === "search_result_only");
-  const count = (st: string) => docs.filter((d) => d.details.review_status === st).length;
-  const findings = ev.findings ?? [];
-  const keyF = findings.filter((f) => f.key && !f.withdrawn);
-  const withdrawn = findings.filter((f) => f.withdrawn);
-  const val = ev.valuation;
+  const type = typeOf(v);
   const review = (c.review ?? null) as ReviewAnnotations | null;
   const original = (c.review_original ?? null) as { action?: string | null } | null;
-  const rows = val ? inputRows(val.specs, review) : [];
 
   if (state === "running") {
     return (
       <Card labelledBy={`inv-${v.id}`} className="!gap-2">
         <CardHead id={`inv-${v.id}`} title={`${type} · in progress`} right={<Pill small tone="copper" dot="hollow">In progress</Pill>} />
-        <p className="t-sm">Started {shortDate(v.research_as_of)}. Phase checkpoints appear below as each one is saved.</p>
-        <Phases v={v} />
+        <p className="t-sm">Started {shortDate(v.research_as_of)}. Phase checkpoints appear under Supporting research as each one is saved.</p>
       </Card>
     );
   }
 
-  return (
-    <Card labelledBy={`inv-${v.id}`} className="!gap-3">
-      <CardHead id={`inv-${v.id}`} title={`${type} · ${shortDate(v.research_as_of)}`} right={
-        <>
-          <Pill small tone={v.completeness === "complete" ? "gain" : "warn"}>{v.completeness === "complete" ? "Complete" : completion?.kind === "material_uncertainty" ? "Incomplete: material uncertainty" : "Incomplete"}</Pill>
-          {v.is_current ? <Pill small tone={state === "adopted_provisional" ? "warn" : "gain"} dot="solid">{state === "adopted_provisional" ? "In use, provisional" : "In use"}</Pill> : state === "awaiting_approval" ? <Pill small tone="copper">Awaiting your decision</Pill> : state === "set_aside" ? <Pill small>Set aside</Pill> : null}
-        </>
-      } />
+  const body = (
+    <>
       {sm ? (
         <>
           <p className="text-ink font-semibold leading-snug">{sm.headline}</p>
@@ -145,8 +148,40 @@ export function InvestigationReport({ symbol, v, sources, inUse, validation }: {
           </ActionForm>
         </div>
       )}
+    </>
+  );
+  if (bare) return <div className="flex flex-col gap-3">{body}</div>;
+  return (
+    <Card labelledBy={`inv-${v.id}`} className="!gap-3">
+      <CardHead id={`inv-${v.id}`} title={`${type} · ${shortDate(v.research_as_of)}`} right={<InvestigationPills v={v} />} />
+      {body}
+    </Card>
+  );
+}
 
-      <div className="flex flex-col rounded-[12px] border border-line px-3">
+/**
+ * The investigation's evidence as collapsible sections: documents, key numbers, valuation workings,
+ * questions, conflicts, skeptical review, sensitivity, consistency check, phase checkpoints and run cost.
+ * Rendered as a fragment of <Disclose> rows so the page can place them in its own container.
+ */
+export function InvestigationEvidence({ v, sources }: { v: InvVersion; sources: SourceRow[] }) {
+  const c = v.conclusion;
+  const sm = c.investment_summary as InvestmentSummary | null | undefined;
+  const ev = (c.evidence ?? {}) as Ev;
+  const usage = c.usage as { cost_usd: number; runtime_ms: number; calls: number; searches: number; by_model: Record<string, { calls: number; costUsd: number }>; input_tokens: number; output_tokens: number } | undefined;
+  const docs = sources.filter((s) => s.details?.doc_id);
+  const snippets = sources.filter((s) => s.details?.review_status === "search_result_only");
+  const count = (st: string) => docs.filter((d) => d.details.review_status === st).length;
+  const findings = ev.findings ?? [];
+  const keyF = findings.filter((f) => f.key && !f.withdrawn);
+  const withdrawn = findings.filter((f) => f.withdrawn);
+  const val = ev.valuation;
+  const review = (c.review ?? null) as ReviewAnnotations | null;
+  const rows = val ? inputRows(val.specs, review) : [];
+  if (String(c.review_state ?? "") === "running") return <Disclose summary={<span className="t-sm">Phase checkpoints · in progress</span>} open><Phases v={v} /></Disclose>;
+
+  return (
+      <>
         <Disclose summary={<span className="t-sm">Documents · {count("fully_reviewed")} read in full, {count("partially_reviewed")} partly, {count("unavailable")} unavailable{snippets.length ? `, ${snippets.length} search snippets (not counted as reviewed)` : ""}</span>}>
           <div className="flex flex-col gap-2 t-sm">
             {docs.map((d, i) => (
@@ -250,8 +285,7 @@ export function InvestigationReport({ symbol, v, sources, inUse, validation }: {
             </div>
           </Disclose>
         )}
-      </div>
-    </Card>
+      </>
   );
 }
 
