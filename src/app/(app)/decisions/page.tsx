@@ -5,6 +5,7 @@ import { pctStr, shortDate, toneOf } from "@/lib/format";
 import { Card, PageHeader, Pill, Seg } from "@/components/ui";
 import { AlertList } from "@/components/cards/Alerts";
 import { NewCapitalView, parseAmount } from "@/components/decisions/NewCapitalView";
+import { parseSource } from "@/lib/decision/newCapital";
 
 const ACTION_LABEL: Record<string, string> = {
   followed: "Followed", partially_followed: "Partly followed", declined: "Did something else", deferred: "Deferred", dismissed: "Dismissed",
@@ -12,7 +13,7 @@ const ACTION_LABEL: Record<string, string> = {
 const KIND_LABEL = (k: string) => (k === "historical" ? "Imported history" : k === "new_capital" ? "New cash" : k === "alert_review" ? "Position review" : k.replace("_", " "));
 type Tab = "new" | "reviews" | "past";
 
-export default async function DecisionsPage({ searchParams }: { searchParams: Promise<{ saved?: string; tab?: string; amount?: string; source?: string }> }) {
+export default async function DecisionsPage({ searchParams }: { searchParams: Promise<{ saved?: string; tab?: string; amount?: string; source?: string; confirmed?: string }> }) {
   const sp = await searchParams;
   const tab: Tab = sp.tab === "reviews" || sp.tab === "past" || sp.tab === "new" ? sp.tab : sp.saved ? "past" : "new";
   const ws = await getWorkspace();
@@ -28,7 +29,7 @@ export default async function DecisionsPage({ searchParams }: { searchParams: Pr
           { key: "past", label: "Past", href: "/decisions?tab=past" },
         ]} />
       </div>
-      {tab === "new" && <NewCapitalView ws={ws} amount={parseAmount(sp.amount)} source={sp.source === "existing" ? "existing" : "new"} action="/decisions" />}
+      {tab === "new" && <NewCapitalView ws={ws} amount={parseAmount(sp.amount)} source={parseSource(sp.source)} confirmed={sp.confirmed === "1"} action="/decisions" />}
       {tab === "reviews" && (
         <Card className="!gap-1 !pb-1.5 lg:max-w-3xl">
           {reviews.length ? <AlertList alerts={reviews} wrap /> : <p className="t-sm py-2">No position needs a review right now. Reviews appear when a holding moves sharply, crosses a research price band or goes over its limit.</p>}
@@ -66,12 +67,8 @@ async function Past({ saved, ws }: { saved: boolean; ws: Awaited<ReturnType<type
               </div>
               <div className="flex flex-wrap justify-end gap-1.5">
                 <Pill small>{KIND_LABEL(d.kind)}</Pill>
-                {d.status === "wait_review" && <Pill small tone="warn">Wait / review</Pill>}
+                {d.status === "wait_review" && <Pill small tone="warn">Conditional / wait</Pill>}
                 {d.status === "actionable" && <Pill small tone="copper">Actionable</Pill>}
-                {d.status === "recommend" && <Pill small tone="copper">Recommended</Pill>}
-                {d.status === "recommend_with_checks" && <Pill small tone="warn">Recommended, with checks</Pill>}
-                {d.status === "wait" && <Pill small tone="warn">Wait</Pill>}
-                {d.status === "analysis_only" && <Pill small tone="warn">Analysis only</Pill>}
               </div>
             </div>
             {r.summary && <p className="t-sm">{r.summary}</p>}

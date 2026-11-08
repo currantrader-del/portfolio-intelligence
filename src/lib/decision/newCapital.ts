@@ -16,9 +16,22 @@
  *  - Research is current: nothing material happened since it was written (results, financing, material 8-K,
  *    zone change). Age alone never decides this.
  *
- * EXECUTION READINESS (needed before dollar amounts): holdings current, cash known, and no material open issue
- * for any name that would receive money. When readiness fails, the analysis and its leaning still show, but any
- * dollar split is marked illustrative.
+ * Research guides the decision but does not freeze it: when the price, the re-priced valuation, results, filings
+ * or financing have changed since the research was written, the old conclusion is shown as the old conclusion,
+ * and the current recommendation is "reassess first" (no new money) until that is done.
+ *
+ * Before the diversified option is chosen, each core ETF, the existing holdings and keeping cash are compared
+ * on what they do to the whole portfolio's exposure (NVIDIA look-through, technology, semiconductors, AI
+ * infrastructure, US share, emerging markets) and to each bucket's range.
+ *
+ * EXECUTION READINESS (needed before a dollar amount is "ready to execute"):
+ *  - the money is verified: planned money that has not arrived is a plan, never an order; cash already held is
+ *    capped at what is deployable after the protected reserve;
+ *  - holdings and balances are verified: a statement, sync or your own check within a week. Trades recorded
+ *    since an older statement are not a reconciliation;
+ *  - no unresolved material development (results, financing, material 8-K) for any held or receiving stock.
+ * Otherwise the result is "conditional": the analysis, the leaning and the conditions are given, and the split
+ * is what to do once they are met.
  */
 import type { PortfolioView } from "@/lib/portfolio/engine";
 import { DEFAULT_ETF_FOR_BUCKET, type Bucket } from "@/lib/portfolio/classify";
@@ -28,8 +41,13 @@ import type { Quote } from "@/lib/market/quotes";
 import type { FilingsResult } from "@/lib/market/sec";
 import { ALTERNATIVES, assessVsAlternatives, conditionIn, refreshState, researchStance, riskFreeFor, type Alternative, type Assessment, type ResearchStance, type RiskFree } from "@/lib/policy/evidence";
 import type { Yields } from "@/lib/workspace-core";
+import { exposureImpact, exposureRules, type ExposureImpact } from "@/lib/decision/exposureImpact";
+import type { PolicyRuleRow } from "@/lib/policy/rules";
 
-export const CODE_VERSION = "new-capital@5";
+export const CODE_VERSION = "new-capital@6";
+
+/** planned: new money not yet deposited (a plan). deposited: new money you confirmed has arrived. existing: cash already held. */
+export type MoneySource = "planned" | "deposited" | "existing";
 
 /** Holdings older than this are not reliable enough to size a purchase. */
 export const HOLDINGS_FRESH_DAYS = 7;
@@ -65,17 +83,29 @@ export type Option = {
   stance?: ResearchStance | null;
   /** Whether the modeled return and the research conclusion point the same way. */
   agreement?: "agrees" | "model_more_positive" | "model_more_negative" | null;
+  /** The research's conclusion as written, and whether it is still today's recommendation. */
+  reassessment?: Reassessment | null;
   toVerify: string[];
+};
+
+export type Reassessment = {
+  conclusion: { action: string; asOf: string; referencePrice: number | null };
+  priceMove: number | null; // today's price vs the research reference
+  changes: string[]; // what happened since the research
+  status: "current" | "needed" | "unverified";
+  current: string; // today's recommendation for this stock, in words
 };
 
 export type Gate = { key: string; label: string; ok: boolean; detail: string };
 
 export type NewCapitalResult = {
   amount: number;
-  source: "new" | "existing";
+  source: MoneySource;
+  /** The money the result is sized on, and whether it is verified. */
+  funds: { requested: number; used: number; verified: boolean; detail: string };
   asOf: string;
-  /** actionable: dollar amounts can be acted on. analysis_only: the opinion stands, but dollar amounts wait for the readiness checks. */
-  status: "actionable" | "analysis_only";
+  /** ready: verified money, verified holdings and no open material issue, so the split can be executed. conditional: the opinion stands, but the split is what to do once the open conditions are met. */
+  status: "ready" | "conditional";
   /** One plain sentence: the leaning on current evidence, given even when dollar amounts cannot be. */
   lean: string;
   gates: Gate[];
@@ -89,7 +119,9 @@ export type NewCapitalResult = {
     rationale: string[];
     wouldChange: string[];
   };
-  assumptions: { alternatives: Alternative[]; riskFree10y: RiskFree };
+  /** Each way of using the money compared on total-portfolio exposure, and why the diversified option was chosen. */
+  exposure: { impacts: ExposureImpact[]; choice: string; reasons: string[] };
+  assumptions: { alternatives: Alternative[]; riskFree10y: RiskFree; items: string[] };
   warnings: string[];
 };
 
@@ -101,7 +133,11 @@ export function newCapital(args: {
   research: ResearchRecord[];
   policy: Policy | null;
   now: Date;
-  source?: "new" | "existing";
+  source?: MoneySource | "new";
+  /** You checked today that the holdings and balances shown match your broker accounts. */
+  holdingsConfirmed?: boolean;
+  /** Policy rules, for the exposure review levels (drafted proposals are used, labelled, when none are on file). */
+  rules?: Pick<PolicyRuleRow, "scope" | "subject" | "approval" | "normal_low" | "normal_high" | "value" | "hard_max">[];
   quotes?: Map<string, Quote>;
   /** SEC filings per symbol. A symbol missing here could not be checked, so its research is "unverified". */
   filings?: Map<string, FilingsResult>;
@@ -110,12 +146,24 @@ export function newCapital(args: {
   /** Extra tickers to assess even without research (e.g. a stock you asked about). They get no money without research and a limit. */
   consider?: string[];
 }): NewCapitalResult {
-  const { amount, portfolio, research, policy, now } = args;
-  const source = args.source ?? "new";
+  const { portfolio, research, policy, now } = args;
+  const source: MoneySource = !args.source || args.source === "new" ? "planned" : args.source;
+  const requested = args.amount;
+  const deployable = Math.max(0, portfolio.cashDetail.deployable);
+  // Cash already held can only be sized up to what is deployable after the protected reserve.
+  const amount = source === "existing" ? Math.min(requested, Math.floor(deployable * 100) / 100) : requested;
+  const funds: NewCapitalResult["funds"] = source === "planned"
+    ? { requested, used: amount, verified: false, detail: `$${requested.toLocaleString()} of planned new money, not yet deposited. This is what to do once it arrives, not an order to place now` }
+    : source === "deposited"
+      ? { requested, used: amount, verified: true, detail: `You confirmed $${requested.toLocaleString()} of new money has arrived in your brokerage account` }
+      : { requested, used: amount, verified: portfolio.cashDetail.savings !== null, detail: amount < requested
+          ? `You asked about $${requested.toLocaleString()}, but only $${amount.toLocaleString()} is deployable after the $${portfolio.cashDetail.protectedReserve.toLocaleString()} protected reserve, so this is sized on $${amount.toLocaleString()}`
+          : `$${amount.toLocaleString()} of cash you hold (deployable after the protected reserve: $${deployable.toLocaleString()})` };
   const audit = policy?.audit;
   const yields = args.yields ?? { y2: null, y10: null };
   // Money already counted as deployable cash only moves within the portfolio; new money grows it.
-  const postTotal = source === "new" ? portfolio.total + amount : portfolio.total;
+  const isNew = source !== "existing";
+  const postTotal = isNew ? portfolio.total + amount : portfolio.total;
   const warnings: string[] = [];
   if (portfolio.quality.status === "estimated") warnings.push(portfolio.quality.headline + ". " + portfolio.quality.reasons[0]);
   if (portfolio.pricedLive < portfolio.holdings.length) warnings.push("Some prices are from statements, not live quotes.");
@@ -156,6 +204,7 @@ export function newCapital(args: {
     let valuation: Verdict = { ok: false, detail: "No valuation to compare" };
     let stance: ResearchStance | null = null;
     let agreement: Option["agreement"] = null;
+    let valuationChange: string | null = null;
     if (v && price) {
       stance = researchStance(v.parsed, price);
       zoneAction = stance?.from === "zone" ? stance.text : null;
@@ -164,6 +213,14 @@ export function newCapital(args: {
         riskFree: riskFreeFor(years, yields), weightNow: e?.total ?? 0,
         limit: cl.hasLimit ? { normalHigh, hcHigh, max: cl.newMoneyMax } : null, completeness: v.completeness, confidence: v.parsed.confidence,
       });
+      // New evidence on valuation: the research's own scenarios at its reference price vs at today's price.
+      const ref = v.parsed.referencePrice;
+      const atRef = ref && ref > 0 && Math.abs(price / ref - 1) > 0.005 ? assessVsAlternatives(v.parsed, ref, now, { riskFree: riskFreeFor(years, yields) }) : null;
+      if (assessment && atRef && atRef.judgment !== assessment.judgment) {
+        valuationChange = `Valuation changed since the research: at its $${ref} reference the modeled return was ${(atRef.expected * 100).toFixed(1)}% a year (${atRef.judgment} vs VOO); at today's $${price.toFixed(2)} it is ${(assessment.expected * 100).toFixed(1)}% (${assessment.judgment})`;
+        if (fresh.ok) { fresh = { ok: false, detail: valuationChange }; refreshFirst = true; toVerify.push(`${symbol}: reassess the research conclusion at today's price (valuation change)`); }
+        else fresh = { ok: false, detail: `${fresh.detail}; ${valuationChange}` };
+      }
       er = fresh.ok ? assessment?.expected ?? null : null;
       const supports = stance?.kind === "add";
       const modelFav = assessment?.judgment === "favourable";
@@ -174,7 +231,12 @@ export function newCapital(args: {
         valuation = { ok: false, detail: `${said}. Not an add until the condition is confirmed: ${stance.condition}. ${assessment.summary}` };
         toVerify.push(`${symbol}: the research's condition for adding must be confirmed first: ${stance.condition}`);
       } else if (!supports) valuation = { ok: false, detail: `${said}. ${assessment.summary}${modelFav ? " The research's HOLD conclusion stands: it weighs uncertainty, downside and conditions the model does not capture." : ""}` };
-      else valuation = { ok: modelFav, detail: `${said}. ${assessment.summary}${modelFav ? "" : " The research would add, but the modeled return does not clearly beat VOO, so no new money on return grounds."}` };
+      else if (assessment.comparison === "approximate") {
+        // A few-year stock case vs 10-15-year index forecasts is context, not a pass/fail: the research decides,
+        // and only a clear contradiction (its own scenarios below every VOO forecast) holds it back.
+        const contradicts = assessment.judgment === "unfavourable";
+        valuation = { ok: !contradicts, detail: `${said}. ${assessment.summary}${contradicts ? " The research would add, but its own scenarios at today's price fall below every VOO forecast, so the conclusion needs reassessing before new money." : ""}` };
+      } else valuation = { ok: modelFav, detail: `${said}. ${assessment.summary}${modelFav ? "" : " The research would add, but the modeled return does not clearly beat VOO, so no new money on return grounds."}` };
     } else if (v) valuation = { ok: false, detail: "No price to compare" };
 
     // ---- 1. Portfolio limit: own limit only, approved by you. Normal range by default; the high-conviction range
@@ -219,10 +281,33 @@ export function newCapital(args: {
     if (agreement === "model_more_positive") notes.push("The modeled return looks better than the research's conclusion. The app follows the research, which weighs uncertainty, downside and conditions the model leaves out.");
     if (v?.parsed.action && stance?.from === "zone") notes.push(`Research conclusion at its reference price: ${v.parsed.action}`);
 
+    // The old conclusion vs today's recommendation. Research guides; it is not frozen when the evidence changes.
+    let reassessment: Reassessment | null = null;
+    if (v && (v.parsed.action || stance)) {
+      const refP = v.parsed.referencePrice ?? null;
+      const priceMove = refP && price ? price / refP - 1 : null;
+      const st = v.completeness === "complete" ? refreshState({ asOf: v.research_as_of, pc: v.parsed, price, filings: args.filings?.get(symbol) ?? null }) : null;
+      const changes = [
+        ...(priceMove !== null ? [Math.abs(priceMove) < 0.001 ? `Price unchanged since the research ($${refP})` : `Price ${priceMove >= 0 ? "up" : "down"} ${Math.abs(priceMove * 100).toFixed(1)}% since the research ($${refP} → $${price!.toFixed(2)})`] : []),
+        ...(st?.triggers.filter((t) => t.kind !== "unverified").map((t) => t.detail) ?? []),
+        ...(valuationChange ? [valuationChange] : []),
+      ];
+      const status: Reassessment["status"] = fresh.ok ? "current" : st?.status === "unverified" && !valuationChange ? "unverified" : "needed";
+      const action = v.parsed.action ?? stance!.text;
+      const asOf = v.research_as_of ?? "an unknown date";
+      const hint = assessment ? ` At today's price the research's own scenarios model ${(assessment.expected * 100).toFixed(1)}% a year (${assessment.judgment} vs VOO${assessment.comparison === "approximate" ? ", approximate" : ""}); that is a reason to reassess, not a new conclusion.` : "";
+      const current = status === "current"
+        ? `The ${asOf} conclusion still applies: nothing material has changed. ${stance?.kind === "add" ? "Add" : stance?.kind === "conditional" ? `Add only once its condition is met (${stance.condition})` : stance?.kind === "trim" ? "Review a trim" : "Hold; no new money"}.`
+        : status === "unverified"
+          ? `Filings since ${asOf} could not be checked, so the conclusion is not re-confirmed. Until they are: hold, no new money.`
+          : `Reassess first. The ${asOf} conclusion ("${action}") was written before what changed below, so it is not today's recommendation. Until it is reassessed: hold what you own, no new money.${hint}`;
+      reassessment = { conclusion: { action, asOf, referencePrice: refP }, priceMove, changes, status, current };
+    }
+
     return {
       kind: held ? "stock" : "new_stock", symbol, label, price, priceSource: h?.priceSource ?? (q ? "quote" : null), expectedReturn: er, assessment, highConviction,
       headroomDollars: headroom, weightNow: e?.total ?? 0, maxWeight: cl.hasLimit ? ceiling : null, limitStatus: lim?.authority === "you" ? "approved" : lim?.authority === "imported" ? "imported" : lim?.status ?? "none",
-      eligible: label === "Candidate", notes, researchAction: v?.parsed.action ?? null, zoneAction, refreshFirst, verdicts: { limit, valuation, research: fresh }, stance, agreement, toVerify,
+      eligible: label === "Candidate", notes, researchAction: v?.parsed.action ?? null, zoneAction, refreshFirst, verdicts: { limit, valuation, research: fresh }, stance, agreement, reassessment, toVerify,
     };
   };
 
@@ -232,26 +317,66 @@ export function newCapital(args: {
     ...(args.consider ?? []).map((x) => x.toUpperCase()).filter((x) => !heldSet.has(x))].filter((x, i, a) => a.indexOf(x) === i);
   const newOptions = newSymbols.map((symbol) => stockOption(symbol, false));
 
-  // ETFs: every core bucket. VOO is the default home for money that nothing else beats; another core ETF leads only
-  // when its bucket is below the bottom of its normal range (most below first). Underweight is a reason to look, not proof.
-  const etfOptions: Option[] = portfolio.buckets
-    .filter((b) => ETF_BUCKETS.includes(b.bucket))
-    .map((b) => ({ b, gap: b.normal && b.weight < b.normal.low ? b.normal.low - b.weight : b.bucket === "US broad-market equity" ? 0 : -1 }))
-    .sort((x, y) => y.gap - x.gap)
-    .map(({ b, gap }, i) => {
-      const symbol = DEFAULT_ETF_FOR_BUCKET[b.bucket] ?? "VOO";
-      const h = portfolio.holdings.find((x) => x.symbol === symbol);
-      const alt = ALTERNATIVES.find((x) => x.symbol === symbol) ?? null;
-      const notes = [`${b.bucket} is ${pct(b.weight)}${b.normal ? `, normal range ${pct(b.normal.low)}–${pct(b.normal.high)}` : ""}`,
-        alt ? `Published forecasts: ${alt.forecasts.map((f) => `${f.firm} ${f.asset} ${f.kind === "range" ? `${pct(f.low)}–${pct(f.high)}` : pct(f.low)} (${f.horizonYears[0] === f.horizonYears[1] ? f.horizonYears[0] : f.horizonYears.join("–")} years, as of ${f.asOf})`).join("; ")}. Forecasts, not promises` : "No published forecast on file for this bucket, so it is not ranked on return"];
-      if (b.status === "over_max" || b.status === "above") notes.push("Already above its normal range");
-      if (i === 0) notes.unshift(gap > 0 ? `Below the bottom of its normal range, so it leads the diversified options` : "The default alternative: where money goes when nothing beats owning the index");
-      return {
-        kind: "etf" as const, symbol, label: (i === 0 ? "Candidate" : "Valid option") as OptionLabel, price: h?.price ?? args.quotes?.get(symbol)?.price ?? null,
-        priceSource: h?.priceSource ?? null, expectedReturn: null, forecast: alt, headroomDollars: null, weightNow: b.weight, maxWeight: b.hardMax,
-        limitStatus: b.status === "no_limit" ? "none" : policy?.buckets.find((x) => x.bucket === b.bucket)?.status ?? "none", eligible: b.status !== "over_max", notes, researchAction: null, zoneAction: null, toVerify: [],
-      };
-    });
+  // ---- Diversified options: each core ETF, the held stocks and keeping cash, compared on the whole portfolio ----
+  const etfBuckets = portfolio.buckets.filter((b) => ETF_BUCKETS.includes(b.bucket));
+  const nvdaCl = companyLimit(policy, "NVDA");
+  const heldResearched = stockOptions.filter((o) => o.stance).map((o) => ({ symbol: o.symbol, label: "Existing holding" }));
+  const ex = exposureImpact({
+    holdings: portfolio.holdings.map((h) => ({ symbol: h.symbol, value: h.value })), cash: portfolio.cash, amount, source: isNew ? "new" : "existing",
+    options: [...etfBuckets.map((b) => ({ symbol: DEFAULT_ETF_FOR_BUCKET[b.bucket] ?? "VOO", label: b.bucket })), ...heldResearched, { symbol: "CASH", label: "Keep cash" }],
+    rules: exposureRules(args.rules ?? []),
+    nvdaMax: nvdaCl.hasLimit ? { value: nvdaCl.newMoneyMax, status: policy?.companies.NVDA?.authority === "you" ? "approved" : "imported" } : null, now,
+  });
+  const impactOf = (symbol: string) => ex.impacts.find((x) => x.symbol === symbol) ?? null;
+  const etfFacts = etfBuckets.map((b) => {
+    const symbol = DEFAULT_ETF_FOR_BUCKET[b.bucket] ?? "VOO";
+    const after = postTotal ? (b.value + amount) / postTotal : 0;
+    const imp = impactOf(symbol);
+    return { b, symbol, after, imp, endsAbove: !!b.normal && after > b.normal.high, below: !!b.normal && b.weight < b.normal.low, crosses: imp?.rows.filter((r) => r.crosses) ?? [] };
+  });
+  // Which concentrations are already at or over a level on file (approved, imported or proposed).
+  const atLevel = (impactOf("CASH")?.rows ?? []).filter((r) => r.level && r.before >= r.level.value).map((r) => r.key);
+  const usable = etfFacts.filter((f) => !f.endsAbove && !f.crosses.length);
+  const pool = usable.length ? usable : etfFacts;
+  const lower = (f: (typeof etfFacts)[number]) => atLevel.reduce((a, k) => { const r = f.imp?.rows.find((x) => x.key === k); return a + (r ? r.before - r.after : 0); }, 0);
+  const voo = pool.find((f) => f.symbol === "VOO");
+  const belowLead = [...pool].filter((f) => f.below).sort((x, y) => (y.b.normal!.low - y.b.weight) - (x.b.normal!.low - x.b.weight))[0];
+  const lowerLead = atLevel.length ? [...pool].sort((x, y) => lower(y) - lower(x))[0] : undefined;
+  const chosen = belowLead ?? (lowerLead && voo && lower(lowerLead) > lower(voo) ? lowerLead : undefined) ?? voo ?? pool[0];
+  const exReasons: string[] = [];
+  const whyOf = new Map<string, string>();
+  for (const f of etfFacts) {
+    const why = f === chosen
+      ? (f === belowLead ? `${f.b.bucket} is ${pct(f.b.weight)}, below its ${pct(f.b.normal!.low)}–${pct(f.b.normal!.high)} range, so it leads`
+        : f === lowerLead && f !== voo ? `it lowers the concentrations already at their levels (${atLevel.join(", ")}) the most`
+        : `it is your stated benchmark with published forecasts, it keeps ${f.b.bucket} inside its range (${pct(f.b.weight)} → ${pct(f.after)}), and none of your concentrations is at a level that calls for a less concentrated fund`)
+      : f.endsAbove ? `${f.b.bucket} would go to ${pct(f.after)}, above its ${pct(f.b.normal!.high)} normal top`
+      : f.crosses.length ? `it would push ${f.crosses.map((r) => r.label).join(", ")} past ${f.crosses.length > 1 ? "their levels" : "its level"}`
+      : !ALTERNATIVES.some((a) => a.symbol === f.symbol) ? `no published return forecast on file to compare it with, and no concentration needs it now`
+      : `${f.symbol === "VOO" ? "the default" : "a valid alternative"}, not preferred here`;
+    whyOf.set(f.symbol, why);
+    exReasons.push(`${f.symbol}${f === chosen ? " (chosen)" : ""}: ${why}. ${f.imp?.summary ?? ""} ${f.b.bucket} ${pct(f.b.weight)} → ${pct(f.after)}${f.b.normal ? ` (normal ${pct(f.b.normal.low)}–${pct(f.b.normal.high)})` : ""}.`);
+  }
+  exReasons.sort((x, y) => Number(y.includes("(chosen)")) - Number(x.includes("(chosen)")));
+  const cashImp = impactOf("CASH");
+  exReasons.push(`Keep cash: no stock risk, and it earns about ${yields.y2 ? `the 2-year Treasury's ${yields.y2.value.toFixed(2)}%` : "a savings or Treasury rate"} (your savings yield is not entered). ${cashImp?.summary ?? ""} Better than any ETF for money you may need within a few years; the ETF forecasts (10-15 years) only apply to money you can leave invested that long.`);
+  const heldWords = stockOptions.filter((o) => o.stance).map((o) => `${o.symbol} (${o.label === "Research says hold" ? "research says hold" : o.label.toLowerCase()})`);
+  if (heldWords.length) exReasons.push(`Existing holdings: ${stockOptions.some((o) => o.eligible) ? `${stockOptions.filter((o) => o.eligible).map((o) => o.symbol).join(", ")} qualify for new money; ` : "none qualifies for new money: "}${heldWords.join(", ")}.`);
+
+  const etfOptions: Option[] = [...etfFacts].sort((x, y) => (x === chosen ? -1 : y === chosen ? 1 : 0)).map((f) => {
+    const { b, symbol } = f;
+    const h = portfolio.holdings.find((x) => x.symbol === symbol);
+    const alt = ALTERNATIVES.find((x) => x.symbol === symbol) ?? null;
+    const notes = [f === chosen ? `Chosen because ${whyOf.get(symbol)}` : `${b.bucket} is ${pct(b.weight)}${b.normal ? `, normal range ${pct(b.normal.low)}–${pct(b.normal.high)}` : ""}`,
+      alt ? `Published forecasts: ${alt.forecasts.map((x) => `${x.firm} ${x.asset} ${x.kind === "range" ? `${pct(x.low)}–${pct(x.high)}` : pct(x.low)} (${x.horizonYears[0] === x.horizonYears[1] ? x.horizonYears[0] : x.horizonYears.join("–")} years, as of ${x.asOf})`).join("; ")}. Forecasts, not promises` : "No published forecast on file for this bucket, so it is not ranked on return",
+      ...(f.imp ? [`Whole-portfolio effect: ${f.imp.summary}`] : [])];
+    if (b.status === "over_max" || b.status === "above") notes.push("Already above its normal range");
+    return {
+      kind: "etf" as const, symbol, label: (f === chosen ? "Candidate" : "Valid option") as OptionLabel, price: h?.price ?? args.quotes?.get(symbol)?.price ?? null,
+      priceSource: h?.priceSource ?? null, expectedReturn: null, forecast: alt, headroomDollars: null, weightNow: b.weight, maxWeight: b.hardMax,
+      limitStatus: b.status === "no_limit" ? "none" : policy?.buckets.find((x) => x.bucket === b.bucket)?.status ?? "none", eligible: b.status !== "over_max", notes, researchAction: null, zoneAction: null, toVerify: [],
+    };
+  });
 
   const trimOptions: Option[] = portfolio.exposures.filter((e) => e.total > e.max).map((e) => ({
     kind: "trim", symbol: e.symbol, label: "Trim review", price: portfolio.holdings.find((h) => h.symbol === e.symbol)?.price ?? null, priceSource: null,
@@ -264,11 +389,12 @@ export function newCapital(args: {
     kind: "cash", symbol: "CASH", label: "Valid option", price: null, priceSource: null, expectedReturn: null, headroomDollars: null,
     weightNow: portfolio.total ? portfolio.cash / portfolio.total : 0, maxWeight: null, limitStatus: null, eligible: true,
     notes: ["Policy: new cash does not have to be invested immediately", `The $${portfolio.cashDetail.protectedReserve.toLocaleString()} protected reserve is excluded from sizing`,
-      yields.y2 ? `Risk-free alternative: 2-year Treasury ${yields.y2.value.toFixed(2)}% (FRED, ${yields.y2.date}); your savings yield is not entered` : "Treasury yields not loaded; your savings yield is not entered"],
+      yields.y2 ? `Risk-free alternative: 2-year Treasury ${yields.y2.value.toFixed(2)}% (FRED, ${yields.y2.date}); your savings yield is not entered` : "Treasury yields not loaded; your savings yield is not entered",
+      ...(cashImp ? [`Whole-portfolio effect: ${cashImp.summary}`] : [])],
     researchAction: null, zoneAction: null, toVerify: [],
   };
 
-  // ---- Illustrative split: best eligible stocks to their ceilings, the rest to the most underweight ETF ----
+  // ---- Split: stocks that qualify up to their room, the rest to the chosen diversified ETF ----
   const eligible = [...stockOptions, ...newOptions].filter((o) => o.eligible).sort((x, y) => (y.expectedReturn ?? 0) - (x.expectedReturn ?? 0));
   const allocations: { symbol: string; amount: number }[] = [];
   const rationale: string[] = [];
@@ -281,60 +407,65 @@ export function newCapital(args: {
     if (toStock <= 0) continue;
     allocations.push({ symbol: c.symbol, amount: toStock });
     remaining -= toStock;
-    rationale.push(`${c.symbol}: the research supports adding at today's price ("${c.stance?.text ?? ""}") and the modeled return agrees. ${c.assessment?.summary ?? ""}${c.highConviction ? " Sized to its approved high-conviction range." : ""}`);
+    rationale.push(`${c.symbol}: the research supports adding at today's price ("${c.stance?.text ?? ""}") and nothing material has changed since. ${c.assessment?.summary ?? ""}${c.highConviction ? " Sized to its approved high-conviction range." : ""}`);
     if (/specul|asymmetric/i.test(research.find((r) => r.symbol === c.symbol)?.current?.parsed.classification ?? "")) confidence -= 1;
     wouldChange.push(`${c.symbol}: a price move out of the research's add zone, a filing that changes its scenarios, or new evidence against its thesis.`);
   }
-  const etf = etfOptions.find((o) => o.eligible) ?? etfOptions[0];
-  if (remaining > 0 && etf) {
+  const etf = etfOptions[0];
+  if (remaining >= 1 && etf) {
     allocations.push({ symbol: etf.symbol, amount: Math.round(remaining * 100) / 100 });
-    rationale.push(eligible.length
-      ? `The rest to ${etf.symbol}: ${etf.notes[0].toLowerCase()}.`
-      : `No stock qualifies for new money on current evidence, so the money goes to ${etf.symbol}: ${etf.notes[0].toLowerCase()}. Holding cash is equally valid if you expect to need it.`);
+    rationale.push(`${eligible.length ? "The rest" : "No stock qualifies for new money on current evidence, so the money"} to ${etf.symbol}, because ${whyOf.get(etf.symbol) ?? "it is the chosen diversified option"}. Holding cash is equally valid for money you may need within a few years.`);
   }
   rationale.push("Account: assumes the money goes to your taxable brokerage account. Retirement contributions have annual limits, and selling in a taxable account can realize gains.");
+  wouldChange.push(`${etf?.symbol ?? "The ETF"}: a concentration (NVIDIA, semiconductors, AI infrastructure, technology) reaching its level, which would favour a less concentrated fund, or needing the money within a few years, which favours cash.`);
 
-  // ---- Gates ----
+  // ---- Execution readiness ----
   const brokerAccounts = portfolio.accounts.filter((a) => a.role !== "cash" && a.role !== "protected_savings");
-  // Holdings are known through the later of each statement and the trades recorded since it (confirmations).
-  const oldest = brokerAccounts.reduce((m, a) => Math.max(m, a.knownAgeDays ?? a.ageDays), 0);
-  const stalest = brokerAccounts.find((a) => (a.knownAgeDays ?? a.ageDays) === oldest);
+  // A statement, sync or your own check within a week verifies an account. Trades recorded since an older
+  // statement show what probably happened; they are not a reconciliation.
+  const unverified = brokerAccounts.filter((a) => a.ageDays > HOLDINGS_FRESH_DAYS || a.tradesAfter > 0);
   const gaps = brokerAccounts.filter((a) => a.statementGap !== null && Math.abs(a.statementGap) > 1);
-  const refresh = [...stockOptions].filter((o) => o.label === "Refresh required" || o.label === "Research needed");
-  const receiving = allocations.map((x) => x.symbol);
+  const confirmed = !!args.holdingsConfirmed;
+  const refresh = stockOptions.filter((o) => o.label === "Refresh required" || o.label === "Research needed");
+  const receivingStocks = allocations.map((x) => x.symbol).filter((s) => ![...etfOptions].some((e) => e.symbol === s));
   const gates: Gate[] = [
-    { key: "holdings", label: "Holdings are current", ok: oldest <= HOLDINGS_FRESH_DAYS && !gaps.length,
-      detail: oldest > HOLDINGS_FRESH_DAYS ? `${stalest?.name ?? "An account"} is only known through ${stalest?.knownThrough ?? "its statement"} (${oldest} days). Confirm holdings or record trades since then`
-        : gaps.length ? `Statement totals do not add up for ${gaps.map((a) => a.name).join(", ")}`
-        : `Every account known through a statement or recorded trades within ${HOLDINGS_FRESH_DAYS} days${portfolio.quality.reconciliation.complete ? "" : ` (not blocking: ${portfolio.quality.reconciliation.gaps.join("; ")})`}` },
-    { key: "cash", label: "Available cash is known", ok: portfolio.cashDetail.savings !== null && (source === "new" || amount <= portfolio.cashDetail.deployable),
-      detail: portfolio.cashDetail.savings === null ? "Enter your savings balance so the protected reserve and deployable cash are known"
-        : source === "existing" && amount > portfolio.cashDetail.deployable ? `Only $${portfolio.cashDetail.deployable.toLocaleString()} is deployable after the protected reserve` : `Deployable cash $${portfolio.cashDetail.deployable.toLocaleString()}` },
-    { key: "research", label: "No unresolved material events", ok: !refresh.length,
-      detail: refresh.length ? `${refresh.map((o) => o.symbol).join(", ")}: something material changed since the research, or filings could not be checked. Until that is resolved the best use of the money may change` : "No new results, financings or zone changes since each held stock's research" },
+    { key: "funds", label: "The money is verified", ok: source === "planned" ? false : portfolio.cashDetail.savings !== null && amount >= 1,
+      detail: source === "planned" ? `${funds.detail}. Choose "New, already deposited" once it has arrived`
+        : portfolio.cashDetail.savings === null ? "Enter your savings balance so the protected reserve and deployable cash are known"
+        : amount < 1 ? `No deployable cash: the $${portfolio.cashDetail.protectedReserve.toLocaleString()} protected reserve takes everything held` : funds.detail },
+    { key: "holdings", label: "Holdings and balances are verified", ok: confirmed || (!unverified.length && !gaps.length),
+      detail: confirmed ? `You confirmed today that the holdings and balances shown match your broker accounts${portfolio.quality.reconciliation.complete ? "" : ` (still open, not blocking: ${portfolio.quality.reconciliation.gaps.join("; ")})`}`
+        : unverified.length ? `${unverified.map((a) => `${a.name}: statement ${a.asOf.slice(0, 10)} (${a.ageDays} days)${a.tradesAfter ? `, plus ${a.tradesAfter} recorded transactions through ${a.knownThrough}` : ""}`).join("; ")}. Recorded transactions are not a reconciliation: check each account in its app and confirm, or add a current statement`
+        : gaps.length ? `Statement totals do not add up for ${gaps.map((a) => a.name).join(", ")}. Check them against your broker accounts and confirm`
+        : `Every account verified by a statement or sync within ${HOLDINGS_FRESH_DAYS} days` },
+    { key: "research", label: "No unresolved material developments", ok: !refresh.length && !receivingStocks.some((s) => newOptions.find((o) => o.symbol === s)?.label === "Refresh required"),
+      detail: refresh.length ? `${refresh.map((o) => o.symbol).join(", ")}: something material changed since the research (results, financing, a material 8-K, a price or valuation change), or filings could not be checked. Until it is reassessed the best use of the money may change` : "No new results, financings, material filings or valuation changes since each held stock's research" },
   ];
-  // Dollar amounts only when every readiness check passes. The analysis and its leaning are given either way.
-  const status: NewCapitalResult["status"] = gates.every((g) => g.ok) ? "actionable" : "analysis_only";
+  // Ready to execute only when every check passes. The analysis, the leaning and the conditions are given either way.
+  const status: NewCapitalResult["status"] = gates.every((g) => g.ok) ? "ready" : "conditional";
   const toVerify = [
     ...gates.filter((g) => !g.ok && g.key !== "research").map((g) => g.detail),
     ...refresh.flatMap((o) => o.toVerify),
     ...[...stockOptions, ...newOptions].filter((o) => o.label === "Condition not met" || o.label === "Limit not approved").flatMap((o) => o.toVerify),
   ].filter((x, i, a) => a.indexOf(x) === i);
 
-  if (refresh.length) wouldChange.unshift(`Refreshed research on ${refresh.map((o) => o.symbol).join(", ")} that sets expected returns at today's prices.`);
+  if (refresh.length) wouldChange.unshift(`Reassessed research on ${refresh.map((o) => o.symbol).join(", ")} at today's prices and filings.`);
   for (const o of [...stockOptions, ...newOptions].filter((x) => x.label === "Condition not met")) wouldChange.push(`${o.symbol}: confirmation of the research's condition (${o.stance?.condition}).`);
-  confidence -= gates.filter((g) => !g.ok).length;
+  confidence -= gates.filter((g) => !g.ok && g.key !== "funds").length;
 
   const researched = [...stockOptions, ...newOptions].filter((o) => o.stance);
-  const why = researched.slice(0, 5).map((o) => `${o.symbol}: ${o.label === "Research says hold" ? "research says hold" : o.label === "Condition not met" ? "add only on a condition not yet met" : o.label.toLowerCase()}`).join("; ");
+  const why = researched.slice(0, 5).map((o) => `${o.symbol}: ${o.label === "Research says hold" ? "research says hold" : o.label === "Condition not met" ? "add only on a condition not yet met" : o.label === "Refresh required" ? "reassess first" : o.label.toLowerCase()}`).join("; ");
+  const choiceWords = etf && whyOf.get(etf.symbol) ? `${etf.symbol}, because ${whyOf.get(etf.symbol)}` : "";
   const lean = eligible.length
-    ? `Lean: add to ${eligible.slice(0, 2).map((o) => o.symbol).join(" and ")}, where the research and the modeled return both support it and you approved the limit${etf && allocations.some((x) => x.symbol === etf.symbol) ? `; the rest to ${etf.symbol}` : ""}.`
-    : `Lean: ${etf?.symbol ?? "VOO"} or hold cash. ${etf ? `${etf.symbol}: ${etf.notes[0].charAt(0).toLowerCase()}${etf.notes[0].slice(1)}. ` : ""}No stock qualifies for new money right now${why ? ` (${why})` : ""}.`;
-  const leanShort = eligible.length ? `Leaning: add to ${eligible.slice(0, 2).map((o) => o.symbol).join(" and ")}` : `Leaning: ${etf?.symbol ?? "VOO"} or hold cash`;
+    ? `Lean: add to ${eligible.slice(0, 2).map((o) => o.symbol).join(" and ")}, where the research supports it, nothing material has changed and you approved the limit${etf && allocations.some((x) => x.symbol === etf.symbol) ? `; the rest to ${etf.symbol}` : ""}.`
+    : `Lean: ${etf?.symbol ?? "VOO"} or keep cash. ${choiceWords ? `${choiceWords}. ` : ""}No stock qualifies for new money right now${why ? ` (${why})` : ""}.`;
   const split = allocations.map((x) => `$${x.amount.toLocaleString()} ${x.symbol}`).join(" + ");
+  const openWords = gates.filter((g) => !g.ok).map((g) => g.key === "funds" ? (source === "planned" ? "the money arrives" : "your cash is confirmed") : g.key === "holdings" ? "your balances are verified" : "open research is reassessed");
+  const openList = openWords.length > 1 ? `${openWords.slice(0, -1).join(", ")} and ${openWords[openWords.length - 1]}` : openWords[0] ?? "";
   return {
     amount,
     source,
+    funds,
     asOf: now.toISOString(),
     status,
     lean,
@@ -349,13 +480,24 @@ export function newCapital(args: {
     ],
     recommendation: {
       allocations,
-      illustrative: status !== "actionable",
+      illustrative: status !== "ready",
       confidence: Math.max(1, Math.min(10, confidence)),
-      headline: status === "actionable" ? split || "Hold cash" : leanShort,
+      headline: !split ? "Keep cash" : status === "ready" ? split : `${split}, once ${openList}`,
       rationale,
       wouldChange,
     },
-    assumptions: { alternatives: ALTERNATIVES, riskFree10y: riskFreeFor(10, yields) },
+    exposure: { impacts: ex.impacts, choice: etf?.symbol ?? "CASH", reasons: exReasons },
+    assumptions: {
+      alternatives: ALTERNATIVES, riskFree10y: riskFreeFor(10, yields),
+      items: [
+        funds.detail,
+        `Investable capital $${Math.round(portfolio.total).toLocaleString()} (${portfolio.quality.status}); the $${portfolio.cashDetail.protectedReserve.toLocaleString()} protected reserve is excluded`,
+        `Prices: ${portfolio.pricedLive} of ${portfolio.holdings.length} holdings from delayed quotes, the rest from statements`,
+        "Fund look-through from each fund's dated published holdings and sector/country splits; industry and theme figures are lower bounds",
+        "Exposure levels: those you approved, else the app's drafted proposals (labelled proposed)",
+        "The money goes to your taxable brokerage account",
+      ],
+    },
     warnings,
   };
 }
@@ -365,4 +507,19 @@ const rankLabel = (l: OptionLabel) => LABEL_ORDER.indexOf(l);
 
 export function pct(n: number, digits = 1) {
   return `${(n * 100).toFixed(digits)}%`;
+}
+
+/** Reads the money source from a form or URL value. Anything unrecognised is treated as planned (unverified) money. */
+export function parseSource(raw: unknown): MoneySource {
+  return raw === "existing" ? "existing" : raw === "deposited" ? "deposited" : "planned";
+}
+
+/** The policy rows on file (approved and pending), for the exposure levels. */
+export function ruleRowsOf(policy: Policy | null): PolicyRuleRow[] {
+  return policy?.audit?.subjects.flatMap((s) => [...(s.approvedRow ? [s.approvedRow] : []), ...s.candidates]) ?? [];
+}
+
+/** The decisions table stores the older two-value status; the detailed status stays in the recommendation JSON. */
+export function dbStatus(status: NewCapitalResult["status"]): "actionable" | "wait_review" {
+  return status === "ready" ? "actionable" : "wait_review";
 }

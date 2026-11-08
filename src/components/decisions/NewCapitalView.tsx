@@ -2,7 +2,8 @@ import Form from "next/form";
 import { ActionForm, SubmitButton } from "@/components/forms";
 import Link from "next/link";
 import type { Workspace } from "@/lib/workspace";
-import { newCapital, type OptionLabel } from "@/lib/decision/newCapital";
+import { newCapital, ruleRowsOf, type MoneySource, type OptionLabel } from "@/lib/decision/newCapital";
+import { WATCHED } from "@/lib/decision/exposureImpact";
 import { recordNewCapital } from "@/app/(app)/decisions/actions";
 import { loadDecisionFilings } from "@/lib/alerts/events";
 import { AskButton } from "@/components/AskPanel";
@@ -14,45 +15,52 @@ const LABEL_TONE: Record<OptionLabel, "gain" | "warn" | "neutral" | "solid" | "a
 };
 const KIND: Record<string, string> = { stock: "Existing position", new_stock: "New position", etf: "Diversified ETF", cash: "Always available", trim: "Reduce exposure" };
 const GATE_LINK: Record<string, { href: string; label: string }> = {
-  holdings: { href: "/portfolio/reconcile", label: "Update holdings" },
-  cash: { href: "/portfolio/reconcile", label: "Enter savings" },
+  holdings: { href: "/portfolio/reconcile", label: "Check accounts" },
   research: { href: "/research", label: "Refresh research" },
 };
 
 /**
  * Investment Decision card set for new cash. The engine decides; this only lays it out.
- * The analysis (what the research and the numbers say, and the leaning) always shows. Dollar amounts are
- * actionable only when holdings, cash and material events are all settled; otherwise they are illustrative.
+ * The analysis (what the research and the numbers say, and the leaning) always shows. A split is "ready to
+ * execute" only when the money, the holdings and the research are all verified; otherwise it is conditional.
  */
-export async function NewCapitalView({ ws, amount, source, action }: { ws: Workspace; amount: number; source: "new" | "existing"; action: string }) {
+export async function NewCapitalView({ ws, amount, source, confirmed, action }: { ws: Workspace; amount: number; source: MoneySource; confirmed: boolean; action: string }) {
   const filings = await loadDecisionFilings(ws);
-  const r = newCapital({ amount, source, portfolio: ws.portfolio, research: ws.research, policy: ws.policy, now: ws.now, quotes: ws.quotes, filings, yields: ws.yields });
+  const r = newCapital({ amount, source, holdingsConfirmed: confirmed, portfolio: ws.portfolio, research: ws.research, policy: ws.policy, now: ws.now, quotes: ws.quotes, filings, yields: ws.yields, rules: ruleRowsOf(ws.policy) });
   const rec = r.recommendation;
-  const wait = r.status !== "actionable";
+  const wait = r.status !== "ready";
+  const shown = r.exposure.impacts.filter((x) => x.label !== "Existing holding");
   const open = r.gates.filter((g) => !g.ok);
 
   return (
     <div className="grid grid-cols-1 gap-3 lg:gap-4 lg:grid-cols-12 items-start">
       <div className="lg:col-span-6 flex flex-col gap-3 lg:gap-4 min-w-0">
-        <Form action={action} className="card card-tight !flex-row items-end gap-2">
-          <label className="field flex-1">Amount
-            <span className="flex items-center rounded-[12px] border border-line-strong bg-ground px-3 min-h-11"><span className="text-muted">$</span><input name="amount" defaultValue={amount} inputMode="decimal" aria-label="Amount in dollars" className="w-full min-h-11 bg-transparent px-1 num outline-none text-ink" /></span>
-          </label>
-          <label className="field flex-1">From
-            <select name="source" defaultValue={source} className="input">
-              <option value="new">New money</option>
-              <option value="existing">Cash I hold</option>
-            </select>
-          </label>
-          <button className="btn shrink-0">Update</button>
+        <Form action={action} className="card card-tight !gap-2">
+          <div className="flex items-end gap-2">
+            <label className="field flex-1">Amount
+              <span className="flex items-center rounded-[12px] border border-line-strong bg-ground px-3 min-h-11"><span className="text-muted">$</span><input name="amount" defaultValue={amount} inputMode="decimal" aria-label="Amount in dollars" className="w-full min-h-11 bg-transparent px-1 num outline-none text-ink" /></span>
+            </label>
+            <label className="field flex-1">The money is
+              <select name="source" defaultValue={source} className="input">
+                <option value="planned">New, not deposited yet</option>
+                <option value="deposited">New, already deposited</option>
+                <option value="existing">Cash I already hold</option>
+              </select>
+            </label>
+          </div>
+          <span className="flex items-center justify-between gap-2">
+            <label className="inline-flex items-center gap-2.5 min-h-11 t-sm text-ink"><input type="checkbox" name="confirmed" value="1" defaultChecked={confirmed} className="w-[18px] h-[18px] accent-[var(--accent)]" /> I checked my accounts today and the holdings match</label>
+            <button className="btn shrink-0">Update</button>
+          </span>
         </Form>
 
         <Card labelledBy="res-h">
-          <CardHead id="res-h" cap="Result" right={wait ? <Pill tone="warn">Analysis · not ready to act</Pill> : <DataLabel kind="recommendation">Ready to act</DataLabel>} />
+          <CardHead id="res-h" cap="Result" right={wait ? <Pill tone="warn">Conditional · not ready to execute</Pill> : <DataLabel kind="recommendation">Ready to execute</DataLabel>} />
           <div className="flex flex-col gap-1">
             <span className="text-[20px] font-semibold tracking-tight leading-snug">{rec.headline}</span>
             <span className="t-sm">{r.lean}</span>
-            <span className="t-xs">{wait ? `This is the analysis on current evidence. Dollar amounts wait for ${open.length === 1 ? "the open check" : `the ${open.length} open checks`} below, because they change what can responsibly be bought. Holding cash is always a valid choice.` : `Holdings, cash and research are current, and every limit used is one you approved. Confidence ${rec.confidence}/10.`}</span>
+            <span className="t-xs">{r.funds.detail}.</span>
+            <span className="t-xs">{wait ? `This is the recommendation on current evidence, and what to do once ${open.length === 1 ? "the open condition below is" : `the ${open.length} open conditions below are`} met. It is not an order to place now. Keeping cash is always a valid choice.` : `The money, your holdings and the research are verified, and every limit used is one you approved. Confidence ${rec.confidence}/10.`}</span>
           </div>
           <ul className="flex flex-col gap-2">
             {r.gates.map((g) => (
@@ -86,6 +94,24 @@ export async function NewCapitalView({ ws, amount, source, action }: { ws: Works
       </div>
 
       <div className="lg:col-span-6 flex flex-col gap-3 lg:gap-4 min-w-0">
+        <Card labelledBy="ex-h" className="!gap-2">
+          <CardHead id="ex-h" title="Effect on your whole portfolio" right={<span className="t-xs">before → after</span>} />
+          <div className="overflow-x-auto -mx-1">
+            <table className="w-full t-xs num">
+              <thead><tr className="text-muted"><th className="text-left font-normal px-1">If {usd(r.funds.used)} goes to</th>{WATCHED.filter((w) => w.key !== "us").map((w) => <th key={w.key} className="text-right font-normal px-1">{w.key === "nvda" ? "NVDA" : w.key === "tech" ? "Tech" : w.key === "semis" ? "Chips" : w.key === "ai" ? "AI infra" : "EM"}</th>)}</tr></thead>
+              <tbody>
+                <tr className="border-t border-line"><td className="text-left px-1 py-1">Today</td>{WATCHED.filter((w) => w.key !== "us").map((w) => { const row = shown[0]?.rows.find((x) => x.key === w.key); return <td key={w.key} className="text-right px-1">{row ? pctStr(row.before) : "—"}</td>; })}</tr>
+                {shown.map((x) => (
+                  <tr key={x.symbol} className="border-t border-line"><td className={`text-left px-1 py-1 ${x.symbol === r.exposure.choice ? "text-ink font-semibold" : ""}`}>{x.symbol === "CASH" ? "Keep cash" : x.symbol}</td>
+                    {WATCHED.filter((w) => w.key !== "us").map((w) => { const row = x.rows.find((y) => y.key === w.key); return <td key={w.key} className={`text-right px-1 ${row?.crosses ? "warn" : ""}`}>{row ? pctStr(row.after) : "—"}</td>; })}</tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+          <ul className="list-disc pl-4 t-sm flex flex-col gap-1">{r.exposure.reasons.map((x) => <li key={x}>{x}</li>)}</ul>
+          <span className="t-xs">% of investable capital, including what each fund holds. Levels: NVIDIA&apos;s limit and the exposure levels on file ({shown[0]?.rows.find((x) => x.key === "semis")?.level?.status ?? "proposed"}). Industry and theme figures are lower bounds.</span>
+        </Card>
+
         <Card className="!gap-1 !pb-2" labelledBy="opt-h">
           <div className="mb-1.5"><CardHead id="opt-h" title="Options compared" right={<span className="t-xs">exp. return · room</span>} /></div>
           <div className="list">
@@ -106,9 +132,16 @@ export async function NewCapitalView({ ws, amount, source, action }: { ws: Works
                     {o.price !== null && <span>{usd(o.price, 2)}{o.priceSource === "statement" ? " (statement)" : " (delayed)"}</span>}
                     {o.expectedReturn !== null && <span>exp. {pctStr(o.expectedReturn)}/yr (research model)</span>}
                     {o.forecast && <span>forecasts {o.forecast.forecasts.map((f) => (f.kind === "range" ? `${pctStr(f.low)}–${pctStr(f.high)}` : pctStr(f.low))).join(" · ")}</span>}
-                    {o.assessment && <span>model vs VOO: {o.assessment.judgment}</span>}{o.stance && <span>research: {o.stance.kind === "add" ? "add" : o.stance.kind === "conditional" ? "add only if a condition is met" : o.stance.kind}</span>}
+                    {o.assessment && <span>model vs VOO: {o.assessment.judgment}{o.assessment.comparison === "approximate" ? ` (approx., ${o.assessment.horizonYears.toFixed(1)}-yr vs 10-yr)` : ""}</span>}{o.stance && <span>research: {o.stance.kind === "add" ? "add" : o.stance.kind === "conditional" ? "add only if a condition is met" : o.stance.kind}</span>}
                     {o.weightNow !== null && <span>now {pctStr(o.weightNow)}{o.maxWeight !== null ? ` of ${pctStr(o.maxWeight, 0)}` : ""}</span>}
                   </div>
+                  {o.reassessment && (
+                    <div className="flex flex-col gap-0.5 border-l-2 border-line pl-2">
+                      <span><span className="text-ink">Research conclusion ({o.reassessment.conclusion.asOf}{o.reassessment.conclusion.referencePrice ? `, at $${o.reassessment.conclusion.referencePrice}` : ""}):</span> {o.reassessment.conclusion.action}</span>
+                      <span><span className="text-ink">Recommendation now:</span> {o.reassessment.current}</span>
+                      {o.reassessment.changes.length > 0 && <span className="t-xs">Since then: {o.reassessment.changes.join("; ")}.</span>}
+                    </div>
+                  )}
                   {o.zoneAction && <span>Research price band today: {o.zoneAction} (a prompt to research, not a trade).</span>}
                   <ul className="list-disc pl-4 flex flex-col gap-0.5">{o.notes.map((n) => <li key={n}>{n}</li>)}</ul>
                   {o.assessment && (
@@ -118,18 +151,18 @@ export async function NewCapitalView({ ws, amount, source, action }: { ws: Works
               </details>
             ))}
           </div>
-          <span className="t-xs">The research&apos;s own conclusion at today&apos;s price decides the action; the modeled return never overrides it. Expected returns are model estimates from the research scenarios at today&apos;s price, and the scenario probabilities are the research&apos;s subjective assumptions. Each stock is compared with VOO&apos;s published forecasts (shown separately, never averaged), a Treasury for the same horizon, its downside and its concentration. A drop is never a buy signal by itself.</span>
+          <span className="t-xs">The research&apos;s conclusion guides the action until something material changes (price, valuation, results, filings, financing); then it is shown as the old conclusion and the stock is reassessed before any new money. A few-year stock case and VOO&apos;s 10-15-year forecasts are not like for like, so that comparison is context, not a pass/fail. Expected returns are model estimates from the research scenarios at today&apos;s price, and the scenario probabilities are the research&apos;s subjective assumptions. Each stock is compared with VOO&apos;s published forecasts (shown separately, never averaged), a Treasury for the same horizon, its downside and its concentration. A drop is never a buy signal by itself.</span>
         </Card>
 
         <Card flush>
-          <Disclose open={!wait} summary={wait ? "Illustrative split (not a recommendation)" : `Why this split · confidence ${rec.confidence}/10`}>
-            {wait && <DataLabel kind="illustrative" />}
+          <Disclose open={!wait} summary={wait ? "The split once the conditions are met" : `Why this split · confidence ${rec.confidence}/10`}>
             <div className="num text-[17px] text-ink">{rec.allocations.length ? rec.allocations.map((x) => `${usd(x.amount)} ${x.symbol}`).join(" + ") : "Nothing allocated"}</div>
-            {wait && <p className="t-sm warn">Shown only to make the engine&apos;s mechanics visible: your cash is not confirmed.</p>}
+            {wait && <p className="t-sm warn">Conditional, not ready to execute: {open.map((g) => g.label.toLowerCase()).join("; ")} still open.</p>}
             <ul className="list-disc pl-4 t-sm flex flex-col gap-1">{rec.rationale.map((x) => <li key={x}>{x}</li>)}</ul>
             {rec.wouldChange.length > 0 && <p className="t-sm"><span className="text-ink font-semibold">Would change it:</span> {rec.wouldChange.join(" ")}</p>}
           </Disclose>
           <Disclose summary="Assumptions and sources">
+            <ul className="list-disc pl-4 t-sm flex flex-col gap-0.5">{r.assumptions.items.map((x) => <li key={x}>{x}</li>)}</ul>
             <ul className="t-sm flex flex-col gap-1">
               {r.assumptions.alternatives.flatMap((alt) => alt.forecasts.map((f) => (
                 <li key={`${alt.symbol}-${f.firm}-${f.asset}`} className="flex justify-between gap-3"><span>{alt.symbol}: {f.firm}, {f.asset}</span><span className="num text-ink text-right">{f.kind === "range" ? `${pctStr(f.low)}–${pctStr(f.high)}` : pctStr(f.low)} <span className="t-xs">· {f.horizonYears[0] === f.horizonYears[1] ? f.horizonYears[0] : f.horizonYears.join("–")} yrs, {f.asOf}</span></span></li>
@@ -144,10 +177,11 @@ export async function NewCapitalView({ ws, amount, source, action }: { ws: Works
             <ActionForm action={recordNewCapital} success="Decision saved" className="flex flex-col gap-2.5">
               <input type="hidden" name="amount" value={amount} />
               <input type="hidden" name="source" value={source} />
+              {confirmed && <input type="hidden" name="confirmed" value="1" />}
               <fieldset className="flex flex-col gap-1">
                 <legend className="t-xs mb-1">Your decision (nothing is selected for you)</legend>
                 {(wait
-                  ? [["deferred", "Wait and confirm cash first"], ["declined", "Act anyway, differently (describe below)"], ["partially_followed", "Act on part of the illustrative split"]]
+                  ? [["deferred", "Wait until the conditions are met"], ["declined", "Act anyway, differently (describe below)"], ["partially_followed", "Act on part of the illustrative split"]]
                   : [["followed", "Follow the recommendation"], ["partially_followed", "Follow part of it"], ["declined", "Do something else"], ["deferred", "Decide later / keep cash"]]
                 ).map(([v, l]) => (
                   <label key={v} className="inline-flex items-center gap-2.5 min-h-11 t-sm text-ink"><input type="radio" name="user_action" value={v} required className="w-[18px] h-[18px] accent-[var(--accent)]" /> {l}</label>

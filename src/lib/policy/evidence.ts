@@ -91,6 +91,8 @@ export type Assessment = {
   judgment: "favourable" | "mixed" | "unfavourable";
   /** True when the research horizon is close enough to the forecasts' 10-15 years to compare annual rates directly. */
   horizonCompatible: boolean;
+  /** direct: like-for-like horizons. approximate: a few-year stock case vs 10-15-year index forecasts, context only, never a pass/fail. */
+  comparison: "direct" | "approximate";
   /** Total return over the research's own horizon: the stock's probability-weighted case vs VOO's forecasts compounded over the same years. */
   overHorizon: { years: number; stock: number; vooLow: number; vooHigh: number };
   summary: string;
@@ -129,9 +131,12 @@ export function assessVsAlternatives(pc: ParsedConclusion, price: number, now: D
   const bear = [...scenarios].sort((a, b) => a.annual - b.annual)[0];
   const best = [...scenarios].sort((a, b) => b.annual - a.annual)[0];
   const factors: Factor[] = [];
+  const horizonCompatible = horizonYears >= 8;
+  const T = horizonYears;
+  const overHorizon = { years: r4(T), stock: r4(Math.pow(1 + expected, T) - 1), vooLow: r4(Math.pow(1 + VOO_SPAN.low, T) - 1), vooHigh: r4(Math.pow(1 + VOO_SPAN.high, T) - 1) };
 
-  factors.push({ label: "Expected return vs VOO", leans: vsVoo === "above_all" ? "for" : vsVoo === "below_all" ? "against" : "neutral",
-    finding: `${f1(expected)} a year expected vs published VOO forecasts of ${VOO.forecasts.map((x) => `${x.kind === "range" ? `${f1(x.low)}–${f1(x.high)}` : f1(x.low)} (${x.firm})`).join(" and ")}: ${vsVoo === "above_all" ? "above all of them" : vsVoo === "below_all" ? "below all of them" : "inside their spread, so the difference is within forecast uncertainty"}.` });
+  factors.push({ label: "Expected return vs VOO", leans: !horizonCompatible ? "neutral" : vsVoo === "above_all" ? "for" : vsVoo === "below_all" ? "against" : "neutral",
+    finding: `${f1(expected)} a year expected${horizonCompatible ? "" : ` over ${T.toFixed(1)} years`} vs published VOO forecasts of ${VOO.forecasts.map((x) => `${x.kind === "range" ? `${f1(x.low)}–${f1(x.high)}` : f1(x.low)} (${x.firm}, ${x.horizonYears[0] === x.horizonYears[1] ? x.horizonYears[0] : x.horizonYears.join("–")} years)`).join(" and ")}: ${vsVoo === "above_all" ? "above all of them" : vsVoo === "below_all" ? "below all of them" : "inside their spread, so the difference is within forecast uncertainty"}${horizonCompatible ? "" : ". The horizons differ, so these rates are not like for like"}.` });
   if (ctx.riskFree) factors.push({ label: "Vs a risk-free Treasury", leans: expected > ctx.riskFree.rate ? "neutral" : "against", finding: `${f1(ctx.riskFree.rate)} a year is available without stock risk (${ctx.riskFree.detail}).` });
   factors.push({ label: "Odds of beating VOO", leans: probBeatVooLow > 0.5 ? "for" : "against",
     finding: `Using the research's own scenario probabilities (subjective assumptions, not statistical confidence): ${Math.round(probBeatVooLow * 100)}% chance of beating the lowest VOO forecast, ${Math.round(probBeatVooHigh * 100)}% of beating the highest.` });
@@ -139,9 +144,6 @@ export function assessVsAlternatives(pc: ParsedConclusion, price: number, now: D
     finding: `${Math.round(probLoss * 100)}% chance of being worth less than today at the horizon. Bear case (${Math.round(bear.probability * 100)}%): ${f1(bear.total)} in total, ${f1(bear.annual)} a year.` });
   factors.push({ label: "Valuation uncertainty", leans: "neutral",
     finding: `Outcomes range from ${f1(bear.annual)} to ${f1(best.annual)} a year${ctx.confidence ? `; research confidence ${ctx.confidence}` : ""}${ctx.completeness && ctx.completeness !== "complete" ? `; research is ${ctx.completeness}` : ""}.` });
-  const horizonCompatible = horizonYears >= 8;
-  const T = horizonYears;
-  const overHorizon = { years: r4(T), stock: r4(Math.pow(1 + expected, T) - 1), vooLow: r4(Math.pow(1 + VOO_SPAN.low, T) - 1), vooHigh: r4(Math.pow(1 + VOO_SPAN.high, T) - 1) };
   factors.push({ label: "Same horizon", leans: "neutral", finding: horizonCompatible
     ? `The research runs about ${T.toFixed(1)} years, close to the forecasts' 10-15 years.`
     : `Over the research's ${T.toFixed(1)} years: ${f1(overHorizon.stock)} total expected for the stock vs ${f1(overHorizon.vooLow)}–${f1(overHorizon.vooHigh)} for VOO if its 10-year forecasts held over the same period. No published forecast covers ${T.toFixed(1)} years, and index returns over a few years can differ widely from 10-year forecasts, so this comparison is approximate.` });
@@ -154,17 +156,19 @@ export function assessVsAlternatives(pc: ParsedConclusion, price: number, now: D
 
   const judgment: Assessment["judgment"] = vsVoo === "above_all" && probBeatVooLow > 0.5 ? "favourable" : vsVoo === "below_all" ? "unfavourable" : "mixed";
   const approx = horizonCompatible ? "" : ` (approximate: ${T.toFixed(1)}-year research vs 10-year forecasts)`;
-  const summary = judgment === "favourable"
+  const summary = !horizonCompatible
+    ? `Modeled return over the research's ${T.toFixed(1)} years: ${f1(overHorizon.stock)} in total (${f1(expected)} a year) at today's price, vs ${f1(overHorizon.vooLow)}–${f1(overHorizon.vooHigh)} for VOO if its 10-15-year forecasts held over the same years. No forecast covers ${T.toFixed(1)} years and index returns over a few years vary widely, so this is context, not a pass/fail. The research's subjective odds of a loss: ${Math.round(probLoss * 100)}%, bear case ${f1(bear.total)}.`
+    : judgment === "favourable"
     ? `Modeled return favourable vs VOO${approx}: ${f1(expected)} a year at today's price is above every published VOO forecast, and the research's subjective scenario odds of beating the lowest one are better than even. Downside: ${Math.round(probLoss * 100)}% assumed chance of a loss, bear case ${f1(bear.total)}.`
     : judgment === "unfavourable"
       ? `Modeled return unfavourable vs VOO${approx}: ${f1(expected)} a year at today's price is below every published VOO forecast, so owning the index is expected to do better.`
       : `Modeled return mixed vs VOO${approx}: ${f1(expected)} a year at today's price${vsVoo === "above_all" ? " is above the VOO forecasts, but the research's subjective odds of beating even the lowest one are not better than even" : " is within the spread of VOO forecasts"}.`;
-  return { expected, scenarios, horizonYears: r4(horizonYears), probLoss, probBeatVooLow, probBeatVooHigh, vsVoo, riskFree: ctx.riskFree ?? null, factors, judgment, summary, horizonCompatible, overHorizon };
+  return { expected, scenarios, horizonYears: r4(horizonYears), probLoss, probBeatVooLow, probBeatVooHigh, vsVoo, riskFree: ctx.riskFree ?? null, factors, judgment, summary, horizonCompatible, comparison: horizonCompatible ? "direct" : "approximate", overHorizon };
 }
 
 // ---------- Event-driven research refresh ----------
 
-export type RefreshTrigger = { kind: "results" | "financing" | "material_event" | "zone_change" | "price_move" | "unverified"; detail: string; date?: string; url?: string };
+export type RefreshTrigger = { kind: "results" | "financing" | "material_event" | "zone_change" | "price_move" | "valuation_change" | "unverified"; detail: string; date?: string; url?: string };
 export type RefreshState = { status: "current" | "refresh" | "unverified"; triggers: RefreshTrigger[] };
 
 const RESULTS_FORMS = /^(10-K|10-Q|20-F|40-F)(\/A)?$/;

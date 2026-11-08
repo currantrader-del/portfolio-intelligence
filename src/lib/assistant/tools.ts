@@ -16,7 +16,7 @@ import { screenCompany } from "@/lib/research/screen";
 import { getHistories } from "@/lib/market/history";
 import { buildRisk } from "@/lib/portfolio/risk";
 import { loadEventAlerts } from "@/lib/alerts/events";
-import { newCapital } from "@/lib/decision/newCapital";
+import { newCapital, parseSource, ruleRowsOf } from "@/lib/decision/newCapital";
 import { expectedReturnAt, repriceCheck, scenarioReturnsAt, zoneFor } from "@/lib/research/valuation";
 import { researchAgeDays } from "@/lib/research/records";
 import { LOOKTHROUGH_AS_OF } from "@/lib/portfolio/classify";
@@ -68,8 +68,8 @@ export const TOOLS: Anthropic.Beta.BetaTool[] = [
   },
   {
     name: "simulate_new_capital",
-    description: "Runs the deterministic new-capital engine for an amount in dollars. Compares researched holdings, ETFs, researched new positions, holding cash and trims; checks current holdings, known cash, approved limits and current research. Returns status actionable (dollar amounts can be acted on) or analysis_only (the opinion and leaning stand, but dollar amounts wait for holdings, cash or material events), a one-line lean, the readiness checks, what to verify, and labelled alternatives. Each stock carries the research's own stance at today's price (add / conditional / hold / trim), the modeled return vs VOO and Treasuries, and whether they agree. The research's conclusion decides the action; a favourable model never overrides it.",
-    input_schema: { type: "object", properties: { amount: { type: "number", description: "Dollars" }, source: { type: "string", enum: ["new", "existing"], description: "new = money coming in; existing = cash already held" } }, required: ["amount", "source"], additionalProperties: false },
+    description: "Runs the deterministic new-capital engine for an amount in dollars. Compares researched holdings, diversified ETFs (VOO, VXUS, AVUV), researched new positions, keeping cash and trims, including each option's effect on total-portfolio exposure (NVIDIA look-through, technology, semiconductors, AI infrastructure, US share, emerging markets). Returns status ready (verified money, verified holdings and balances, no unresolved material development: the split can be executed) or conditional (the recommendation and split stand, but only as what to do once the open conditions are met; never present it as an order). Planned money that has not been deposited is always conditional; cash already held is capped at what is deployable after the protected reserve. Each stock carries the research conclusion as written and today's recommendation: when price, valuation, results, filings or financing changed since the research, it says reassess first. Few-year stock cases vs 10-15-year index forecasts are approximate context, not pass/fail.",
+    input_schema: { type: "object", properties: { amount: { type: "number", description: "Dollars" }, source: { type: "string", enum: ["planned", "deposited", "existing"], description: "planned = new money not yet deposited (default when unsure); deposited = new money the user says has arrived; existing = cash already held" }, holdings_confirmed: { type: "boolean", description: "Only true if the user said in this conversation that they checked today that their holdings and balances match their broker accounts" } }, required: ["amount", "source"], additionalProperties: false },
     strict: true,
   },
   {
@@ -256,9 +256,9 @@ export async function runTool(name: string, input: Record<string, unknown>, ws: 
     case "simulate_new_capital": {
       const amount = Number(input.amount);
       if (!(amount > 0)) return { error: "amount must be positive" };
-      const source = input.source === "existing" ? "existing" : "new";
+      const source = parseSource(input.source);
       const filings = await loadDecisionFilings(ws);
-      return { layer: "model_output", ...newCapital({ amount, source, portfolio: p, research: ws.research, policy: ws.policy, now: ws.now, quotes: ws.quotes, filings }) };
+      return { layer: "model_output", ...newCapital({ amount, source, holdingsConfirmed: input.holdings_confirmed === true, portfolio: p, research: ws.research, policy: ws.policy, now: ws.now, quotes: ws.quotes, filings, yields: ws.yields, rules: ruleRowsOf(ws.policy) }) };
     }
     case "get_policy": {
       const a = ws.policy?.audit;
