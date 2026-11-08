@@ -11,7 +11,7 @@ type Msg = { role: "user" | "assistant"; content: string; model?: string; eviden
 const SUGGESTIONS: [RegExp, string[]][] = [
   [/^\/research\/[^/]+/, ["What would change the call?", "Is the research still current?", "What are the biggest risks?"]],
   [/^\/decisions\/review\//, ["Should I trim, hold or add?", "What does the policy say here?"]],
-  [/^\/decisions\/new-capital/, ["What is blocking a recommendation?", "What would make this actionable?"]],
+  [/^\/decisions\/new-capital/, ["Why this split and not VOO?", "What should I check before acting?"]],
   [/^\/portfolio/, ["Am I too concentrated anywhere?", "What is missing before these numbers are verified?"]],
   [/^\/risk/, ["What is my biggest risk?", "How bad could a 20% market drop be?"]],
   [/^\/research/, ["Which research is stale?", "Which ideas are worth researching next?"]],

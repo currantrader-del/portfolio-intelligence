@@ -4,9 +4,11 @@
  * Every rule keeps its source, date and approval. For each subject:
  *  - a rule YOU approved in the app (approved_at set) controls;
  *  - a rule imported from the old archive as "approved" (approved_at empty) is shown as imported, not as
- *    your approval. It still controls as a ceiling until you confirm or replace it;
- *  - when open candidates compete and nothing you approved settles it, the strictest controls (or the
- *    one you marked provisional) and the subject is a conflict for you to decide;
+ *    your approval. It still controls as a ceiling until you confirm, revise or retire it;
+ *  - a PROPOSAL (approval "proposed", or any candidate nobody has approved) never controls. It is shown
+ *    beside the rule in control and changes nothing until you approve it;
+ *  - when sources disagree (an imported rule and an unresolved research value), the stricter one is used
+ *    as a temporary safety limit, labelled as such, until you decide;
  *  - superseded and rejected rules are kept for history and never used.
  *
  * Companies without their own limit never inherit the generic maximum: they get no new money until
@@ -14,7 +16,6 @@
  */
 import type { Bucket } from "@/lib/portfolio/classify";
 import type { BucketLimit, CompanyLimit, LimitStatus, Policy } from "./limits";
-import { DEFAULT_RISK_MARGIN_FACTOR, EVIDENCE_BENCHMARK, type Benchmark } from "./evidence";
 
 export type PolicyRuleRow = {
   id: string;
@@ -39,7 +40,16 @@ export type PolicyRuleRow = {
 export type { LimitStatus };
 
 /** Who stands behind the controlling rule. */
-export type Authority = "you" | "imported" | "provisional" | "strictest" | "proposed" | "none";
+export type Authority = "you" | "imported" | "provisional" | "safety" | "none";
+
+/** Plain labels, so "in control", "proposed" and "imported" can never be confused on screen. */
+export const AUTHORITY_LABEL: Record<Authority, string> = {
+  you: "Approved by you",
+  imported: "Imported from the old archive, not confirmed by you",
+  provisional: "Provisional (you marked it), not approved",
+  safety: "Temporary safety limit: the stricter of the disputed values, until you decide",
+  none: "No rule in control",
+};
 
 export type SubjectAudit = {
   scope: PolicyRuleRow["scope"];
@@ -64,11 +74,22 @@ export const isRejected = (r: PolicyRuleRow) => r.approval === "superseded" && /
 export const RECOMMEND_PREFIX = "Claude recommends:";
 export const isRecommended = (r: PolicyRuleRow) => r.approval !== "approved" && (r.approval_note ?? "").startsWith(RECOMMEND_PREFIX);
 
-/** App placeholders retired 2026-11-08: they were never research-backed. Kept in history, never used. */
-export const RETIRED_ASSUMPTIONS = new Set(["etf_expected_return", "hurdle_over_etf", "research_freshness_days"]);
+/**
+ * Assumptions the engine no longer uses. Kept in history with their approvals, never used:
+ *  - etf_expected_return (7%), hurdle_over_etf (3 points), research_freshness_days (120): app placeholders, never research-backed;
+ *  - benchmark_return (one 4.8–7.5% U.S. range) and risk_margin_factor (0.5 x scenario spread): withdrawn 2026-11-08 at your
+ *    request. Stocks are now compared with each alternative's own dated forecasts (see ./evidence), with no fixed cutoff.
+ */
+export const RETIRED_ASSUMPTIONS = new Set(["etf_expected_return", "hurdle_over_etf", "research_freshness_days", "benchmark_return", "risk_margin_factor"]);
+export const RETIRED_WHY: Record<string, string> = {
+  etf_expected_return: "App placeholder, never from research. Replaced by each alternative's published forecasts.",
+  hurdle_over_etf: "App placeholder, never from research. No fixed hurdle is used.",
+  research_freshness_days: "App placeholder. Research is refreshed when events happen, not after a fixed number of days.",
+  benchmark_return: "Withdrawn 2026-11-08 at your request: one combined U.S. range is no longer used as a bar for every stock.",
+  risk_margin_factor: "Withdrawn 2026-11-08 at your request: no universal premium. Downside and uncertainty are shown, not folded into a cutoff.",
+};
 
 export type Assumption = { value: number; status: LimitStatus; source: string };
-export type BenchmarkAssumption = Benchmark & { status: LimitStatus; source: string; rowId: string | null };
 
 export type PolicyAudit = {
   subjects: SubjectAudit[];
@@ -77,7 +98,6 @@ export type PolicyAudit = {
   decisions: SubjectAudit[];
   /** Imported rules that control but that you never confirmed in the app. */
   imported: SubjectAudit[];
-  assumptions: { benchmark: BenchmarkAssumption; riskMargin: Assumption };
   protectedReserve: Assumption;
   retired: PolicyRuleRow[];
 };
@@ -112,34 +132,33 @@ function auditSubject(scope: PolicyRuleRow["scope"], subject: string, rs: Policy
   const mine = approvedRows.filter(isYours).sort((a, b) => (b.approved_at ?? "").localeCompare(a.approved_at ?? ""));
   const imported = approvedRows.filter((r) => !isYours(r));
   const open = rs.filter((r) => r.approval === "unresolved" || r.approval === "proposed");
+  const unresolved = open.filter((r) => r.approval === "unresolved");
   const history = rs.filter((r) => r.approval === "superseded");
   const recommended = open.find(isRecommended) ?? null;
-  const base = { scope, subject, history, recommended };
+  const base = { scope, subject, history, recommended, candidates: open };
 
   // 1. Your own approval controls. Open proposals stay visible as decisions, but do not change the numbers.
   if (mine.length) {
     const used = mine[0];
-    const candidates = [...open, ...imported.filter((r) => !sameNumbers(r, used))];
-    return { ...base, status: "approved", authority: "you", used, approvedRow: used, candidates: open, differences: describeDifferences([used, ...candidates]), provisional: false };
+    return { ...base, status: "approved", authority: "you", used, approvedRow: used, differences: describeDifferences([used, ...open]), provisional: false };
   }
-  // 2. Imported approvals: they control as a ceiling. Disagreeing imports, or an open candidate, make a conflict.
+  // 2. Imported rules control as a ceiling. A proposal beside them is a decision, not a conflict, and changes nothing.
   const importsAgree = new Set(imported.map((r) => JSON.stringify([n(r.hard_max), n(r.value), n(r.normal_low), n(r.normal_high)]))).size <= 1;
-  if (imported.length && importsAgree && !open.length) {
-    return { ...base, status: "imported", authority: "imported", used: imported[0], approvedRow: null, candidates: [], differences: [], provisional: false };
-  }
-  const pool = [...imported, ...open];
-  if (!pool.length) return { ...base, status: "none", authority: "none", used: null, approvedRow: null, candidates: [], differences: [], provisional: false };
   const provisionalRow = open.find(isProvisional) ?? null;
-  const competing = imported.length > 0 || open.filter((r) => r.approval === "unresolved").length > 1 || !importsAgree;
-  if (!competing) {
-    // Only proposals, nothing approved or imported: the proposal is used, labelled as not approved.
-    const used = provisionalRow ?? strictest(open)!;
-    return { ...base, status: "proposed", authority: provisionalRow ? "provisional" : "proposed", used, approvedRow: null, candidates: open, differences: describeDifferences(open), provisional: !!provisionalRow };
+  if (imported.length && importsAgree && !unresolved.length && !provisionalRow) {
+    return { ...base, status: "imported", authority: "imported", used: imported[0], approvedRow: null, differences: describeDifferences([imported[0], ...open]), provisional: false };
   }
+  // 3. Only proposals: nothing is in control. A proposal never controls by itself.
+  if (!imported.length && !provisionalRow && unresolved.length <= 1) {
+    if (!open.length) return { ...base, status: "none", authority: "none", used: null, approvedRow: null, differences: [], provisional: false };
+    return { ...base, status: "proposed", authority: "none", used: null, approvedRow: null, differences: describeDifferences(open), provisional: false };
+  }
+  // 4. Sources disagree: the one you marked provisional, else the stricter value, as a labelled temporary safety limit.
+  const pool = [...imported, ...unresolved];
   const used = provisionalRow ?? strictest(pool)!;
   return {
-    ...base, status: "conflict", authority: provisionalRow ? "provisional" : "strictest", used, approvedRow: null,
-    candidates: [...imported.map((r) => ({ ...r })), ...open], differences: describeDifferences(pool), provisional: !!provisionalRow,
+    ...base, status: "conflict", authority: provisionalRow ? "provisional" : "safety", used, approvedRow: null,
+    candidates: [...imported, ...open], differences: describeDifferences([...pool, ...open.filter((r) => !pool.includes(r))]), provisional: !!provisionalRow,
   };
 }
 
@@ -157,15 +176,6 @@ export function auditRules(rows: PolicyRuleRow[]): PolicyAudit {
   }).sort((a, b) => a.scope.localeCompare(b.scope) || a.subject.localeCompare(b.subject));
 
   const find = (scope: string, subject: string) => subjects.find((x) => x.scope === scope && x.subject === subject);
-  const bm = find("assumption", "benchmark_return");
-  const bmRow = bm?.used ?? null;
-  const benchmark: BenchmarkAssumption = bmRow && n(bmRow.normal_low) !== null && n(bmRow.normal_high) !== null
-    ? { low: n(bmRow.normal_low)!, high: n(bmRow.normal_high)!, mid: n(bmRow.value) ?? (n(bmRow.normal_low)! + n(bmRow.normal_high)!) / 2, sources: EVIDENCE_BENCHMARK.sources, status: bm!.status, source: bmRow.source_label, rowId: bmRow.id }
-    : { ...EVIDENCE_BENCHMARK, status: "none", source: "Published forecasts (not yet saved as a rule)", rowId: null };
-  const rm = find("assumption", "risk_margin_factor");
-  const riskMargin: Assumption = n(rm?.used?.value) !== null
-    ? { value: n(rm!.used!.value)!, status: rm!.status, source: rm!.used!.source_label }
-    : { value: DEFAULT_RISK_MARGIN_FACTOR, status: "none", source: "App default" };
   const reserveRow = find("portfolio", "protected_reserve");
 
   const weight = (s: SubjectAudit) => (s.status === "conflict" ? 0 : 1) * 10 + (s.scope === "company" ? 0 : s.scope === "assumption" ? 1 : 2);
@@ -174,7 +184,6 @@ export function auditRules(rows: PolicyRuleRow[]): PolicyAudit {
     conflicts: subjects.filter((s) => s.status === "conflict"),
     decisions: subjects.filter((s) => s.candidates.some((c) => c.approval === "unresolved" || c.approval === "proposed")).sort((a, b) => weight(a) - weight(b) || a.subject.localeCompare(b.subject)),
     imported: subjects.filter((s) => s.status === "imported"),
-    assumptions: { benchmark, riskMargin },
     protectedReserve: n(reserveRow?.used?.value) !== null
       ? { value: n(reserveRow!.used!.value)!, status: reserveRow!.status, source: reserveRow!.used!.source_label }
       : { value: 3000, status: "none", source: "App default (your stated USAA reserve)" },
@@ -204,6 +213,7 @@ export function policyFromRules(rows: PolicyRuleRow[], version = "Versioned poli
       status: s.status,
       authority: s.authority,
       provisional: s.provisional,
+      conditions: u.conditions,
       source: `${u.source_label}${u.source_date ? ` (${u.source_date})` : ""}`,
     };
   }
@@ -214,8 +224,6 @@ export function policyFromRules(rows: PolicyRuleRow[], version = "Versioned poli
     companies,
     portfolioCeiling: n(generic?.hard_max),
     protectedSavingsFloor: audit.protectedReserve.value,
-    benchmark: audit.assumptions.benchmark,
-    riskMarginFactor: audit.assumptions.riskMargin.value,
     audit,
   };
 }

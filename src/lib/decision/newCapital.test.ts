@@ -48,19 +48,20 @@ const approvedRules = [
 const quiet = new Map([["AAA", { cik: "1", company: "AAA", filings: [{ form: "10-Q", filed: "2026-08-01", reportDate: null, description: "Quarterly report", items: [], isEarnings: true, url: "u", category: "periodic" as const, note: "" }], lastEarnings: null, nextEarningsEstimate: null, source: "s", fetchedAt: "t" }]]);
 
 describe("new capital: evidence gates", () => {
-  it("is WAIT / REVIEW with placeholders, unknown savings and an unresearched holding", () => {
+  it("waits only when the cash itself is not known, and still lists every open check", () => {
     const p = buildPortfolio([snap], new Map(), legacy, {}, [], now);
     const r = newCapital({ amount: 1250, portfolio: p, research: [research("$26")], policy: legacy, now });
-    expect(r.status).toBe("wait_review");
-    expect(r.recommendation.headline).toBe("WAIT / REVIEW");
+    expect(r.status).toBe("wait");
+    expect(r.recommendation.headline).toBe("Wait: confirm your cash first");
     expect(r.recommendation.illustrative).toBe(true);
     const open = r.gates.filter((g) => !g.ok).map((g) => g.key);
-    expect(open).toEqual(expect.arrayContaining(["cash", "assumptions", "research"]));
+    expect(open).toEqual(expect.arrayContaining(["cash", "research"]));
+    expect(r.gates.map((g) => g.key)).not.toContain("assumptions");
     expect(r.toVerify.join(" ")).toMatch(/BBB: full research/);
     expect(r.options.find((o) => o.kind === "cash")!.label).toBe("Valid option");
   });
 
-  it("stays on wait while the portfolio is not reconciled", () => {
+  it("still recommends, with checks, while the portfolio is not reconciled", () => {
     const policy = policyFromRules(approvedRules);
     const p = buildPortfolio([{ ...snap, positions: snap.positions.filter((x) => x.symbol !== "BBB") }, savings], new Map(), policy, {}, [], now);
     expect(p.quality.reconciliation.complete).toBe(false);
@@ -68,10 +69,11 @@ describe("new capital: evidence gates", () => {
     expect(p.quality.reconciliation.gaps.join(" ")).toMatch(/Cost basis missing for 3 positions/);
     const r = newCapital({ amount: 400, portfolio: p, research: [research("$26")], policy, now });
     expect(r.gates.find((g) => g.key === "holdings")).toMatchObject({ ok: false });
-    expect(r.status).toBe("wait_review");
+    expect(r.status).toBe("recommend_with_checks");
+    expect(r.recommendation.illustrative).toBe(false);
   });
 
-  it("becomes actionable only when every gate passes", () => {
+  it("recommends without checks only when every check passes", () => {
     const policy = policyFromRules(approvedRules);
     const withBasis = { ...snap, positions: snap.positions.filter((x) => x.symbol !== "BBB").map((x) => ({ ...x, costBasis: x.marketValue })) };
     const ledger = [{ accountId: "a", tradeDate: "2026-10-01", kind: "deposit" as const, symbol: null, quantity: null, price: null, amount: 500 }];
@@ -79,8 +81,9 @@ describe("new capital: evidence gates", () => {
     expect(p.quality.reconciliation).toMatchObject({ complete: true, label: "Reconciled" });
     const r = newCapital({ amount: 400, portfolio: p, research: [research("$26")], policy, now, filings: quiet });
     expect(r.gates.every((g) => g.ok)).toBe(true);
-    expect(r.status).toBe("actionable");
+    expect(r.status).toBe("recommend");
     expect(r.recommendation.allocations[0]).toEqual({ symbol: "AAA", amount: 400 });
+    expect(r.options.find((o) => o.symbol === "AAA")!.assessment!.judgment).toBe("favourable");
   });
 });
 
@@ -94,7 +97,7 @@ describe("new capital: a drop is not a buy signal", () => {
     expect(aaa.expectedReturn).toBeNull();
     expect(aaa.verdicts!.research.detail).toMatch(/38% below the \$40 research reference/);
     expect(r.recommendation.allocations.find((x) => x.symbol === "AAA")).toBeUndefined();
-    expect(r.status).toBe("wait_review");
+    expect(r.status).toBe("recommend_with_checks");
   });
 
   it("treats partial research as needing completion, not as a smaller buy", () => {
@@ -128,7 +131,7 @@ describe("new capital: ceilings and money source", () => {
 });
 
 describe("new capital: policy conflicts", () => {
-  it("uses the stricter limit and blocks actionability until you choose", () => {
+  it("uses the stricter limit as a temporary safety limit and lists the open decision as a check", () => {
     const rules = [...approvedRules.filter((x) => x.subject !== "AAA"),
       row({ subject: "AAA", normal_low: 0.03, normal_high: 0.05, hard_max: 0.10, approval: "unresolved", source_label: "Baseline" }),
       row({ subject: "AAA", normal_low: 0.03, normal_high: 0.05, hard_max: 0.07, approval: "unresolved", source_label: "Company research", source_date: "2026-09-10" })];
@@ -137,9 +140,10 @@ describe("new capital: policy conflicts", () => {
     expect(policy.companies.AAA.status).toBe("conflict");
     expect(policy.audit.conflicts[0].differences[0]).toMatch(/Maximum: 10% \(Baseline, undated\) vs 7% \(Company research, 2026-09-10\)/);
     const p = buildPortfolio([snap, savings], new Map(), policy, {}, [], now);
-    const r = newCapital({ amount: 400, portfolio: p, research: [research("$26")], policy, now });
+    const r = newCapital({ amount: 400, portfolio: p, research: [research("$26")], policy, now, filings: quiet });
+    expect(policy.companies.AAA.authority).toBe("safety");
     expect(r.gates.find((g) => g.key === "limits")!.ok).toBe(false);
-    expect(r.status).toBe("wait_review");
+    expect(r.status).toBe("recommend_with_checks");
   });
 });
 
@@ -155,7 +159,8 @@ describe("new capital: event-driven refresh and independent verdicts", () => {
     const aaa = r.options.find((o) => o.symbol === "AAA")!;
     expect(aaa.label).toBe("Refresh required");
     expect(aaa.verdicts!.research.detail).toMatch(/New results since the research: 10-Q filed 2026-11-03/);
-    expect(r.status).toBe("wait_review");
+    expect(r.status).toBe("recommend_with_checks");
+    expect(r.recommendation.allocations.find((x) => x.symbol === "AAA")).toBeUndefined();
   });
   it("does not call research current when filings could not be checked", () => {
     const r = newCapital({ amount: 400, portfolio: p, research: [research("$26")], policy, now });
@@ -186,11 +191,26 @@ describe("new capital: event-driven refresh and independent verdicts", () => {
     expect(aaa.headroomDollars).toBe(0);
     expect(aaa.verdicts!.limit.detail).toMatch(/does not inherit the generic 18% maximum/);
   });
-  it("keeps the result on wait while limits are only imported, never confirmed by you", () => {
+  it("recommends with a check, rather than blocking, while limits are only imported", () => {
     const importedOnly = policyFromRules(approvedRules.map((x) => (x.scope === "assumption" ? x : { ...x, approved_at: null })));
     const p3 = buildPortfolio([withBasis, savings], new Map(), importedOnly, {}, ledger, now);
     const r = newCapital({ amount: 400, portfolio: p3, research: [research("$26")], policy: importedOnly, now, filings: quiet });
-    expect(r.gates.find((g) => g.key === "limits")).toMatchObject({ ok: false });
-    expect(r.status).toBe("wait_review");
+    expect(r.gates.find((g) => g.key === "limits")).toMatchObject({ ok: false, detail: expect.stringMatching(/Imported, not confirmed by you: AAA/) });
+    expect(r.status).toBe("recommend_with_checks");
+  });
+  it("sizes to the high-conviction range only when you approved it and the case is favourable and current", () => {
+    const hc = (approved_at: string | null) => policyFromRules([...approvedRules.filter((x) => x.subject !== "AAA"),
+      row({ subject: "AAA", normal_low: 0.03, normal_high: 0.05, high_conviction_low: 0.05, high_conviction_high: 0.08, hard_max: 0.1, approved_at, conditions: "Only after de-risking." })]);
+    const run = (pol: ReturnType<typeof hc>, filings?: typeof quiet) => newCapital({ amount: 400, portfolio: buildPortfolio([withBasis, savings], new Map(), pol, {}, ledger, now), research: [research("$26")], policy: pol, now, filings }).options.find((o) => o.symbol === "AAA")!;
+    const yours = run(hc("2026-11-08T13:00:00Z"), quiet);
+    expect(yours.highConviction).toBe(true);
+    expect(yours.maxWeight).toBe(0.08);
+    expect(yours.toVerify.join(" ")).toMatch(/confirm the high-conviction condition in its research: Only after de-risking/);
+    const imported = run(hc(null), quiet);
+    expect(imported.highConviction).toBe(false);
+    expect(imported.maxWeight).toBe(0.05);
+    expect(imported.notes.join(" ")).toMatch(/not used: you have not approved it/);
+    const unchecked = run(hc("2026-11-08T13:00:00Z"));
+    expect(unchecked.highConviction).toBe(false);
   });
 });

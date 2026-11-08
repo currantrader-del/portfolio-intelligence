@@ -5,6 +5,8 @@ import { revalidatePath } from "next/cache";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { createClient } from "@/lib/supabase/server";
 import { save } from "@/lib/intel/jobs";
+import { auditRules, type PolicyRuleRow } from "@/lib/policy/rules";
+import { reviewImported } from "@/lib/policy/importReview";
 
 /**
  * Policy changes. Nothing is ever deleted and no earlier note is overwritten: each change APPENDS to the
@@ -67,6 +69,35 @@ export async function confirmImported(formData: FormData) {
   await log(db, { action: "confirm_imported", ids }, (rows ?? []) as Row[], []);
   revalidatePath("/", "layout");
   redirect(`/policy?saved=${encodeURIComponent(`confirmed:${(rows ?? []).length}`)}`);
+}
+
+/**
+ * Applies Claude's proposed revision of one imported rule, after you approve it. The revision is computed
+ * here from the review (never from form input); the imported rule is kept as superseded.
+ */
+export async function reviseImported(formData: FormData) {
+  const id = String(formData.get("rule_id") ?? "");
+  const db = await createClient();
+  const { data: all, error } = await db.from("policy_rules").select("*");
+  if (error) throw error;
+  const item = reviewImported(auditRules((all ?? []) as PolicyRuleRow[])).exceptions.find((x) => x.row.id === id && x.revised);
+  if (!item) throw new Error("No proposed revision for this rule");
+  // One approved row per subject (database index): supersede the imported rule first, restore it if the insert fails.
+  const old = item.row as unknown as Row;
+  const { error: supErr } = await db.from("policy_rules").update({ approval: "superseded" }).eq("id", old.id);
+  if (supErr) throw supErr;
+  const { data: added, error: insErr } = await db.from("policy_rules").insert({
+    scope: item.scope, subject: item.subject, ...item.revised, source_label: "Claude review of imported rule", source_date: today(), source_status: "user_entry",
+    conditions: item.reason, approval: "approved", approved_at: new Date().toISOString(), approval_note: `Approved by you in the app on ${today()}: revision of "${item.row.source_label}".`,
+  }).select("id").single();
+  if (insErr || !added) {
+    await db.from("policy_rules").update({ approval: "approved" }).eq("id", old.id);
+    throw insErr ?? new Error("Could not save the revision");
+  }
+  await setRow(db, { ...old, approval: "superseded" }, {}, `Superseded ${today()}: you approved Claude's revision (row ${added.id}).`);
+  await log(db, { action: "revise_imported", rule_id: id, scope: item.scope, subject: item.subject, revised: item.revised, reason: item.reason }, [item.row as unknown as Row], []);
+  revalidatePath("/", "layout");
+  redirect(`/policy?saved=${encodeURIComponent(`approved:${item.subject}`)}`);
 }
 
 const pct = (v: FormDataEntryValue | null) => {

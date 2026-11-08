@@ -46,7 +46,7 @@ export async function recordNewCapital(formData: FormData) {
   const db = await createClient();
   const ws = await buildWorkspace(db);
   const filings = await loadDecisionFilings(ws);
-  const result = newCapital({ amount, source, portfolio: ws.portfolio, research: ws.research, policy: ws.policy, now: ws.now, quotes: ws.quotes, filings });
+  const result = newCapital({ amount, source, portfolio: ws.portfolio, research: ws.research, policy: ws.policy, now: ws.now, quotes: ws.quotes, filings, yields: ws.yields });
   const symbols = result.options.map((o) => o.symbol).filter((s) => s !== "CASH");
   // Everything the result depended on, with timestamps and sources, so the decision can be audited later.
   const inputs = {

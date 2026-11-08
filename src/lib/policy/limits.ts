@@ -7,7 +7,7 @@ import type { Bucket } from "@/lib/portfolio/classify";
 export type Range = { low: number; high: number } | null;
 export type LimitStatus = "approved" | "imported" | "conflict" | "proposed" | "none";
 export type BucketLimit = { bucket: Bucket; normal: Range; hardMax: number | null; status?: LimitStatus };
-export type CompanyLimit = { symbol: string; role: string | null; normal: Range; highConviction: Range; hardMax: number | null; action: string | null; researchStatus: string | null; status?: LimitStatus; source?: string; provisional?: boolean; authority?: import("./rules").Authority };
+export type CompanyLimit = { symbol: string; role: string | null; normal: Range; highConviction: Range; hardMax: number | null; action: string | null; researchStatus: string | null; status?: LimitStatus; source?: string; provisional?: boolean; authority?: import("./rules").Authority; conditions?: string | null };
 export type Policy = {
   version: string;
   buckets: BucketLimit[];
@@ -15,9 +15,6 @@ export type Policy = {
   /** Absolute ceiling for any single company. Never a company's own limit: see companyLimit(). */
   portfolioCeiling: number | null;
   protectedSavingsFloor: number;
-  /** Index return range from published forecasts, with whether you approved it. */
-  benchmark?: import("./rules").BenchmarkAssumption;
-  riskMarginFactor?: number;
   audit?: import("./rules").PolicyAudit;
 };
 

@@ -4,6 +4,7 @@
  * (approved and newer versions, with age), the pipeline, recent decisions and the latest briefing.
  * It is compact text (a few thousand tokens) and is cached between questions by the API.
  */
+import { VOO } from "@/lib/policy/evidence";
 import { AGE_REMINDER_DAYS } from "@/lib/policy/limits";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { Workspace } from "@/lib/workspace-core";
@@ -49,9 +50,7 @@ export async function investorContext(ws: Workspace, db: SupabaseClient): Promis
 
   if (ws.policy) {
     const lim = Object.values(ws.policy.companies).filter((x) => x.hardMax != null).map((x) => `${x.symbol} max ${pct(x.hardMax, 1)}${x.normal ? ` normal ${pct(x.normal.low, 1)}-${pct(x.normal.high, 1)}` : ""} (${x.provisional ? "provisional" : x.authority === "you" ? "approved by the investor" : x.authority === "imported" ? "imported from old archive, not confirmed" : x.status})`);
-    const b = ws.policy.benchmark;
-    lines.push(`\nPOLICY (${ws.policy.version}): ${lim.join("; ")}. Any other company has NO limit of its own: no new money until research sets one and the investor approves it (the ${ws.policy.portfolioCeiling != null ? pct(ws.policy.portfolioCeiling, 0) : "generic"} figure is only an absolute ceiling). Protected reserve $${ws.policy.protectedSavingsFloor.toLocaleString()}, never invested.`);
-    if (b) lines.push(`Return comparison: published 10-15 year U.S. stock forecasts ${pct(b.low, 1)}-${pct(b.high, 1)} (${b.sources.map((x) => `${x.firm} ${x.asOf}`).join("; ")}; ${b.status === "approved" ? "approved" : "not yet approved"}). A stock must beat the top of that range plus ${ws.policy.riskMarginFactor ?? 0.5} x its own scenario spread. Research needs a refresh when events happen (new results, financing, material 8-K, price moving into another zone of the research), not because of age. New cash does not have to be invested immediately; holding cash is always an option.`);
+    lines.push(`Return comparison: no fixed cutoff. Each stock's research scenarios, re-priced at today's price, are compared with VOO's published forecasts shown separately (${VOO.forecasts.map((f) => `${f.firm} ${f.kind === "range" ? `${pct(f.low, 1)}-${pct(f.high, 1)}` : pct(f.low, 1)}, ${f.horizonYears[0] === f.horizonYears[1] ? f.horizonYears[0] : f.horizonYears.join("-")} years, as of ${f.asOf}`).join("; ")}), with a Treasury for the same horizon${ws.yields?.y10 ? ` (10-year ${ws.yields.y10.value.toFixed(2)}%, 2-year ${ws.yields.y2?.value.toFixed(2) ?? "n/a"}%)` : ""}, and with downside, valuation uncertainty and concentration. Give a reasoned judgment: favourable only when the expected return is above every VOO forecast and the research's own odds favour beating the lowest one. A company may go up to its high-conviction range only if the investor approved that range and the case is favourable and current. Research needs a refresh when events happen (new results, financing, material 8-K, price moving into another zone of the research), not because of age. New cash does not have to be invested immediately; holding cash is always an option.`);
   }
   if (decisions?.length) {
     lines.push("\nRECENT DECISIONS");

@@ -2,7 +2,7 @@ import type { Workspace } from "@/lib/workspace";
 import { getQuote } from "@/lib/market/quotes";
 import { scenarioReturnsAt, zoneFor } from "@/lib/research/valuation";
 import { getFilings } from "@/lib/market/sec";
-import { compareToIndex, DEFAULT_RISK_MARGIN_FACTOR, EVIDENCE_BENCHMARK, refreshState } from "@/lib/policy/evidence";
+import { assessVsAlternatives, refreshState, riskFreeFor } from "@/lib/policy/evidence";
 import { AGE_REMINDER_DAYS } from "@/lib/policy/limits";
 import { researchAgeDays } from "@/lib/research/records";
 import { coverage } from "@/lib/research/status";
@@ -28,15 +28,19 @@ export async function InvestmentSummary({ ws, symbol }: { ws: Workspace; symbol:
   const filings = v ? await getFilings(symbol, ws.now).catch(() => null) : null;
   const st = v ? refreshState({ asOf: v.research_as_of, pc: v.parsed, price, filings: filings && !("error" in filings) ? filings : null }) : null;
   const check = st ? { ok: st.status !== "refresh", reason: st.triggers.map((t) => t.detail).join("; ") } : null;
-  const cmp = v && price && check?.ok ? compareToIndex(v.parsed, price, ws.now, ws.policy?.benchmark ?? EVIDENCE_BENCHMARK, ws.policy?.riskMarginFactor ?? DEFAULT_RISK_MARGIN_FACTOR) : null;
+  const exp0 = ws.portfolio.exposures.find((e) => e.symbol === symbol);
+  const lim0 = ws.policy?.companies[symbol];
+  const years = v?.parsed.horizonDate ? Math.max(0.25, (new Date(v.parsed.horizonDate).getTime() - ws.now.getTime()) / (365.25 * 864e5)) : 10;
+  const cmp = v && price && check?.ok ? assessVsAlternatives(v.parsed, price, ws.now, {
+    riskFree: riskFreeFor(years, ws.yields ?? { y2: null, y10: null }), weightNow: exp0?.total ?? null,
+    limit: exp0?.hasLimit ? { normalHigh: lim0?.normal?.high ?? null, hcHigh: lim0?.highConviction?.high ?? null, max: exp0.max } : null, completeness: v.completeness, confidence: v.parsed.confidence,
+  }) : null;
   const er = cmp?.expected ?? null;
   const scen = v && price && check?.ok ? scenarioReturnsAt(v.parsed, price, ws.now) : [];
   const zone = v && price ? zoneFor(v.parsed.zones, price) : null;
-  const exp = ws.portfolio.exposures.find((e) => e.symbol === symbol);
+  const exp = exp0;
   const cov = coverage(r, price, ws.now, AGE_REMINDER_DAYS);
-  const audit = ws.policy?.audit;
-  const approved = audit?.assumptions.benchmark.status === "approved" && audit?.assumptions.riskMargin.status === "approved";
-  const lim = ws.policy?.companies[symbol];
+  const lim = lim0;
 
   return (
     <Card labelledBy="inv-h">
@@ -62,12 +66,11 @@ export async function InvestmentSummary({ ws, symbol }: { ws: Workspace; symbol:
               <>
                 <div className="flex items-center justify-between gap-3"><span className="t-sm">Expected return</span><span className="num font-semibold">{er === null ? "—" : `≈ ${pctStr(er)} a year`}</span></div>
                 {cmp && (
-                  <div className="flex items-center justify-between gap-3 t-xs">
-                    <span>Bar {pctStr(cmp.bar)}: U.S. stock forecasts up to {pctStr(cmp.benchmark.high)} + {pctStr(cmp.margin)} for this stock&apos;s spread{approved ? "" : " (not approved yet)"}</span>
-                    <span className={cmp.clears ? "gain" : "warn"}>{cmp.clears ? "clears it" : "below it"}</span>
+                  <div className="flex flex-col gap-1">
+                    <div className="flex items-center justify-between gap-3 t-sm"><span>Compared with VOO and Treasuries</span><span className={cmp.judgment === "favourable" ? "gain" : cmp.judgment === "unfavourable" ? "warn" : ""}>{cmp.judgment === "favourable" ? "Favourable" : cmp.judgment === "unfavourable" ? "Unfavourable" : "Mixed"}</span></div>
+                    <ul className="t-xs flex flex-col gap-0.5">{cmp.factors.map((f) => <li key={f.label}><span className="text-ink">{f.label}:</span> {f.finding}</li>)}</ul>
                   </div>
                 )}
-                {cmp && <span className="t-xs">{Math.round(cmp.probTrailIndex * 100)}% chance, by the research&apos;s own odds, of trailing the index.</span>}
                 {st?.status === "unverified" && <span className="t-xs warn">{check?.reason}</span>}
               </>
             ) : (

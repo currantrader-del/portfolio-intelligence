@@ -2,9 +2,10 @@ import Link from "next/link";
 import { getWorkspace } from "@/lib/workspace";
 import { Tag } from "@/components/Tag";
 import { Card, CardHead, Disclose } from "@/components/ui";
-import { RECOMMEND_PREFIX, isRejected, type PolicyRuleRow, type SubjectAudit } from "@/lib/policy/rules";
-import { US_EQUITY_FORECASTS } from "@/lib/policy/evidence";
-import { addRule, approveRule, confirmImported, rejectRule, saveProfile } from "./actions";
+import { AUTHORITY_LABEL, RECOMMEND_PREFIX, RETIRED_WHY, isRecommended, isRejected, type PolicyRuleRow, type SubjectAudit } from "@/lib/policy/rules";
+import { ALTERNATIVES } from "@/lib/policy/evidence";
+import { reviewImported, type ImportReviewItem } from "@/lib/policy/importReview";
+import { addRule, approveRule, confirmImported, rejectRule, reviseImported, saveProfile } from "./actions";
 import { createClient } from "@/lib/supabase/server";
 import { loadProfile } from "@/lib/profile";
 
@@ -14,7 +15,7 @@ const rng = (lo: number | string | null, hi: number | string | null) => (lo === 
 /** One line of numbers for a rule, in plain words. */
 function numbers(r: PolicyRuleRow): string {
   if (r.scope === "portfolio" && r.subject === "protected_reserve") return `$${Number(r.value).toLocaleString()} kept in savings, never invested`;
-  if (r.scope === "assumption" && r.subject === "benchmark_return") return `U.S. stocks ${rng(r.normal_low, r.normal_high)} a year (middle ${p(r.value, 1)})`;
+  if (r.scope === "assumption" && r.subject === "benchmark_return") return `U.S. stocks ${rng(r.normal_low, r.normal_high)} a year (shown middle ${p(r.value, 1)}: the average of Vanguard's 5.8% midpoint and J.P. Morgan's 7.5%, not the middle of the range)`;
   if (r.scope === "assumption" && r.subject === "risk_margin_factor") return `${Number(r.value)} x each stock's scenario spread`;
   if (r.scope === "assumption") return String(r.value);
   const parts = [rng(r.normal_low, r.normal_high) && `normal ${rng(r.normal_low, r.normal_high)}`, rng(r.high_conviction_low, r.high_conviction_high) && `high conviction ${rng(r.high_conviction_low, r.high_conviction_high)}`, r.hard_max !== null && `max ${p(r.hard_max)}`].filter(Boolean);
@@ -31,11 +32,11 @@ const subjectName = (s: { scope: string; subject: string }) => SUBJECT[s.subject
 
 function Who({ s }: { s: SubjectAudit }) {
   const u = s.used;
-  if (!u) return <Tag>No rule</Tag>;
-  if (s.authority === "you") return <Tag tone="accent">You approved {u.approved_at?.slice(0, 10)}</Tag>;
+  if (!u) return <Tag>{s.status === "proposed" ? "Nothing in control" : "No rule"}</Tag>;
+  if (s.authority === "you") return <Tag tone="accent">Approved by you {u.approved_at?.slice(0, 10)}</Tag>;
   if (s.authority === "imported") return <Tag>Imported · not confirmed</Tag>;
-  if (s.status === "conflict") return <Tag tone="alert">Open decision</Tag>;
-  return <Tag tone="warn">Proposed</Tag>;
+  if (s.authority === "provisional") return <Tag tone="warn">Provisional · not approved</Tag>;
+  return <Tag tone="alert">Temporary safety limit</Tag>;
 }
 
 const src = (r: PolicyRuleRow) => `${r.source_label}${r.source_date ? `, ${r.source_date}` : ", undated"}`;
@@ -46,14 +47,14 @@ function DecisionCard({ s }: { s: SubjectAudit }) {
   const rec = s.recommended;
   return (
     <Card labelledBy={`d-${s.scope}-${s.subject}`}>
-      <CardHead id={`d-${s.scope}-${s.subject}`} title={subjectName(s)} right={s.status === "conflict" ? <Tag tone="alert">Conflict</Tag> : <Tag tone="warn">Proposal</Tag>} />
+      <CardHead id={`d-${s.scope}-${s.subject}`} title={subjectName(s)} right={s.status === "conflict" ? <Tag tone="alert">Sources disagree</Tag> : <Tag tone="warn">Proposal · not in effect</Tag>} />
       <dl className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-1.5 text-sm">
         <dt className="text-muted">In control now</dt>
-        <dd>{s.used ? <><span className="font-mono">{numbers(s.used)}</span> <span className="text-muted">· {src(s.used)}{s.authority === "strictest" ? " (stricter of the two, used until you decide)" : s.authority === "imported" ? " (imported, never approved by you)" : ""}</span></> : "Nothing"}</dd>
+        <dd>{s.used ? <><span className="font-mono">{numbers(s.used)}</span> <span className="text-muted">· {src(s.used)} · {AUTHORITY_LABEL[s.authority]}</span></> : <span className="text-muted">Nothing. A proposal is not in effect until you approve it{s.scope === "company" ? ", so this company gets no new money meanwhile" : ""}.</span>}</dd>
         {open.map((c) => (
           <div key={c.id} className="contents">
-            <dt className="text-muted">{c === rec ? "Claude recommends" : "Alternative"}</dt>
-            <dd><span className="font-mono">{numbers(c)}</span> <span className="text-muted">· {src(c)}</span></dd>
+            <dt className="text-muted">{isRecommended(c) ? "Proposed · Claude recommends" : "Proposed · alternative"}</dt>
+            <dd><span className="font-mono">{numbers(c)}</span> <span className="text-muted">· {src(c)} · not in effect</span></dd>
           </div>
         ))}
       </dl>
@@ -62,7 +63,6 @@ function DecisionCard({ s }: { s: SubjectAudit }) {
         <ul className="list-disc pl-5 text-sm flex flex-col gap-1">
           {s.differences.map((d) => <li key={d}>{d}</li>)}
           {[s.used, ...open].filter((r, i, a): r is PolicyRuleRow => !!r?.conditions && a.findIndex((x) => x?.id === r.id) === i).map((r) => <li key={`c-${r.id}`}><span className="text-muted">{r.source_label}:</span> {r.conditions}</li>)}
-          {s.subject === "benchmark_return" && US_EQUITY_FORECASTS.map((f) => <li key={f.url}><a href={f.url} target="_blank" rel="noreferrer">{f.firm}</a>: {f.low === f.high ? p(f.low, 1) : `${p(f.low, 1)}–${p(f.high, 1)}`} a year, {f.horizon}, as of {f.asOf}</li>)}
         </ul>
       </Disclose>
       <div className="flex flex-col gap-2">
@@ -77,6 +77,57 @@ function DecisionCard({ s }: { s: SubjectAudit }) {
         ))}
         <p className="text-xs text-muted">Approve makes it the controlling rule; the current one is kept in history. Reject keeps what controls now and records your choice.</p>
       </div>
+    </Card>
+  );
+}
+
+const VERDICT: Record<ImportReviewItem["verdict"], { tag: string; tone?: "warn" | "accent" | "alert" }> = {
+  retain: { tag: "Retain" },
+  interim: { tag: "Keep as interim ceiling", tone: "warn" },
+  revise: { tag: "Revise", tone: "alert" },
+};
+
+function ImportedReview({ retain, exceptions }: { retain: ImportReviewItem[]; exceptions: ImportReviewItem[] }) {
+  const total = retain.length + exceptions.length;
+  const interim = exceptions.filter((x) => x.verdict === "interim");
+  const revise = exceptions.filter((x) => x.verdict === "revise");
+  return (
+    <Card labelledBy="imp-h">
+      <CardHead id="imp-h" title={`Review of ${total} imported rules`} right={<Tag>Not approved by you</Tag>} />
+      <p className="text-sm">These came from the old archive marked &quot;approved&quot;, which is not your approval. I checked each against your current method (beat simply owning VOO; limits from each company&apos;s own research; a limit is a ceiling, not a reason to buy). Until you act they stay in control as ceilings, labelled imported, and they lower the confidence of a recommendation rather than block it.</p>
+      <p className="text-sm font-medium">Retain {retain.length}, keep {interim.length} as interim ceilings, revise {revise.length}.</p>
+      <Disclose summary={`Retain (${retain.length})`}>
+        <ul className="text-sm flex flex-col divide-y divide-line">
+          {retain.map((x) => <li key={x.row.id} className="py-1.5 flex flex-col gap-0.5"><span className="flex flex-wrap justify-between gap-x-3"><span>{subjectName(x)}</span><span className="font-mono text-[13px]">{numbers(x.row)}</span></span><span className="text-xs text-muted">{x.reason}</span></li>)}
+        </ul>
+      </Disclose>
+      <form action={confirmImported} className="flex gap-2">
+        {retain.map((x) => <input key={x.row.id} type="hidden" name="rule_id" value={x.row.id} />)}
+        <button className="btn btn-sm btn-primary">Confirm the {retain.length} retained rules as mine</button>
+      </form>
+      <h3 className="text-sm font-semibold mt-1">Exceptions</h3>
+      <ul className="flex flex-col gap-3">
+        {exceptions.map((x) => (
+          <li key={x.row.id} className="flex flex-col gap-1.5 border-t border-line pt-2.5">
+            <div className="flex items-center justify-between gap-2"><span className="font-medium">{subjectName(x)}</span><Tag tone={VERDICT[x.verdict].tone}>{VERDICT[x.verdict].tag}</Tag></div>
+            <span className="text-sm"><span className="text-muted">Imported, in control now:</span> <span className="font-mono text-[13px]">{numbers(x.row)}</span></span>
+            {x.revised && <span className="text-sm"><span className="text-muted">Proposed, not in effect:</span> <span className="font-mono text-[13px]">{numbers({ ...x.row, ...x.revised })}</span></span>}
+            <p className="text-xs text-muted">{x.reason}</p>
+            <form className="flex flex-wrap gap-2">
+              <input type="hidden" name="rule_id" value={x.row.id} />
+              {x.revised ? (
+                <>
+                  <button formAction={reviseImported} className="btn btn-sm btn-primary">Approve revision</button>
+                  <button formAction={confirmImported} className="btn btn-sm">Keep the imported rule instead</button>
+                </>
+              ) : (
+                <button formAction={confirmImported} className="btn btn-sm btn-primary">Confirm as interim ceiling</button>
+              )}
+            </form>
+          </li>
+        ))}
+      </ul>
+      <p className="text-xs text-muted">Leaving any of these alone changes nothing. Every earlier version stays in history.</p>
     </Card>
   );
 }
@@ -103,27 +154,15 @@ export default async function PolicyPage({ searchParams }: { searchParams: Promi
       {saved && <p className="rounded-xl bg-accent-soft px-4 py-2 text-sm">{saved[0] === "profile" ? "Saved. Every AI answer, research and plan now reads your updated profile." : saved[0] === "approved" ? `Approved. ${saved[1]} now uses the rule you chose.` : saved[0] === "rejected" ? `Rejected. ${saved[1]} keeps the rule that was in control.` : `Confirmed ${saved[1]} imported rules as yours.`}</p>}
 
       <section aria-labelledby="dec-h" className="flex flex-col gap-3">
-        <h2 id="dec-h" className="h2">{audit.decisions.length ? `${audit.decisions.length} decision${audit.decisions.length > 1 ? "s" : ""} for you` : "Nothing waiting for you"}</h2>
+        <h2 id="dec-h" className="h2">{audit.decisions.length + (imported.length ? 1 : 0) ? "For your review" : "Nothing waiting for you"}</h2>
         {audit.decisions.map((s) => <DecisionCard key={`${s.scope}|${s.subject}`} s={s} />)}
-        {imported.length > 0 && (
-          <Card labelledBy="imp-h">
-            <CardHead id="imp-h" title={`${imported.length} imported rules you never confirmed`} right={<Tag>Imported</Tag>} />
-            <p className="text-sm">These came from the old archive marked &quot;approved&quot;, but you did not approve them in this app. They control as ceilings meanwhile, and new-cash results stay on wait until you confirm them. To change one instead, use &quot;Change a limit&quot; below.</p>
-            <ul className="text-sm flex flex-col divide-y divide-line">
-              {imported.map((s) => <li key={`${s.scope}|${s.subject}`} className="py-1.5 flex flex-wrap justify-between gap-x-3"><span>{subjectName(s)}</span><span className="font-mono text-[13px]">{numbers(s.used!)}</span><span className="text-xs text-muted w-full">{src(s.used!)}{s.scope === "generic_company" ? " · applies only as an absolute ceiling, never as a company's own limit" : ""}</span></li>)}
-            </ul>
-            <form action={confirmImported} className="flex gap-2">
-              {imported.map((s) => <input key={s.used!.id} type="hidden" name="rule_id" value={s.used!.id} />)}
-              <button className="btn btn-sm btn-primary">Confirm all {imported.length} as my rules</button>
-            </form>
-          </Card>
-        )}
+        {imported.length > 0 && <ImportedReview {...reviewImported(audit, (sym) => ws.portfolio.exposures.find((e) => e.symbol === sym)?.total ?? null)} />}
       </section>
 
       <Card labelledBy="ctl-h">
         <CardHead id="ctl-h" title="Rules in control" />
         <ul className="flex flex-col divide-y divide-line text-sm">
-          {[...controlling("portfolio"), ...controlling("company"), ...controlling("generic_company"), ...controlling("assumption")].map((s) => (
+          {[...controlling("portfolio"), ...controlling("company"), ...controlling("generic_company")].map((s) => (
             <li key={`${s.scope}|${s.subject}`} className="py-2 flex flex-col gap-0.5">
               <div className="flex items-center justify-between gap-2"><span className="font-medium">{subjectName(s)}</span><Who s={s} /></div>
               <span className="font-mono text-[13px]">{s.scope === "generic_company" ? `no new money; ${p(s.used!.hard_max)} only as an absolute ceiling` : numbers(s.used!)}</span>
@@ -141,13 +180,29 @@ export default async function PolicyPage({ searchParams }: { searchParams: Promi
       </Card>
 
       <Card labelledBy="how-h">
-        <CardHead id="how-h" title="How a buy decision is made" />
+        <CardHead id="how-h" title="How a recommendation is made" />
         <ol className="list-decimal pl-5 text-sm flex flex-col gap-1.5">
-          <li><span className="font-medium">Portfolio limit.</span> Only a company limit you approved gives room, and new cash fills only to the top of the normal range. A company without its own limit gets no new money.</li>
-          <li><span className="font-medium">Valuation.</span> The research&apos;s own price zone must allow adding, and its bear/base/bull scenarios at today&apos;s price must beat the top of published U.S. stock forecasts ({p(ws.policy?.benchmark?.high, 1)}) plus a margin that grows with the stock&apos;s own spread of outcomes.</li>
+          <li><span className="font-medium">Portfolio limit.</span> Only a company&apos;s own limit gives room; a company without one gets no new money. New cash fills to the top of the normal range, or to the top of the high-conviction range when you approved that range and the case below is favourable and current.</li>
+          <li><span className="font-medium">Valuation against the alternatives.</span> The research&apos;s own price zone must allow adding. Its scenarios at today&apos;s price are compared with VOO&apos;s published forecasts (each shown separately, never averaged), a Treasury for the same horizon, the odds of a loss, the spread of outcomes and concentration. Favourable only when the expected return is above every VOO forecast and the research&apos;s own odds favour beating the lowest one. No fixed hurdle or premium.</li>
           <li><span className="font-medium">Research is current.</span> Refresh is triggered by events: new results, a financing or share issuance, another material filing, or the price moving into a different action zone of the research. Age alone only prompts a filings check.</li>
         </ol>
-        <p className="text-xs text-muted">All three must pass, and they are shown separately on every decision, so a good valuation never hides a missing limit, or the reverse.</p>
+        <p className="text-xs text-muted">The three are assessed and shown separately. The app always gives its best recommendation on the evidence, with anything still to confirm listed beside it; it waits only when your cash is not known. Holding cash is always allowed.</p>
+        <Disclose summary="The alternatives and their published forecasts">
+          <ul className="text-sm flex flex-col gap-2">
+            {ALTERNATIVES.map((alt) => (
+              <li key={alt.symbol} className="flex flex-col gap-1">
+                <span className="font-medium">{alt.label}</span>
+                <span className="text-xs text-muted">{alt.note}</span>
+                <ul className="list-disc pl-5 flex flex-col gap-1">
+                  {alt.forecasts.map((f) => (
+                    <li key={`${f.firm}-${f.asset}`}><a href={f.url} target="_blank" rel="noreferrer">{f.firm}</a>, {f.asset}: <span className="font-mono">{f.kind === "range" ? `${p(f.low, 1)}–${p(f.high, 1)}` : p(f.low, 1)}</span> a year over {f.horizonYears[0] === f.horizonYears[1] ? f.horizonYears[0] : f.horizonYears.join("–")} years, as of {f.asOf}. <span className="text-xs text-muted">{f.method}</span></li>
+                  ))}
+                </ul>
+              </li>
+            ))}
+            <li className="flex flex-col gap-1"><span className="font-medium">Treasuries (no stock risk)</span><span className="text-xs text-muted">{ws.yields.y2 && ws.yields.y10 ? `2-year ${ws.yields.y2.value.toFixed(2)}%, 10-year ${ws.yields.y10.value.toFixed(2)}% (FRED, ${ws.yields.y10.date}). Each stock is compared with the yield interpolated to its research horizon.` : "Yields not loaded yet."}</span></li>
+          </ul>
+        </Disclose>
       </Card>
 
       <Disclose summary="Change a limit" className="card">
@@ -170,6 +225,7 @@ export default async function PolicyPage({ searchParams }: { searchParams: Promi
           {history.map((r) => (
             <li key={r.id} className="py-2 text-sm flex flex-col gap-0.5">
               <div className="flex items-center justify-between gap-2"><span className="font-medium">{subjectName(r)}</span><Tag>{isRejected(r) ? "Rejected" : audit.retired.includes(r) ? "Retired" : "Superseded"}</Tag></div>
+              {audit.retired.includes(r) && RETIRED_WHY[r.subject] && <span className="text-xs">{RETIRED_WHY[r.subject]}</span>}
               <span className="font-mono text-[13px]">{numbers(r)}</span>
               <span className="text-xs text-muted">{src(r)} · source said: {r.source_status.replace(/_/g, " ")}</span>
               {r.approval_note && <span className="text-xs text-muted">{r.approval_note}</span>}

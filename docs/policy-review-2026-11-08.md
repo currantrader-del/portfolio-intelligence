@@ -17,11 +17,28 @@
 ## Decision engine changes
 
 - **Unresearched companies:** no inherited maximum. Without its own limit a company gets no new money; the generic 18% is kept only as an absolute ceiling for any single company.
-- **Return comparison:** the fixed 7% ETF return and 3-point hurdle are retired (kept in history). The index return is the range of published U.S. stock forecasts: Vanguard 4.8–6.8% (10 years, as of 2026-09-30) and J.P. Morgan 7.5% (10–15 years, 2027 LTCMA, 2026-10-19). A stock must beat the top of that range plus 0.5 x the spread of its own bear/base/bull outcomes. The 0.5 is a risk preference, shown for approval.
+- **Return comparison (revised 14:08Z at Brendan's request):** no single benchmark and no premium. The withdrawn 4.8–7.5% range showed a "middle" of 6.7%: that was the average of Vanguard's midpoint (5.8%) and J.P. Morgan's 7.5% (= 6.65%), not the arithmetic middle of 4.8–7.5% (6.15%). Now each alternative keeps its forecasts as published (`ALTERNATIVES` in `src/lib/policy/evidence.ts`):
+  - VOO: Vanguard U.S. equities 4.8–6.8% (10 years, as of 2026-09-30, VCMM 10,000 simulations, geometric nominal; the page does not say what the range endpoints represent) and J.P. Morgan U.S. large cap 7.5% (10–15 years, 2027 LTCMA, 2026-10-19; the release does not say whether it is a median or mean, compound or arithmetic).
+  - VXUS: Vanguard developed ex-U.S. 5.3–7.3%, Vanguard EM 3.7–5.7%, J.P. Morgan EM 7.1%.
+  - Treasuries: FRED 2- and 10-year yields (4.46% / 4.84% on 2026-11-05), interpolated to each research horizon.
+  - Each stock gets factors (expected vs each VOO forecast, vs Treasury, odds of beating VOO, downside, valuation uncertainty, horizon match, concentration) and a judgment: favourable only if the expected return is above every VOO forecast and the research's own odds of beating the lowest are better than even; unfavourable if below all; otherwise mixed.
+  - The `benchmark_return` row (approved in the app 13:51Z, before the 14:08Z request) and the `risk_margin_factor` proposal are retired in code and kept in history. No database rows were changed.
 - **Research refresh:** the 120-day cutoff is retired as a gate. Research needs a refresh after new results (10-Q/10-K/20-F or 8-K 2.02), a financing (424B*, S-1/S-3/F-3, 8-K 2.03/3.02), another material 8-K, or a move into a different action zone of the research. If filings can't be checked the research is "unverified", never "current". Age only prompts a filings check.
 - **Independent verdicts:** limit, valuation and research currency are evaluated and shown separately; all three must pass.
+
+## Policy states (fixed 14:08Z request)
+
+The earlier code let a lone proposal become the rule "in control", which is why "In control now" and "Claude recommends" could show the same numbers. Now a proposal never controls. Labels: Approved by you (date) / Imported, not confirmed / Provisional / Temporary safety limit (stricter of disputed values) / Nothing in control.
+
+## Imported rules review (`src/lib/policy/importReview.ts`)
+
+Retain 7 (International, Small/mid, Sector ETFs, Quality/growth, Asymmetric sleeve, Bonds, Deployable cash). Interim ceilings 3 (NVDA, NOW, IONQ: no research sets their own ranges; the 2026-11-07 AI research only repeated the policy). Revise 2: US broad-market (drop the 50% max and the malformed 20–45% high-conviction range: VOO is the default alternative) and generic (keep only the 18% absolute ceiling, drop the inherited ranges). Nothing is written until Brendan presses a button.
+
+## Engine
+
+New cash may fill to the top of the high-conviction range when Brendan approved that range, the comparison is favourable, research is current and confidence is not low (the research's condition, e.g. IREN "after de-risking", is listed as a check). Status is recommend / recommend with checks / wait (only when cash is unknown). Imported limits and stale holdings lower confidence and are listed; they no longer block.
 
 ## Validation
 
 - `src/lib/policy/evidence.test.ts` reproduces the RDDT research's own numbers at its $157.77 reference (13.2% probability-weighted return; scenario CAGRs −2.5%, 14.9%, 29.3%) and checks the margin, bar and event triggers.
-- 265 tests pass (`npm test`), typecheck and lint clean.
+- 273 tests pass (`npm test`), typecheck and lint clean.

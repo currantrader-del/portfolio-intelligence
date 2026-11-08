@@ -6,9 +6,9 @@ import type { Workspace } from "@/lib/workspace";
 import { scenarioReturnsAt, zoneFor } from "@/lib/research/valuation";
 import { researchAgeDays } from "@/lib/research/records";
 import type { FilingsResult } from "@/lib/market/sec";
-import { compareToIndex, DEFAULT_RISK_MARGIN_FACTOR, EVIDENCE_BENCHMARK, refreshState, zoneKind } from "@/lib/policy/evidence";
+import { assessVsAlternatives, refreshState, riskFreeFor, zoneKind } from "@/lib/policy/evidence";
 
-export const REVIEW_CODE_VERSION = "position-review@2";
+export const REVIEW_CODE_VERSION = "position-review@3";
 
 export type ReviewOption = { key: "add" | "hold" | "trim" | "exit"; label: string; dollars: number; weightAfter: number; tax: string; available: boolean; note: string };
 
@@ -24,9 +24,13 @@ export function reviewPosition(ws: Workspace, symbol: string, filings?: FilingsR
   const hasLimit = exp?.hasLimit ?? false;
   const weight = exp?.total ?? h.weight;
   const age = r ? researchAgeDays(r, ws.now) : null;
-  const benchmark = ws.policy?.benchmark ?? EVIDENCE_BENCHMARK;
   const st = v ? refreshState({ asOf: v.research_as_of, pc: v.parsed, price: h.price, filings: filings ?? null }) : null;
-  const cmp = v ? compareToIndex(v.parsed, h.price, ws.now, benchmark, ws.policy?.riskMarginFactor ?? DEFAULT_RISK_MARGIN_FACTOR) : null;
+  const years = v?.parsed.horizonDate ? Math.max(0.25, (new Date(v.parsed.horizonDate).getTime() - ws.now.getTime()) / (365.25 * 864e5)) : 10;
+  const cmp = v ? assessVsAlternatives(v.parsed, h.price, ws.now, {
+    riskFree: riskFreeFor(years, ws.yields ?? { y2: null, y10: null }), weightNow: weight,
+    limit: hasLimit ? { normalHigh: lim?.normal?.high ?? null, hcHigh: lim?.highConviction?.high ?? null, max } : null, completeness: v.completeness, confidence: v.parsed.confidence,
+  }) : null;
+  const favourable = cmp?.judgment === "favourable";
   const er = st?.status === "refresh" ? null : cmp?.expected ?? null;
   const zone = v ? zoneFor(v.parsed.zones, h.price) : null;
 
@@ -63,12 +67,12 @@ export function reviewPosition(ws: Workspace, symbol: string, filings?: FilingsR
       reason: `Something has happened since the research (${st.triggers.filter((t) => t.kind !== "unverified").map((t) => t.detail).join("; ")}). The old scenarios are not relied on until a targeted update says whether it touches the thesis. A lower price alone is never a reason to add.`,
       confidence: 4,
     };
-  } else if (cmp && cmp.clears && hasLimit && addDollars > 1 && v.completeness === "complete" && (!zone || zoneKind(zone.action) === "buy") && st?.status === "current") {
-    reasons.push(cmp.explain);
+  } else if (cmp && favourable && hasLimit && addDollars > 1 && v.completeness === "complete" && (!zone || zoneKind(zone.action) === "buy") && st?.status === "current") {
+    reasons.push(cmp.summary);
     if (zone) reasons.push(`The price is in the research's "${zone.label}" band (${zone.action}).`);
     suggestion = { key: "add", label: "Consider adding", reason: reasons.join(" "), confidence: /specul/i.test(v.parsed.classification ?? "") ? 5 : 6 };
-  } else if (cmp && !cmp.clears) {
-    suggestion = { key: "hold", label: "Hold. Don't add.", reason: cmp.explain, confidence: 5 };
+  } else if (cmp && !favourable) {
+    suggestion = { key: "hold", label: cmp.judgment === "unfavourable" ? "Hold. Don't add." : "Hold", reason: `${cmp.summary} Holding is not the same as selling: a trim needs its own reason (limit, thesis or a clearly worse outlook than VOO).`, confidence: 5 };
   } else {
     suggestion = { key: "hold", label: "Hold", reason: v.completeness !== "complete" ? "Research is partial, so it doesn't support a sizing change."
       : st?.status === "unverified" ? "SEC filings could not be checked, so the research can't be confirmed current. No change until it is."

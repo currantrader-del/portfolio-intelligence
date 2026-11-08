@@ -34,21 +34,34 @@ describe("policy conflicts", () => {
     const p = policyFromRules([row({ hard_max: 0.05 }), row({ hard_max: 0.12 })]);
     expect(p.companies.AAA).toMatchObject({ status: "conflict", hardMax: 0.05 });
   });
-  it("marks a lone proposed value as proposed, and falls back to the evidence benchmark when none is saved", () => {
-    const p = policyFromRules([row({ scope: "assumption", subject: "risk_margin_factor", value: 0.5, approval: "proposed" })]);
-    expect(p.audit.assumptions.riskMargin).toMatchObject({ value: 0.5, status: "proposed" });
-    expect(p.audit.assumptions.benchmark).toMatchObject({ status: "none", low: 0.048, high: 0.075 });
+  it("never lets a proposal control: a lone proposal leaves nothing in control", () => {
+    const p = policyFromRules([row({ hard_max: 0.07, approval: "proposed", approval_note: "Claude recommends: research limits" })]);
+    expect(p.audit.subjects[0]).toMatchObject({ status: "proposed", authority: "none", used: null });
+    expect(p.companies.AAA).toBeUndefined();
+    expect(p.audit.decisions.map((s) => s.subject)).toEqual(["AAA"]);
     expect(p.audit.protectedReserve).toMatchObject({ value: 3000, status: "none" });
   });
-  it("retires the old 7% / 3-point / 120-day placeholders: kept in history, never used", () => {
+  it("keeps an imported rule in control beside a proposal, and labels it imported", () => {
+    const p = policyFromRules([row({ hard_max: 0.5 }), row({ hard_max: null, approval: "proposed" })]);
+    expect(p.companies.AAA).toMatchObject({ status: "imported", authority: "imported", hardMax: 0.5 });
+    expect(p.audit.decisions.map((s) => s.subject)).toEqual(["AAA"]);
+  });
+  it("uses the stricter disputed value as a labelled temporary safety limit", () => {
+    const a = auditRules([row({ hard_max: 0.06 }), row({ hard_max: 0.07, approval: "unresolved" })]);
+    expect(a.subjects[0]).toMatchObject({ status: "conflict", authority: "safety" });
+    expect(Number(a.subjects[0].used!.hard_max)).toBe(0.06);
+  });
+  it("retires the old placeholders and the withdrawn benchmark and margin: kept in history, never used", () => {
     const a = auditRules([
+      row({ scope: "assumption", subject: "benchmark_return", normal_low: 0.048, normal_high: 0.075, value: 0.0665, approved_at: "2026-11-08" }),
+      row({ scope: "assumption", subject: "risk_margin_factor", value: 0.5, approval: "proposed" }),
       row({ scope: "assumption", subject: "etf_expected_return", value: 0.07, approval: "proposed" }),
       row({ scope: "assumption", subject: "hurdle_over_etf", value: 0.03, approval: "proposed" }),
       row({ scope: "assumption", subject: "research_freshness_days", value: 120, approval: "proposed" }),
     ]);
     expect(a.subjects).toHaveLength(0);
     expect(a.decisions).toHaveLength(0);
-    expect(a.retired).toHaveLength(3);
+    expect(a.retired).toHaveLength(5);
   });
 });
 
@@ -68,7 +81,7 @@ describe("your approvals vs imported approvals", () => {
       row({ subject: "RDDT", hard_max: 0.06, approved_at: null, source_label: "Portfolio Baseline v2 (revised)" }),
       row({ subject: "RDDT", normal_low: 0.03, normal_high: 0.05, high_conviction_low: 0.05, high_conviction_high: 0.065, hard_max: 0.07, approval: "unresolved", source_label: "RDDT research", source_date: "2026-09-13", approval_note: "Claude recommends: completed research" }),
     ]);
-    expect(p.companies.RDDT).toMatchObject({ status: "conflict", authority: "strictest", hardMax: 0.06 });
+    expect(p.companies.RDDT).toMatchObject({ status: "conflict", authority: "safety", hardMax: 0.06 });
     const d = p.audit.decisions.find((s) => s.subject === "RDDT")!;
     expect(d.recommended?.source_label).toBe("RDDT research");
     expect(d.differences.join(" ")).toMatch(/Maximum: 6% \(Portfolio Baseline v2 \(revised\), undated\) vs 7% \(RDDT research, 2026-09-13\)/);
