@@ -16,6 +16,7 @@ import { FilingCheckCard, type StoredFilingCheck } from "@/components/FilingChec
 import { ResearchButton } from "@/components/ResearchButton";
 import { InvestigationRunner } from "@/components/InvestigationRunner";
 import { InvestigationReport, type InvVersion, type SourceRow } from "@/components/InvestigationReport";
+import type { ValidationReport } from "@/lib/research/validate";
 import { getQuote } from "@/lib/market/quotes";
 import { coverage } from "@/lib/research/status";
 import { researchStanding, qualityOf, QUALITY_LABEL, approvalOf, type Standing } from "@/lib/research/standing";
@@ -99,6 +100,10 @@ export default async function CompanyPage({ params, searchParams }: { params: Pr
   const standing = researchStanding(versions);
   const shownInv = standing.pending?.v as Version | undefined ?? (standing.inUse && isInv(standing.inUse.v as Version) ? standing.inUse.v as Version : investigations[0]) ?? null;
   const latestInv = shownInv;
+  // The code-only check of the investigation, saved separately from the research record.
+  const { data: valRow } = latestInv
+    ? await supabase.from("model_runs").select("outputs").eq("kind", "research_validation").eq("inputs->>version_id", latestInv.id).order("computed_at", { ascending: false }).limit(1).maybeSingle()
+    : { data: null };
 
   return (
     <div className="flex flex-col gap-3 lg:gap-4">
@@ -111,7 +116,7 @@ export default async function CompanyPage({ params, searchParams }: { params: Pr
       <div className="grid grid-cols-1 gap-3 lg:gap-4 lg:grid-cols-12 items-start">
         <div className="lg:col-span-7 flex flex-col gap-3 lg:gap-4 min-w-0">
           <ResearchStatus s={standing} />
-          {latestInv && <InvestigationReport symbol={company.symbol} v={latestInv as unknown as InvVersion} sources={latestInv.research_sources ?? []} inUse={standing.inUse && standing.inUse.v.id !== latestInv.id ? { research_as_of: standing.inUse.v.research_as_of, label: standing.inUse.label } : null} />}
+          {latestInv && <InvestigationReport symbol={company.symbol} v={latestInv as unknown as InvVersion} sources={latestInv.research_sources ?? []} inUse={standing.inUse && standing.inUse.v.id !== latestInv.id ? { research_as_of: standing.inUse.v.research_as_of, label: standing.inUse.label } : null} validation={(valRow?.outputs as ValidationReport | undefined) ?? null} />}
           <InvestmentSummary ws={ws} symbol={company.symbol} />
           {thesis && (
             <Card labelledBy="th-h" className="!gap-2">

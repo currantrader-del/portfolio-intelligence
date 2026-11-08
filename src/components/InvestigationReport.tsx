@@ -5,6 +5,7 @@ import { shortDate } from "@/lib/format";
 import { adoptResearch, setAsideResearch } from "@/app/(app)/research/actions";
 import type { ConsistencyCheck, Conflict, Finding, InvestmentSummary, Objection, Question, ReviewVerdict } from "@/lib/research/investigate/types";
 import type { ScenarioSpec, ValuationResult } from "@/lib/research/investigate/valuationCalc";
+import type { ValidationReport } from "@/lib/research/validate";
 
 export type InvVersion = {
   id: string; research_as_of: string; completeness: string; origin: string; is_current: boolean; conclusion: Record<string, unknown>;
@@ -28,7 +29,7 @@ const usd = (n: number | null | undefined, d = 2) => (n === null || n === undefi
 const pct = (n: number | null | undefined) => (n === null || n === undefined ? "—" : `${(n * 100).toFixed(1)}%`);
 
 /** The concise investment summary from an investigation, with the full evidence underneath. */
-export function InvestigationReport({ symbol, v, sources, inUse }: { symbol: string; v: InvVersion; sources: SourceRow[]; inUse?: { research_as_of: string; label: string } | null }) {
+export function InvestigationReport({ symbol, v, sources, inUse, validation }: { symbol: string; v: InvVersion; sources: SourceRow[]; inUse?: { research_as_of: string; label: string } | null; validation?: ValidationReport | null }) {
   const c = v.conclusion;
   const sm = c.investment_summary as InvestmentSummary | null | undefined;
   const ev = (c.evidence ?? {}) as { findings?: Finding[]; questions?: Question[]; conflicts?: Conflict[]; objections?: Objection[]; valuation?: { specs: ScenarioSpec[]; result: ValuationResult; revenue_basis: string } | null; phases?: { n: number; title: string; status: string; gate: string[]; attempts: number; cost_usd: number; ms: number }[];
@@ -95,6 +96,8 @@ export function InvestigationReport({ symbol, v, sources, inUse }: { symbol: str
         <div className="flex flex-col gap-2 rounded-[12px] border border-line px-3 py-2.5">
           <span className="text-ink font-semibold t-sm">Your decision</span>
           <span className="t-xs">Nothing changes until you choose. Approving makes this the research your decisions use; {inUse ? `the research in use now (${shortDate(inUse.research_as_of)}, ${inUse.label}) stays on file unchanged` : "there is no research in use now"}. Keeping your current research leaves this investigation on file, marked as set aside.</span>
+          <span className="t-xs"><b className="text-ink">Approving the research does not approve its recommendation.</b> {c.action ? `“${String(c.action)}” stays a suggestion; ` : ""}no shares are bought or sold, and any trade is a separate decision you make on Decisions.</span>
+          {validation && <ValidationBox r={validation} />}
           <ActionForm action={adoptResearch} success={v.completeness === "complete" ? "Approved: this research is now in use" : "Approved provisionally"} className="flex flex-col gap-1.5">
             <input type="hidden" name="symbol" value={symbol} />
             <input type="hidden" name="versionId" value={v.id} />
@@ -255,4 +258,40 @@ function Field({ k, v, strong, wide }: { k: string; v: string | null | undefined
 function List({ title, items }: { title: string; items: string[] | undefined }) {
   if (!items?.length) return null;
   return <div className="t-sm"><span className="t-xs block">{title}</span><ul className="list-disc pl-4">{items.map((x, i) => <li key={i}>{x}</li>)}</ul></div>;
+}
+
+const CHECK_TONE: Record<string, "gain" | "warn" | "alert"> = { pass: "gain", warn: "warn", fail: "alert" };
+const VERDICT_TEXT: Record<string, string> = { passes: "Passes", passes_with_caveats: "Passes with caveats", does_not_pass: "Does not pass" };
+
+/** The code-only check of the record (arithmetic, documents, Q&A, sensitivity, bridges), shown before you decide. */
+function ValidationBox({ r }: { r: ValidationReport }) {
+  return (
+    <div className="flex flex-col gap-1.5 rounded-[12px] bg-surface-2 px-3 py-2">
+      <span className="t-sm text-ink font-semibold flex items-center gap-2">Checked by the app before you decide <Pill small tone={r.verdict === "passes" ? "gain" : r.verdict === "does_not_pass" ? "alert" : "warn"}>{VERDICT_TEXT[r.verdict] ?? r.verdict}</Pill></span>
+      <span className="t-xs">Re-checked from the saved evidence by code, without re-running the research or any paid AI. {shortDate(r.at.slice(0, 10))}.</span>
+      <ul className="flex flex-col gap-1 t-sm">
+        {r.checks.map((c) => (
+          <li key={c.key} className="flex items-start gap-2"><Pill small tone={CHECK_TONE[c.status]}>{c.status === "pass" ? "OK" : c.status === "warn" ? "Caveat" : "Problem"}</Pill><span><span className="text-ink">{c.label}.</span> {c.detail}</span></li>
+        ))}
+      </ul>
+      {r.notes.length > 0 && (
+        <div className="flex flex-col gap-1 t-sm"><span className="text-ink font-semibold">Reviewer notes</span>{r.notes.map((n, i) => <p key={i}>{n}</p>)}</div>
+      )}
+      {r.sensitivity.length > 0 && (
+        <Disclose summary={<span className="t-sm">What moves the value (one change at a time)</span>}>
+          <table className="t-sm w-full"><tbody>
+            {r.sensitivity.map((s, i) => <tr key={i} className="border-b border-line last:border-b-0"><td className="py-1 pr-2">{s.label}</td><td className="py-1 pr-2 text-right tabular-nums">{usd(s.weighted)}</td><td className="py-1 pr-2 text-right tabular-nums">{s.delta >= 0 ? "+" : ""}{s.delta.toFixed(2)}</td><td className="py-1 text-right tabular-nums">{pct(s.annualized)}/yr</td></tr>)}
+          </tbody></table>
+        </Disclose>
+      )}
+      {r.bridges.map((b, i) => (
+        <Disclose key={i} summary={<span className="t-sm">{b.title}</span>}>
+          <table className="t-sm w-full"><tbody>
+            {b.steps.map((s, j) => <tr key={j} className="border-b border-line last:border-b-0"><td className={`py-1 pr-2 ${s.label.startsWith("  ") ? "pl-4 t-xs" : ""}`}>{s.label.trim()}</td><td className="py-1 text-right tabular-nums">{s.delta >= 0 ? "+" : ""}{s.delta.toFixed(2)}</td></tr>)}
+          </tbody></table>
+          <p className="t-xs pt-1">{b.note}</p>
+        </Disclose>
+      ))}
+    </div>
+  );
 }

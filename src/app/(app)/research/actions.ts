@@ -132,7 +132,7 @@ export async function adoptResearch(formData: FormData): Promise<ActionResult> {
   const mode = complete ? "full" : "provisional";
   const { error: e1 } = await db.from("research_versions").update({ is_current: false }).eq("company_id", v.company_id).eq("is_current", true);
   if (e1) return fail(`Could not retire the research in use: ${e1.message}`);
-  const { error: e2 } = await db.from("research_versions").update({ is_current: true, conclusion: { ...c, review_state: complete ? "adopted" : "adopted_provisional", adopted_at: at, adoption: { mode, at, open_items: open, replaced: prior?.id ?? null } } }).eq("id", v.id);
+  const { error: e2 } = await db.from("research_versions").update({ is_current: true, conclusion: { ...c, review_state: complete ? "adopted" : "adopted_provisional", adopted_at: at, adoption: { mode, at, open_items: open, replaced: prior?.id ?? null, recommendation_approved: false } } }).eq("id", v.id);
   if (e2) {
     // Put the earlier record back in use rather than leave the company with none.
     if (prior) await db.from("research_versions").update({ is_current: true }).eq("id", prior.id);

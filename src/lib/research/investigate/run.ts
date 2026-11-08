@@ -16,6 +16,7 @@ import { buildWorkspace } from "@/lib/workspace-core";
 import { attachText, buildInventory, fetchDocText } from "./documents";
 import { getFinancials } from "./financials";
 import { docStatus, finalGate } from "./gates";
+import { validateInvestigation } from "../validate";
 import { runLoop } from "./loop";
 import { consistencyCheck, portfolioCheckFrom, stressTests } from "./challenge";
 import { INV_MODELS } from "./models";
@@ -452,7 +453,7 @@ async function stepFinalize(db: SupabaseClient, s: RunState) {
       method: s.valuation!.specs.map((x) => `${x.name}: ${x.method} on ${s.valuation!.revenue_basis} revenue`).join("; ") + " (values computed by the app)", computed_by_app: true,
     } : null,
     price_framework: sm?.price_framework ?? [], allocation: sm?.allocation ?? null, would_change: sm?.would_change ?? [],
-    not_verified: s.questions.filter((q) => q.status !== "resolved").map((q) => `${q.question}${q.why_unresolvable ? ` (${q.why_unresolvable})` : ""}`),
+    not_verified: [...transcriptGap(s), ...s.questions.filter((q) => q.status !== "resolved").map((q) => `${q.question}${q.why_unresolvable ? ` (${q.why_unresolvable})` : ""}`)],
     investment_summary: sm, completion: s.completeness, documents: counts,
     // The evidence behind the conclusion, kept with the record so it can be audited without the run log.
     evidence: {
@@ -482,6 +483,13 @@ async function stepFinalize(db: SupabaseClient, s: RunState) {
       const { error: e2 } = await db.from("research_sources").insert(rows.slice(i, i + 50));
       if (e2) note(s, "finalize", `Sources not saved: ${e2.message}`);
     }
+    // A code-only check of the finished record, saved on its own and shown beside the approval buttons.
+    if (s.valuation && s.price.value) {
+      try {
+        const report = validateInvestigation({ symbol: s.symbol, valuation: s.valuation, price: s.price.value, today: s.today, findings: s.findings, inventory: s.inventory, reviews: s.reviews, log: s.log });
+        await save(db, "research_validation", report.version, { symbol: s.symbol, version_id: s.versionId, request_id: s.requestId }, report);
+      } catch (e) { note(s, "finalize", `Validation not saved: ${(e as Error).message.slice(0, 160)}`); }
+    }
     // Carried-forward phases keep the earlier text, marked as such, so the record reads in full.
     for (const p of s.phases.filter((x) => x.status === "carried_forward")) {
       const { data: old } = await db.from("research_phases").select("title, body_markdown").eq("version_id", p.carried_from!).eq("phase_number", p.n).maybeSingle();
@@ -491,6 +499,19 @@ async function stepFinalize(db: SupabaseClient, s: RunState) {
   }
   s.status = "finished";
   advance(s);
+}
+
+/**
+ * The standard includes the latest earnings call's analyst Q&A. When no transcript could be found, or one was
+ * read but no Q&A came out of it, the record says so plainly instead of reading as complete on that point.
+ */
+export function transcriptGap(s: Pick<RunState, "inventory" | "reviews">): string[] {
+  const t = s.inventory.filter((d) => d.kind === "transcript");
+  if (!t.length) return ["Earnings-call Q&A not reviewed: no transcript was listed for this research."];
+  const qa = s.reviews.filter((r) => t.some((d) => d.id === r.docId)).reduce((m, r) => m + (r.qa?.length ?? 0), 0);
+  if (qa > 0) return [];
+  const d = t[0];
+  return [d.status === "unavailable" ? `Earnings-call Q&A not reviewed: no transcript was available (${d.unavailable_reason ?? "reason not recorded"}). Management's answers to analysts are missing from this research.` : "Earnings-call Q&A not reviewed: the transcript was read but no analyst questions and answers were captured."];
 }
 
 /** Short status for the app. */
