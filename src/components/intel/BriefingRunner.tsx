@@ -21,6 +21,11 @@ async function call(body: Record<string, unknown>) {
     throw new Error(navigator.onLine === false ? "You're offline. Results that were already saved are kept; try again when you're connected." : "Couldn't reach the app. Check your connection and try again.");
   });
   const json = await res.json().catch(() => ({ error: `HTTP ${res.status}` }));
+  // Over the monthly AI budget: say so, and start only if you press OK.
+  if (res.status === 409 && json.needsConfirm && !body.confirm) {
+    if (window.confirm(`${json.error}\n\nStart it anyway?`)) return call({ ...body, confirm: true });
+    throw new Error(`Not started. ${json.error}`);
+  }
   if (!res.ok || json.error) throw new Error(json.error ?? `HTTP ${res.status}`);
   return json;
 }

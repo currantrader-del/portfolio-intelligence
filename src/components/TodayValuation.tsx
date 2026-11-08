@@ -44,7 +44,9 @@ export async function InvestmentSummary({ ws, symbol }: { ws: Workspace; symbol:
 
   return (
     <Card labelledBy="inv-h">
-      <CardHead id="inv-h" cap="Investment summary" right={<span className="pill" style={{ color: cov.tone === "gain" ? "var(--gain)" : cov.tone === "warn" ? "var(--warn-ink)" : undefined, background: cov.tone === "warn" ? "var(--warn-bg)" : undefined }} title={cov.detail}><span className={`dot ${cov.dot === "hollow" ? "dot-hollow" : ""}`} aria-hidden="true" />Research {cov.label.toLowerCase()}</span>} />
+      <CardHead id="inv-h" cap="Investment summary" right={<span className="pill" style={{ color: cov.tone === "gain" ? "var(--gain)" : cov.tone === "warn" ? "var(--warn-ink)" : undefined, background: cov.tone === "warn" ? "var(--warn-bg)" : undefined }} title={cov.detail}><span className={`dot ${cov.dot === "hollow" ? "dot-hollow" : ""}`} aria-hidden="true" />Research in use: {cov.label.toLowerCase()}{r?.approval === "automatic" ? ", not approved" : r?.approval === "provisional" ? ", provisional" : ""}</span>} />
+      {r && r.authoritative === false && (r.current || r.latest) && <p className="t-sm rounded-[12px] bg-warn-bg text-warn-ink px-3 py-2">No approved research for {symbol}. The record below is {r.authority === "preliminary_screen" ? "a preliminary screen" : "research you have not approved"}, shown for context only: the app makes no add, buy-zone or target recommendation from it.</p>}
+      {r?.pendingReview && <p className="t-xs warn">This uses the research in use. A newer investigation ({r.pendingReview.research_as_of}) is waiting for your decision and is not used until you approve it.</p>}
       {any ? (
         <div className="grid grid-cols-3 gap-2">
           <Metric label="Action" value={cap1(any.parsed.action)} />
@@ -60,15 +62,16 @@ export async function InvestmentSummary({ ws, symbol }: { ws: Workspace; symbol:
           <div className="divider" />
           <div className="flex flex-col gap-2.5">
             <div className="flex items-center justify-between gap-3"><span className="t-sm">Valuation at today&apos;s price</span><DataLabel kind="model" /></div>
-            {v.parsed.zones.length > 0 && <ZoneBar zones={toZoneViews(v.parsed.zones)} price={price} />}
-            {zone && <span className="t-xs">Band today: {zone.label} · {zone.action}. A prompt to research, not a trade.</span>}
+            {v.parsed.zones.length > 0 && <ZoneBar zones={toZoneViews(v.parsed.zones)} price={price} unapproved={r?.authoritative === false} />}
+            {zone && <span className="t-xs">Band today: {zone.label} · {zone.action}. {r?.authoritative === false ? "From unapproved research: context only." : "A prompt to research, not a trade."}</span>}
             {check?.ok ? (
               <>
                 <div className="flex items-center justify-between gap-3"><span className="t-sm">Expected return</span><span className="num font-semibold">{er === null ? "—" : `≈ ${pctStr(er)} a year`}</span></div>
                 {cmp && (
                   <div className="flex flex-col gap-1">
-                    <div className="flex items-center justify-between gap-3 t-sm"><span>Compared with VOO and Treasuries</span><span className={cmp.judgment === "favourable" ? "gain" : cmp.judgment === "unfavourable" ? "warn" : ""}>{cmp.judgment === "favourable" ? "Favourable" : cmp.judgment === "unfavourable" ? "Unfavourable" : "Mixed"}</span></div>
+                    <div className="flex items-center justify-between gap-3 t-sm"><span>Valuation only: modeled return vs VOO and Treasuries</span><span className={cmp.judgment === "favourable" ? "gain" : cmp.judgment === "unfavourable" ? "warn" : ""}>{cmp.judgment === "favourable" ? "Favourable" : cmp.judgment === "unfavourable" ? "Unfavourable" : "Mixed"}</span></div>
                     <ul className="t-xs flex flex-col gap-0.5">{cmp.factors.map((f) => <li key={f.label}><span className="text-ink">{f.label}:</span> {f.finding}</li>)}</ul>
+                    <span className="t-xs">How attractive the valuation looks is one input, not the recommendation. What to do comes from the research&apos;s action{any?.parsed.action ? ` (${cap1(any.parsed.action)})` : ""} and, for new money, the comparison on Decisions.</span>
                   </div>
                 )}
                 {st?.status === "unverified" && <span className="t-xs warn">{check?.reason}</span>}
@@ -85,7 +88,7 @@ export async function InvestmentSummary({ ws, symbol }: { ws: Workspace; symbol:
         <div className="flex flex-col gap-1.5">
           <div className="flex items-center justify-between gap-3"><span className="t-sm">Your exposure</span><span className="t-sm num text-ink">{pctStr(exp.total)} <span className="t-xs">of max {pctStr(exp.max, 0)}</span></span></div>
           <Bar thin value={exp.total} max={exp.max} markers={lim?.normal ? [lim.normal.low, lim.normal.high] : []} label={`${pctStr(exp.total)} of a ${pctStr(exp.max, 0)} maximum`} />
-          <span className="t-xs">{pctStr(exp.direct)} direct · {pctStr(exp.viaEtfs)} through ETFs (approx.) · room {usd(exp.headroomDollars)}</span>
+          <span className="t-xs">{pctStr(exp.direct)} direct · {pctStr(exp.viaEtfs)} through ETFs (approx.){exp.totalMax - exp.total > 0.0005 ? `; could be up to ${pctStr(exp.totalMax)} in total because fund holdings are only partly published` : ""} · room {usd(exp.headroomDollars)}{exp.totalMax - exp.total > 0.0005 ? " (on the upper figure)" : ""}</span>
         </div>
       ) : (
         <div className="flex items-center justify-between gap-3"><span className="t-sm">Your exposure</span><span className="t-sm">Not held</span></div>

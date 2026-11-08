@@ -9,7 +9,9 @@ import { desksSettled, dispatchJob, runDeskJob, runSynthesisJob } from "../../sr
 import { DESKS, type DeskKey } from "../../src/lib/intel/desks";
 import { runAskJob } from "../../src/lib/assistant/jobs";
 import { runResearchJob } from "../../src/lib/research/aiResearchJob";
+import { resumeIfStalled, runInvestigationStep, stalledInvestigations } from "../../src/lib/research/investigate/run";
 import { runPlanJob, startPlan } from "../../src/lib/plan/job";
+import { automatedAllowed, loadSpend } from "../../src/lib/costs/spend";
 import { runMorning } from "../../src/lib/intel/start";
 import { pushTradeNews, runWatch, watchSettings } from "../../src/lib/watch/job";
 import { runTradeScan } from "../../src/lib/trades/job";
@@ -36,10 +38,20 @@ async function ownerToken(url: string, key: string) {
   return s.session.access_token;
 }
 
+/** Starts the next background step, retrying: a lost hand-off silently stops a chained investigation. */
+async function dispatchWithRetry(origin: string, body: Parameters<typeof dispatchJob>[1]) {
+  let last: unknown = null;
+  for (const wait of [0, 2000, 5000, 15000, 30000]) {
+    if (wait) await new Promise((r) => setTimeout(r, wait));
+    try { return await dispatchJob(origin, body); } catch (e) { last = e; console.error(`dispatch ${body.job} failed (will retry): ${(e as Error).message}`); }
+  }
+  throw last;
+}
+
 export default async (req: Request) => {
   const body = (await req.json().catch(() => null)) as { job?: string; snapshotId?: string; requestId?: string; desk?: string; token?: string; secret?: string } | null;
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL, key = process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY;
-  if (body?.job === "morning" || body?.job === "watch") {
+  if (body?.job === "morning" || body?.job === "watch" || body?.job === "investigate_sweep") {
     const job = body.job;
     const secret = process.env.CRON_SECRET;
     const given = Buffer.from(String(body.secret ?? "")), want = Buffer.from(secret ?? "");
@@ -48,6 +60,18 @@ export default async (req: Request) => {
       const token = await ownerToken(url, key);
       const db = createClient(url, key, { global: { headers: { Authorization: `Bearer ${token}` } }, auth: { persistSession: false, autoRefreshToken: false } });
       const origin = new URL(req.url).origin;
+      if (job === "investigate_sweep") {
+        // Scheduled safety net: restarts investigations whose chain of steps stopped (capped per run).
+        // Restarting a stopped run spends research money, so it waits for you when the research budget is used up.
+        const month = await loadSpend(db).catch(() => null);
+        if (!month || month.classes.research.over) { console.log(`investigate_sweep: skipped, ${month ? `research budget used ($${month.classes.research.spent.toFixed(2)} of $${month.classes.research.budget})` : "spending could not be read"}; stopped runs stay stopped until you resume them`); return; }
+        const stalled = await stalledInvestigations(db);
+        for (const r of stalled) {
+          const ok = await resumeIfStalled(db, r.requestId, () => dispatchWithRetry(origin, { job: "investigate", requestId: r.requestId, token })).catch((e) => { console.error(`sweep ${r.symbol}: ${(e as Error).message}`); return false; });
+          console.log(`investigate_sweep: ${r.symbol} ${ok ? "restarted" : "left stopped (restart limit)"}`);
+        }
+        return;
+      }
       const r = job === "morning" ? await runMorning(db, token, origin, (id) => runAskJob(db, id)) : await runWatch(db, origin);
       console.log(`${job}: ${JSON.stringify(r).slice(0, 2000)}`);
     } catch (e) {
@@ -69,7 +93,26 @@ export default async (req: Request) => {
       console.log(`intel job: research result saved ${id}`);
       // New research changes the plan: rebuild it (skipped when a rebuild is already running).
       const { data: r } = await db.from("model_runs").select("outputs->>ok").eq("id", id).maybeSingle();
-      if ((r as { ok?: string } | null)?.ok === "true") await startPlan(db, origin, body.token, "research").catch((e) => console.error(`intel job: plan did not start: ${(e as Error).message}`));
+      const room = await automatedAllowed(db, "portfolio_plan");
+      if (!room.ok) console.log(`intel job: plan rebuild ${room.reason}`);
+      else if ((r as { ok?: string } | null)?.ok === "true") await startPlan(db, origin, body.token, "research").catch((e) => console.error(`intel job: plan did not start: ${(e as Error).message}`));
+    } else if (body.job === "investigate" && body.requestId) {
+      // One step of a research investigation; the next step is started as a new invocation, so no
+      // single invocation runs into the 15-minute limit. A token close to expiry is replaced with a
+      // fresh session for the same owner (the app has one user).
+      const r = await runInvestigationStep(db, body.requestId);
+      console.log(`intel job: investigation ${body.requestId} step ${r.step} -> ${r.status}`);
+      if (r.more) {
+        let token = body.token;
+        const exp = (() => { try { return JSON.parse(Buffer.from(token.split(".")[1], "base64url").toString()).exp as number; } catch { return 0; } })();
+        if (exp * 1000 - Date.now() < 20 * 60_000) {
+          const fresh = await ownerToken(url, key).catch((e) => { console.error(`investigation: could not refresh the session: ${(e as Error).message}`); return null; });
+          const { data: who } = fresh ? await db.auth.getUser(fresh) : { data: { user: null } };
+          if (fresh && who.user?.id === data.user.id) token = fresh;
+        }
+        await dispatchWithRetry(origin, { job: "investigate", requestId: body.requestId, token });
+        console.log(`intel job: investigation ${body.requestId} next step started`);
+      }
     } else if (body.job === "trades" && body.requestId) {
       const id = await runTradeScan(db, body.requestId, async (made) => {
         const s = await watchSettings(db);

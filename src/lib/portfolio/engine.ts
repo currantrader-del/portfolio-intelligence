@@ -12,6 +12,38 @@
 import type { Quote } from "@/lib/market/quotes";
 import { companyLimit, type Policy, type Range } from "@/lib/policy/limits";
 import { bucketOf, LOOKTHROUGH, type Bucket } from "./classify";
+import { COMPANIES, FUNDS, canonical } from "@/lib/exposure/reference";
+
+const FUND_ALIAS: Record<string, string> = { IVV: "VOO", SPY: "VOO" };
+const OUTSIDE_US = /outside the US|ex[- ]US|emerging/i;
+
+/**
+ * How much more of a company the held ETFs could contain beyond their itemized top holdings. A company not in
+ * a fund's published top list can weigh at most as much as the smallest listed holding, so that weight is a
+ * hard upper bound. Funds that cannot hold the company (bond funds, a country or size mandate that excludes
+ * it) add nothing; a fund with no itemized holdings at all is listed as unknown. Pure.
+ */
+export function lookthroughUpperBound(symbol: string, etfs: { symbol: string; value: number }[]): { extra: number; funds: string[]; unknown: string[] } {
+  const sym = canonical(symbol);
+  const co = COMPANIES[sym];
+  let extra = 0;
+  const funds: string[] = [], unknown: string[] = [];
+  for (const e of etfs) {
+    const f = FUNDS[FUND_ALIAS[e.symbol] ?? e.symbol];
+    if (!f || f.assetClass === "bond" || e.value <= 0) continue;
+    if (f.top?.some((t) => canonical(t.symbol) === sym)) continue; // already counted from the itemized list
+    if (co && f.countries) {
+      const itemized = Object.values(f.countries).reduce((a, x) => a + x, 0);
+      if (!(f.countries[co.country] > 0) && (itemized > 0.99 || (co.country === "United States" && OUTSIDE_US.test(f.mandate)))) continue;
+    }
+    if (co && f.size && f.sizeBasis === "mandate" && !(f.size[co.size] && f.size[co.size]! > 0)) continue;
+    if (!f.top?.length) { unknown.push(e.symbol); continue; }
+    if (f.holdingsCount && f.top.length >= f.holdingsCount) continue;
+    extra += Math.min(...f.top.map((t) => t.weight)) * e.value;
+    funds.push(e.symbol);
+  }
+  return { extra, funds, unknown };
+}
 
 export type SnapshotInput = {
   accountId: string;
@@ -58,17 +90,83 @@ export type AccountView = {
   statementComputed: number; // positions at statement values + cash, to check the statement adds up
   statementGap: number | null; // statementTotal - statementComputed
   tradesAfter: number; // ledger rows applied after the statement
-  ageDays: number;
+  ageDays: number; // days since the statement
+  /** Latest of the statement date and the last recorded transaction (confirmations) in this account. */
+  knownThrough: string;
+  knownAgeDays: number;
 };
 
+/**
+ * What an account's cash can do. Cash never moves between accounts on its own: Acorns invests its own cash in
+ * its own portfolios, a Roth follows contribution rules, and savings can only fund the brokerage through a
+ * transfer you plan. Only the self-directed brokerage account can buy a chosen stock or ETF.
+ */
+export type AccountCashUse = "self_directed" | "managed" | "retirement_managed" | "savings";
+export type AccountCash = { id: string; name: string; role: string; cash: number; use: AccountCashUse; canBuyChosen: boolean; note: string; basis?: CashBasis };
+/**
+ * Where an account's cash figure comes from, and whether anything confirms it. A figure that only follows from
+ * arithmetic (statement cash plus transactions you recorded since) is shown as derived, never as confirmed:
+ * a missing trade, a pending deposit or a fee would make it wrong without the arithmetic noticing.
+ */
+export type CashBasis = {
+  statementCash: number; statementAsOf: string; sourceKind: string; ledgerNet: number; ledgerRows: number; lastActivity: string | null;
+  confirmed: boolean; status: "statement" | "manual" | "derived"; detail: string; checks: string[];
+};
+/** A statement or your own entry older than this does not confirm today's cash. */
+export const CASH_CONFIRM_DAYS = 7;
+
+export function cashBasis(a: { cashValue: number | null; asOf: string; sourceKind?: string | null; after: { amount: number; tradeDate: string }[]; statementGap: number | null; now: Date }): CashBasis {
+  const stmt = a.cashValue ?? 0;
+  const net = Math.round(a.after.reduce((x, t) => x + t.amount, 0) * 100) / 100;
+  const last = a.after.reduce<string | null>((m, t) => (!m || t.tradeDate > m ? t.tradeDate : m), null);
+  const age = Math.max(0, Math.floor((a.now.getTime() - new Date(a.asOf).getTime()) / 86_400_000));
+  const kind = a.sourceKind ?? "statement";
+  const derived = a.after.length > 0;
+  const cash = Math.round((stmt + net) * 100) / 100;
+  const d = (iso: string) => iso.slice(0, 10);
+  const money = (n: number) => `$${Math.abs(n).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+  const checks: string[] = [];
+  if (a.cashValue === null) checks.push("The statement on file has no cash figure.");
+  if (cash < -0.005) checks.push(`Recorded transactions spend ${money(-cash)} more than the cash on the ${d(a.asOf)} statement: a deposit or trade is missing from the records.`);
+  if (a.statementGap !== null && Math.abs(a.statementGap) > 1) checks.push(`The ${d(a.asOf)} statement total differs from its positions plus cash by ${money(a.statementGap)}.`);
+  if (age > CASH_CONFIRM_DAYS) checks.push(`The ${kind === "manual" ? "balance you entered" : "statement"} is ${age} days old.`);
+  const status: CashBasis["status"] = derived ? "derived" : kind === "manual" ? "manual" : "statement";
+  const detail = derived
+    ? `${money(stmt)} on the ${d(a.asOf)} statement ${net >= 0 ? "plus" : "less"} ${money(net)} from ${a.after.length} recorded transaction${a.after.length === 1 ? "" : "s"} through ${last} = ${money(cash)}. Worked out, not confirmed: nothing since ${d(a.asOf)} shows the actual balance or buying power.`
+    : kind === "manual" ? `${money(stmt)} as you entered it on ${d(a.asOf)}.` : `${money(stmt)} on the ${d(a.asOf)} statement, with no recorded activity since.`;
+  return { statementCash: stmt, statementAsOf: a.asOf, sourceKind: kind, ledgerNet: net, ledgerRows: a.after.length, lastActivity: last, confirmed: !derived && checks.length === 0, status, detail, checks };
+}
+
+export function accountCashUse(name: string, role: string): AccountCashUse {
+  if (role === "cash" || role === "protected_savings") return "savings";
+  // Acorns accounts are robo-managed portfolios: you cannot pick individual stocks or ETFs there.
+  if (/acorns/i.test(name)) return role === "retirement" ? "retirement_managed" : "managed";
+  return role === "retirement" ? "retirement_managed" : "self_directed";
+}
+const USE_NOTE: Record<AccountCashUse, string> = {
+  self_directed: "Can buy any stock or ETF you choose",
+  managed: "Invested by Acorns in its own portfolio; cannot buy a chosen stock or ETF",
+  retirement_managed: "Retirement account: annual contribution limits, withdrawals restricted; invested in its own portfolio",
+  savings: "Savings: funds the brokerage only through a transfer you plan",
+};
+
+/** A transfer you recorded as planned. It counts as conditional money until the receiving account shows it. */
+export type PlannedTransfer = { id: string; fromAccountId: string; toAccountId: string; amount: number; date: string; note: string | null; createdAt: string };
+
 export type CashView = {
+  /** Each account's own cash and what it can be used for. */
+  accounts: AccountCash[];
+  /** The self-directed brokerage account new-money decisions buy in (null when none is on file). */
+  investingAccount: { id: string; name: string; cash: number; confirmed?: boolean; basis?: CashBasis } | null;
   brokerage: number; // cash inside brokerage and retirement accounts
   savings: number | null; // cash accounts; null when never entered
   savingsAsOf: string | null;
   protectedReserve: number; // policy floor, excluded from every percentage
   reserveShortfall: number; // reserve not covered by savings
   deployableSavings: number; // savings above the reserve
-  deployable: number; // brokerage + deployable savings
+  deployable: number; // brokerage + deployable savings (capital accounting; not all of it can buy anything today)
+  /** Cash that can buy a chosen stock or ETF today, without any transfer: the self-directed brokerage cash. */
+  spendableNow: number;
 };
 
 export type DataQuality = {
@@ -93,7 +191,13 @@ export function reconciliationGaps(args: { brokerAsOfs: string[]; savingsEntered
 }
 
 export type BucketRow = { bucket: Bucket; value: number; weight: number; normal: Range; hardMax: number | null; status: "below" | "within" | "above" | "over_max" | "no_limit" };
-export type CompanyExposure = { symbol: string; direct: number; viaEtfs: number; total: number; max: number; hasLimit: boolean; headroomDollars: number };
+export type CompanyExposure = {
+  symbol: string; direct: number; viaEtfs: number; total: number; max: number; hasLimit: boolean; headroomDollars: number;
+  /** Upper bound of the ETF share when fund holdings are only partly itemized (equals viaEtfs when fully known). */
+  viaEtfsMax: number; totalMax: number;
+  /** Funds whose holdings lists are incomplete for this company: bounded, or unknown. */
+  lookthroughGaps: string[];
+};
 
 export type PortfolioView = {
   total: number; // investable capital: the denominator for every weight
@@ -126,12 +230,16 @@ export function buildPortfolio(
   let savings: number | null = null;
   let savingsAsOf: string | null = null;
   const accounts: AccountView[] = [];
+  const accountCash: AccountCash[] = [];
   const missing: string[] = [];
 
   for (const s of snapshots) {
     const isCashAccount = s.accountRole === "cash" || s.accountRole === "protected_savings";
     const after = ledger.filter((t) => t.accountId === s.accountId && t.tradeDate > s.asOf.slice(0, 10));
     const cashAfter = (s.cashValue ?? 0) + after.reduce((a, t) => a + t.amount, 0);
+    const use = accountCashUse(s.accountName, s.accountRole);
+    const acctCash: AccountCash = { id: s.accountId, name: s.accountName, role: s.accountRole, cash: round2(cashAfter), use, canBuyChosen: use === "self_directed", note: USE_NOTE[use] };
+    accountCash.push(acctCash);
     if (isCashAccount) {
       savings = (savings ?? 0) + cashAfter;
       if (!savingsAsOf || s.asOf < savingsAsOf) savingsAsOf = s.asOf;
@@ -173,17 +281,25 @@ export function buildPortfolio(
       bySymbol.set(sym, cur);
     }
     const gap = s.totalValue === null ? null : round2(s.totalValue - stmtComputed);
+    acctCash.basis = cashBasis({ cashValue: s.cashValue, asOf: s.asOf, sourceKind: s.sourceKind, after, statementGap: gap, now });
+    const knownThrough = after.reduce((m, t) => (t.tradeDate > m ? t.tradeDate : m), s.asOf.slice(0, 10));
     accounts.push({
       id: s.accountId, name: s.accountName, role: s.accountRole, asOf: s.asOf, sourceKind: s.sourceKind ?? "statement", value: round2(acctValue),
       statementTotal: s.totalValue, statementComputed: round2(stmtComputed), statementGap: gap, tradesAfter: after.length,
       ageDays: Math.max(0, Math.floor((now.getTime() - new Date(s.asOf).getTime()) / 86_400_000)),
+      knownThrough, knownAgeDays: Math.max(0, Math.floor((now.getTime() - new Date(knownThrough === s.asOf.slice(0, 10) ? s.asOf : `${knownThrough}T21:00:00Z`).getTime()) / 86_400_000)),
     });
     if (gap !== null && Math.abs(gap) > 1) missing.push(`${s.accountName}: statement total differs from its positions plus cash by ${gap > 0 ? "" : "-"}$${Math.abs(gap).toFixed(2)}`);
   }
 
   const reserve = policy?.protectedSavingsFloor ?? 3000;
   const deployableSavings = savings === null ? 0 : Math.max(0, savings - reserve);
+  const selfDirected = accountCash.filter((a) => a.use === "self_directed").sort((a, b) => b.cash - a.cash);
+  const investingAccount = selfDirected[0] ? { id: selfDirected[0].id, name: selfDirected[0].name, cash: Math.max(0, selfDirected[0].cash), confirmed: selfDirected[0].basis?.confirmed ?? false, basis: selfDirected[0].basis } : null;
   const cashDetail: CashView = {
+    accounts: accountCash,
+    investingAccount,
+    spendableNow: round2(Math.max(0, investingAccount?.cash ?? 0)),
     brokerage: round2(brokerageCash),
     savings: savings === null ? null : round2(savings),
     savingsAsOf,
@@ -258,6 +374,8 @@ export function buildPortfolio(
       const lim = companyLimit(policy, h.symbol);
       const max = lim.monitorMax;
       const totalExp = h.value + via;
+      const bound = lookthroughUpperBound(h.symbol, holdings.filter((e) => e.symbol !== h.symbol));
+      const totalExpMax = totalExp + bound.extra;
       return {
         symbol: h.symbol,
         direct: total ? h.value / total : 0,
@@ -265,8 +383,12 @@ export function buildPortfolio(
         total: total ? totalExp / total : 0,
         max,
         hasLimit: lim.hasLimit,
-        // No company-specific limit means no room for new money, whatever the generic ceiling says.
-        headroomDollars: lim.hasLimit ? round2(Math.max(0, lim.newMoneyMax * total - totalExp)) : 0,
+        // No company-specific limit means no room for new money, whatever the generic ceiling says. Room is
+        // measured against the upper bound, so incomplete fund data can never create room that may not exist.
+        headroomDollars: lim.hasLimit ? round2(Math.max(0, lim.newMoneyMax * total - totalExpMax)) : 0,
+        viaEtfsMax: total ? (via + bound.extra) / total : 0,
+        totalMax: total ? totalExpMax / total : 0,
+        lookthroughGaps: [...bound.funds.map((f) => `${f}: only its largest holdings are published, so ${h.symbol} could be up to the smallest listed weight`), ...bound.unknown.map((f) => `${f}: holdings not itemized`)],
       };
     });
 

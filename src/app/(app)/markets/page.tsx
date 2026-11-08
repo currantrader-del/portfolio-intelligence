@@ -264,12 +264,13 @@ function CoverageCard({ cov }: { cov: Coverage }) {
       <ul className="flex flex-col gap-1 t-sm">
         {cov.inputs.map((i) => (
           <li key={i.key} className="flex flex-wrap items-center gap-1.5">
-            <Pill small tone={LEVEL_TONE[i.level as Level]}>{i.level}</Pill>
+            <Pill small tone={LEVEL_TONE[i.level as Level]}>{i.level === "complete" ? "collected" : i.level}</Pill>
             <span className="text-ink">{i.label}</span>
             <span className="t-xs">{i.detail}{i.reusedFrom ? ` · reused from ${Number.isNaN(Date.parse(i.reusedFrom)) ? "an earlier snapshot" : `${et(i.reusedFrom, { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" })} ET`}` : ""}</span>
           </li>
         ))}
       </ul>
+      <p className="t-xs">&quot;Collected&quot; means the inputs arrived and every item has a source; it does not mean the items are verified. Only facts marked verified were confirmed on their source page.</p>
       <p className="t-xs">Sources: {s.cited} cited, {s.returnedBySearch} returned by the searches. Of the reported facts, {s.matched} match their source page, {s.partial} partly, {s.notFound} not found, {s.unreachable} pages could not be read. Calendar: {cov.calendar.confirmed} confirmed by an official source, {cov.calendar.estimated} estimated.</p>
     </Card>
   );

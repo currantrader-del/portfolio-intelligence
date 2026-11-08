@@ -7,6 +7,7 @@
  *   GET ?id=<requestId>                  -> {status: "running" | "done", answer?}
  *   GET ?demo=<demoId>                   -> every request and answer of one demo run
  */
+import { loadSpend, manualGate } from "@/lib/costs/spend";
 import { createClient } from "@/lib/supabase/server";
 import { dispatchJob, save } from "@/lib/intel/jobs";
 import { AGENT_VERSION } from "@/lib/assistant/agent";
@@ -26,7 +27,7 @@ async function session() {
 }
 
 export async function POST(req: Request) {
-  const body = (await req.json().catch(() => null)) as { action?: string; messages?: ClientMsg[]; page?: string; symbol?: string | null; deep?: boolean; slot?: number } | null;
+  const body = (await req.json().catch(() => null)) as { action?: string; messages?: ClientMsg[]; page?: string; symbol?: string | null; deep?: boolean; slot?: number; confirm?: boolean } | null;
   if (!process.env.ANTHROPIC_API_KEY) return Response.json({ error: "The assistant is not configured yet: add ANTHROPIC_API_KEY in Netlify environment variables." }, { status: 503 });
   const { db, user, token } = await session();
   if (!user || !token) return Response.json({ error: "Sign in first." }, { status: 401 });
@@ -38,6 +39,8 @@ export async function POST(req: Request) {
   };
   const spent = await spentToday(db);
   if (spent.answers >= DAILY_CAP.answers || spent.total >= DAILY_CAP.total) return Response.json({ error: `Today's cost limit is reached ($${spent.total.toFixed(2)} spent; limits $${DAILY_CAP.answers} for questions, $${DAILY_CAP.total} in all). It resets at midnight UTC.` }, { status: 429 });
+  const gate = manualGate(await loadSpend(db), "assistant_answer", body?.confirm === true);
+  if (!gate.ok) return Response.json({ error: gate.message, needsConfirm: gate.needsConfirm }, { status: 409 });
   try {
     if (body?.action === "morning") {
       const requestId = await start({ question: MORNING_QUESTION, mode: "app", purpose: "morning" });

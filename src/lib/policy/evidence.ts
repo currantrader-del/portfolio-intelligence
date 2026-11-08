@@ -87,7 +87,14 @@ export type Assessment = {
   vsVoo: "above_all" | "within" | "below_all";
   riskFree: RiskFree;
   factors: Factor[];
+  /** The MODELED return compared with VOO. Not a buy signal: the research's own conclusion decides the action. */
   judgment: "favourable" | "mixed" | "unfavourable";
+  /** True when the research horizon is close enough to the forecasts' 10-15 years to compare annual rates directly. */
+  horizonCompatible: boolean;
+  /** direct: like-for-like horizons. approximate: a few-year stock case vs 10-15-year index forecasts, context only, never a pass/fail. */
+  comparison: "direct" | "approximate";
+  /** Total return over the research's own horizon: the stock's probability-weighted case vs VOO's forecasts compounded over the same years. */
+  overHorizon: { years: number; stock: number; vooLow: number; vooHigh: number };
   summary: string;
 };
 
@@ -124,17 +131,22 @@ export function assessVsAlternatives(pc: ParsedConclusion, price: number, now: D
   const bear = [...scenarios].sort((a, b) => a.annual - b.annual)[0];
   const best = [...scenarios].sort((a, b) => b.annual - a.annual)[0];
   const factors: Factor[] = [];
+  const horizonCompatible = horizonYears >= 8;
+  const T = horizonYears;
+  const overHorizon = { years: r4(T), stock: r4(Math.pow(1 + expected, T) - 1), vooLow: r4(Math.pow(1 + VOO_SPAN.low, T) - 1), vooHigh: r4(Math.pow(1 + VOO_SPAN.high, T) - 1) };
 
-  factors.push({ label: "Expected return vs VOO", leans: vsVoo === "above_all" ? "for" : vsVoo === "below_all" ? "against" : "neutral",
-    finding: `${f1(expected)} a year expected vs published VOO forecasts of ${VOO.forecasts.map((x) => `${x.kind === "range" ? `${f1(x.low)}–${f1(x.high)}` : f1(x.low)} (${x.firm})`).join(" and ")}: ${vsVoo === "above_all" ? "above all of them" : vsVoo === "below_all" ? "below all of them" : "inside their spread, so the difference is within forecast uncertainty"}.` });
+  factors.push({ label: "Expected return vs VOO", leans: !horizonCompatible ? "neutral" : vsVoo === "above_all" ? "for" : vsVoo === "below_all" ? "against" : "neutral",
+    finding: `${f1(expected)} a year expected${horizonCompatible ? "" : ` over ${T.toFixed(1)} years`} vs published VOO forecasts of ${VOO.forecasts.map((x) => `${x.kind === "range" ? `${f1(x.low)}–${f1(x.high)}` : f1(x.low)} (${x.firm}, ${x.horizonYears[0] === x.horizonYears[1] ? x.horizonYears[0] : x.horizonYears.join("–")} years)`).join(" and ")}: ${vsVoo === "above_all" ? "above all of them" : vsVoo === "below_all" ? "below all of them" : "inside their spread, so the difference is within forecast uncertainty"}${horizonCompatible ? "" : ". The horizons differ, so these rates are not like for like"}.` });
   if (ctx.riskFree) factors.push({ label: "Vs a risk-free Treasury", leans: expected > ctx.riskFree.rate ? "neutral" : "against", finding: `${f1(ctx.riskFree.rate)} a year is available without stock risk (${ctx.riskFree.detail}).` });
   factors.push({ label: "Odds of beating VOO", leans: probBeatVooLow > 0.5 ? "for" : "against",
-    finding: `By the research's own probabilities: ${Math.round(probBeatVooLow * 100)}% chance of beating the lowest VOO forecast, ${Math.round(probBeatVooHigh * 100)}% of beating the highest.` });
+    finding: `Using the research's own scenario probabilities (subjective assumptions, not statistical confidence): ${Math.round(probBeatVooLow * 100)}% chance of beating the lowest VOO forecast, ${Math.round(probBeatVooHigh * 100)}% of beating the highest.` });
   factors.push({ label: "Downside", leans: probLoss >= 0.3 ? "against" : "neutral",
     finding: `${Math.round(probLoss * 100)}% chance of being worth less than today at the horizon. Bear case (${Math.round(bear.probability * 100)}%): ${f1(bear.total)} in total, ${f1(bear.annual)} a year.` });
   factors.push({ label: "Valuation uncertainty", leans: "neutral",
     finding: `Outcomes range from ${f1(bear.annual)} to ${f1(best.annual)} a year${ctx.confidence ? `; research confidence ${ctx.confidence}` : ""}${ctx.completeness && ctx.completeness !== "complete" ? `; research is ${ctx.completeness}` : ""}.` });
-  if (Math.abs(horizonYears - 10) > 2) factors.push({ label: "Horizon match", leans: "neutral", finding: `The research runs about ${horizonYears.toFixed(1)} years; the VOO forecasts cover 10 to 15 years. No published forecast matches the shorter horizon, so treat the comparison as approximate.` });
+  factors.push({ label: "Same horizon", leans: "neutral", finding: horizonCompatible
+    ? `The research runs about ${T.toFixed(1)} years, close to the forecasts' 10-15 years.`
+    : `Over the research's ${T.toFixed(1)} years: ${f1(overHorizon.stock)} total expected for the stock vs ${f1(overHorizon.vooLow)}–${f1(overHorizon.vooHigh)} for VOO if its 10-year forecasts held over the same period. No published forecast covers ${T.toFixed(1)} years, and index returns over a few years can differ widely from 10-year forecasts, so this comparison is approximate.` });
   if (ctx.weightNow != null) {
     const lim = ctx.limit;
     const after = ctx.weightAfter ?? ctx.weightNow;
@@ -143,17 +155,20 @@ export function assessVsAlternatives(pc: ParsedConclusion, price: number, now: D
   }
 
   const judgment: Assessment["judgment"] = vsVoo === "above_all" && probBeatVooLow > 0.5 ? "favourable" : vsVoo === "below_all" ? "unfavourable" : "mixed";
-  const summary = judgment === "favourable"
-    ? `Favourable vs VOO: ${f1(expected)} expected is above every published VOO forecast, and the research gives better-than-even odds of beating the lowest one. Downside: ${Math.round(probLoss * 100)}% chance of a loss, bear case ${f1(bear.total)}.`
+  const approx = horizonCompatible ? "" : ` (approximate: ${T.toFixed(1)}-year research vs 10-year forecasts)`;
+  const summary = !horizonCompatible
+    ? `Modeled return over the research's ${T.toFixed(1)} years: ${f1(overHorizon.stock)} in total (${f1(expected)} a year) at today's price, vs ${f1(overHorizon.vooLow)}–${f1(overHorizon.vooHigh)} for VOO if its 10-15-year forecasts held over the same years. No forecast covers ${T.toFixed(1)} years and index returns over a few years vary widely, so this is context, not a pass/fail. The research's subjective odds of a loss: ${Math.round(probLoss * 100)}%, bear case ${f1(bear.total)}.`
+    : judgment === "favourable"
+    ? `Modeled return favourable vs VOO${approx}: ${f1(expected)} a year at today's price is above every published VOO forecast, and the research's subjective scenario odds of beating the lowest one are better than even. Downside: ${Math.round(probLoss * 100)}% assumed chance of a loss, bear case ${f1(bear.total)}.`
     : judgment === "unfavourable"
-      ? `Unfavourable vs VOO: ${f1(expected)} expected is below every published VOO forecast, so owning the index is expected to do better.`
-      : `Mixed: ${f1(expected)} expected is within the spread of VOO forecasts${vsVoo === "above_all" ? ", but the research's own odds of beating even the lowest VOO forecast are not better than even" : ""}. Not a reason to prefer it over VOO on return alone.`;
-  return { expected, scenarios, horizonYears: r4(horizonYears), probLoss, probBeatVooLow, probBeatVooHigh, vsVoo, riskFree: ctx.riskFree ?? null, factors, judgment, summary };
+      ? `Modeled return unfavourable vs VOO${approx}: ${f1(expected)} a year at today's price is below every published VOO forecast, so owning the index is expected to do better.`
+      : `Modeled return mixed vs VOO${approx}: ${f1(expected)} a year at today's price${vsVoo === "above_all" ? " is above the VOO forecasts, but the research's subjective odds of beating even the lowest one are not better than even" : " is within the spread of VOO forecasts"}.`;
+  return { expected, scenarios, horizonYears: r4(horizonYears), probLoss, probBeatVooLow, probBeatVooHigh, vsVoo, riskFree: ctx.riskFree ?? null, factors, judgment, summary, horizonCompatible, comparison: horizonCompatible ? "direct" : "approximate", overHorizon };
 }
 
 // ---------- Event-driven research refresh ----------
 
-export type RefreshTrigger = { kind: "results" | "financing" | "material_event" | "zone_change" | "price_move" | "unverified"; detail: string; date?: string; url?: string };
+export type RefreshTrigger = { kind: "results" | "financing" | "material_event" | "zone_change" | "price_move" | "valuation_change" | "unverified"; detail: string; date?: string; url?: string };
 export type RefreshState = { status: "current" | "refresh" | "unverified"; triggers: RefreshTrigger[] };
 
 const RESULTS_FORMS = /^(10-K|10-Q|20-F|40-F)(\/A)?$/;
@@ -162,6 +177,36 @@ const FINANCING_ITEMS = ["2.03", "3.02"];
 const MATERIAL_ITEMS = ["1.01", "1.02", "2.01", "2.05", "2.06", "4.01", "4.02", "5.01", "5.02"];
 /** Used only when the research has no action zones of its own to compare against. */
 export const FALLBACK_PRICE_MOVE = 0.15;
+
+/** A clause that makes an action conditional ("only if", "only after", "re-check ... first"). Returns the condition text, or null. */
+export function conditionIn(text: string | null | undefined): string | null {
+  if (!text) return null;
+  const m = text.match(/\b(only (?:if|after|when|once)|after .{0,40}(?:verified|confirmed)|provided|subject to|re-?check[^.]*first|research trigger)\b[^.]*\.?/i);
+  return m ? m[0].trim().replace(/\.$/, "") : null;
+}
+
+export type ResearchStance = {
+  /** add: the research itself supports adding at this price; conditional: only once a stated condition is met; hold / trim otherwise. */
+  kind: "add" | "conditional" | "hold" | "trim";
+  /** The research's own words that decide it (the price zone at today's price, else the overall conclusion). */
+  text: string;
+  from: "zone" | "conclusion";
+  condition: string | null;
+};
+
+/**
+ * What the completed research itself says about adding at today's price. The research conclusion decides the
+ * action; a favourable modeled return never overrides it. A conditional add ("consider a small add only if ...")
+ * is not an add until the condition is confirmed.
+ */
+export function researchStance(pc: ParsedConclusion, price: number | null): ResearchStance | null {
+  const zone = price ? zoneFor(pc.zones, price) : null;
+  const text = zone?.action ?? pc.action;
+  if (!text) return null;
+  const kind = zoneKind(text);
+  const condition = conditionIn(text);
+  return { kind: kind === "buy" && condition ? "conditional" : kind === "buy" ? "add" : kind, text, from: zone ? "zone" : "conclusion", condition };
+}
 
 /** The research's own recommended action, simplified so a change of zone can be detected. */
 export function zoneKind(action: string): "buy" | "hold" | "trim" {

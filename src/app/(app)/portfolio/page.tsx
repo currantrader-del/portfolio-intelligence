@@ -200,7 +200,7 @@ export default async function PortfolioPage({ searchParams }: { searchParams: Pr
                     </span>
                   </div>
                   <Bar thin value={e.total} max={e.max} label={`${e.symbol} ${pctStr(e.total)} of a ${pctStr(e.max, 0)} limit`} />
-                  <span className="t-xs">{pctStr(e.direct)} direct · {pctStr(e.viaEtfs)} via ETFs · room {usd(e.headroomDollars)}</span>
+                  <span className="t-xs" title={e.lookthroughGaps.join("; ") || undefined}>{pctStr(e.direct)} direct · {pctStr(e.viaEtfs)} via ETFs{e.totalMax - e.total > 0.0005 ? ` (could be up to ${pctStr(e.totalMax)} in total: fund holdings only partly published)` : ""} · room {usd(e.headroomDollars)}</span>
                 </li>
               );
             })}

@@ -14,12 +14,13 @@ type Status =
 
 const mins = (ms: number) => `${Math.max(1, Math.round(ms / 60000))} min`;
 
-/** "Research this": runs full AI research for the company as a background job and shows its progress. */
+/** The preliminary screen: one quick AI pass to decide whether a company deserves a full investigation. */
 export function ResearchButton({ symbol, hasResearch, needsResearch }: { symbol: string; hasResearch: boolean; needsResearch: boolean }) {
   const router = useRouter();
   const [st, setSt] = useState<Status | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [starting, setStarting] = useState(false);
+  const [needsConfirm, setNeedsConfirm] = useState(false);
   const [now, setNow] = useState(() => Date.now());
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -45,13 +46,14 @@ export function ResearchButton({ symbol, hasResearch, needsResearch }: { symbol:
     return () => clearInterval(t);
   }, [st?.status]);
 
-  async function start() {
+  async function start(confirm = false) {
     if (starting) return;
     setError(null);
+    setNeedsConfirm(false);
     setStarting(true);
-    const r = await requestJSON("/api/research", { json: { symbol } });
+    const r = await requestJSON<{ needsConfirm?: boolean }>("/api/research", { json: { symbol, confirm } });
     setStarting(false);
-    if (!r.ok) { setError(`Research did not start. ${r.error}`); return; }
+    if (!r.ok) { setNeedsConfirm(!!r.data?.needsConfirm); setError(r.data?.needsConfirm ? r.error : `Research did not start. ${r.error}`); return; }
     setSt({ status: "running", startedAt: new Date().toISOString() });
     setNow(Date.now());
     if (timer.current) clearTimeout(timer.current);
@@ -65,14 +67,14 @@ export function ResearchButton({ symbol, hasResearch, needsResearch }: { symbol:
 
   return (
     <Card labelledBy="ai-r-h" className="!gap-3">
-      <CardHead id="ai-r-h" title="AI research" right={running ? <Pill small tone="copper" dot="solid">Running</Pill> : needsResearch ? <Pill small tone="warn">Needed</Pill> : null} />
+      <CardHead id="ai-r-h" title="Quick screen" right={running ? <Pill small tone="copper" dot="solid">Running</Pill> : needsResearch ? <Pill small tone="warn">Needed</Pill> : null} />
       {running ? (
         <p className="t-sm" role="status" aria-live="polite">
-          Researching {symbol}: reading filings, financials and news, then valuing it. {Math.floor(elapsed / 60)}:{String(elapsed % 60).padStart(2, "0")} so far; this usually takes 2–8 minutes. You can leave this page and come back.
+          Screening {symbol}. {Math.floor(elapsed / 60)}:{String(elapsed % 60).padStart(2, "0")} so far; this usually takes 1–2 minutes.
         </p>
       ) : (
         <p className="t-sm">
-          Claude works through the business, financials and filings, competition, risks and catalysts, a bear/base/bull valuation, and a conclusion with sources. It is saved as a new research version{hasResearch ? "; your earlier research is kept" : ""}. About $0.25–1 per company, counted in today&apos;s cost limit.
+          A one-minute first pass from the SEC data, a few searches and excerpts of the latest filings, to decide whether {symbol} deserves a full investigation. It is not an investment rating and is never used for decisions. About $0.25.
         </p>
       )}
       {last && !running && (
@@ -80,7 +82,7 @@ export function ResearchButton({ symbol, hasResearch, needsResearch }: { symbol:
           {last.ok ? (
             <>
               <span className="text-ink font-semibold">
-                Last run {new Date(done!.finishedAt).toLocaleDateString("en-US", { month: "short", day: "numeric" })}: {last.completeness === "complete" ? "complete" : "partial"}{last.madeCurrent ? ", now your current research" : ", kept beside your current research"}
+                Last run {new Date(done!.finishedAt).toLocaleDateString("en-US", { month: "short", day: "numeric" })}: screen saved (not used for decisions)
               </span>
               {last.problems && last.problems.length > 0 && <span className="t-xs warn">Gaps: {last.problems.join("; ")}</span>}
               <span className="t-xs">{mins(last.ms)} · {last.searches} searches · ${last.costUsd.toFixed(2)}</span>
@@ -92,8 +94,9 @@ export function ResearchButton({ symbol, hasResearch, needsResearch }: { symbol:
       )}
       {st?.status === "lost" && <p className="t-xs warn">The last run never finished. You can start it again.</p>}
       {error && <p role="alert" className="t-sm rounded-[12px] bg-warn-bg text-warn-ink px-3 py-2">{error}</p>}
-      <button type="button" className={`btn ${needsResearch ? "btn-primary" : ""} self-start ${starting || running ? "is-pending" : ""}`} onClick={start} disabled={running || starting || st === null} aria-busy={starting || running || undefined}>
-        {starting ? <><Spinner />Starting…</> : running ? <><Spinner />Research running…</> : st === null ? <><Spinner />Checking status…</> : hasResearch ? "Refresh research with AI" : "Research this with AI"}
+      {needsConfirm && <button type="button" className="btn btn-sm self-start" onClick={() => start(true)} disabled={starting}>Start anyway</button>}
+      <button type="button" className={`btn ${needsResearch ? "btn-primary" : ""} self-start ${starting || running ? "is-pending" : ""}`} onClick={() => start()} disabled={running || starting || st === null} aria-busy={starting || running || undefined}>
+        {starting ? <><Spinner />Starting…</> : running ? <><Spinner />Research running…</> : st === null ? <><Spinner />Checking status…</> : "Run quick screen"}
       </button>
     </Card>
   );

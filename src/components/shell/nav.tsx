@@ -16,6 +16,7 @@ export const MORE = [
   { href: "/brief", label: "Daily brief" },
   { href: "/brief?period=week", label: "Weekly brief" },
   { href: "/policy", label: "Policy" },
+  { href: "/costs", label: "AI spending" },
   { href: "/portfolio/reconcile", label: "Reconcile" },
   { href: "/import", label: "Import" },
 ] as const;
@@ -29,6 +30,7 @@ const TITLES: [RegExp, string][] = [
   [/^\/brief/, "Brief"],
   [/^\/markets/, "Markets"],
   [/^\/policy/, "Policy"],
+  [/^\/costs/, "AI spending"],
   [/^\/plan/, "Plan"],
   [/^\/alerts/, "Alerts"],
   [/^\/trades/, "Trades"],

@@ -13,6 +13,7 @@ How to work:
 - Research is the authority for each company's view; do not invent a new valuation. If research is stale, partial, or the price has moved far from its reference, say the action is "Refresh research first" and put it in "stale".
 - Targets stay within the policy: never above a company's maximum, buckets within their ranges, the protected reserve never invested. Broad ETFs need no company research; they are the default home for cash when no stock passes.
 - A price drop is never a reason to buy by itself; room under a limit is never a reason to add; new cash does not have to be invested now. Holding cash is a valid plan.
+- Research authority: only research the investor APPROVED is an investment model. get_research says which records are approved; a preliminary screen, an older record or an investigation awaiting approval is context only. For a company without approved research, do not set a target above today's weight, do not give a buy-below price and say plainly that no approved research exists.
 - Opportunities: the companies at the "Ready for decision" stage (named in the question) are the shortlist for new cash. Rank them against simply buying VOO with the same money. For each, say "Buy now", "Wait for price" or "Not yet", with a buy-below price, a dollar amount within the deployable cash and the policy limits, the expected return from its research versus VOO's, and why. If none beats VOO today, say so in the cash plan.
 - Companies the investor marked "Passed" are decided: leave them out of positions and opportunities.
 - Prefer few, clear actions. Priority 1 is the most important.
@@ -52,7 +53,7 @@ export type Plan = {
 
 export type PlanFacts = {
   holdings: { symbol: string; weight: number }[];         // weight as a fraction
-  researched: { symbol: string; asOf: string | null; stage?: string }[];
+  researched: { symbol: string; asOf: string | null; stage?: string; approved?: boolean }[];
   maxFor: (symbol: string) => number | null;               // fraction
   deployable: number | null;
 };
@@ -72,7 +73,9 @@ export function validatePlan(raw: unknown, f: PlanFacts): Plan | { error: string
   const known = new Map<string, { held: boolean; asOf: string | null }>();
   for (const h of f.holdings) known.set(h.symbol, { held: true, asOf: null });
   const passed = new Set(f.researched.filter((x) => x.stage === "passed" && !f.holdings.some((h) => h.symbol === x.symbol)).map((x) => x.symbol));
-  const ready = new Set(f.researched.filter((x) => x.stage === "ready").map((x) => x.symbol));
+  // Only companies with research you approved can be a shortlist for new cash.
+  const ready = new Set(f.researched.filter((x) => x.stage === "ready" && x.approved !== false).map((x) => x.symbol));
+  const unapproved = new Set(f.researched.filter((x) => x.approved === false).map((x) => x.symbol));
   for (const x of f.researched) if (!passed.has(x.symbol)) known.set(x.symbol, { held: known.get(x.symbol)?.held ?? false, asOf: x.asOf });
 
   const seen = new Set<string>();
@@ -90,6 +93,10 @@ export function validatePlan(raw: unknown, f: PlanFacts): Plan | { error: string
     let target = num(p.target_pct);
     if (target !== null && (target < 0 || target > 100)) { flags.push("target out of range, ignored"); target = null; }
     if (target !== null && max !== null && target / 100 > max + 1e-9) { flags.push(`target ${r1(target)}% capped at the ${r1(max * 100)}% policy maximum`); target = r1(max * 100); }
+    // An unapproved thesis cannot set a target above today's weight (that would be a research-based add).
+    if (unapproved.has(symbol) && target !== null && current !== null && target > r1(current * 100) + 0.05) {
+      flags.push(`target ${r1(target)}% not used: the research is not approved, so no research-based increase`); target = r1(current * 100);
+    }
     const pr = Number(p.priority);
     positions.push({
       symbol, status: k.held ? "held" : "idea", currentPct: current === null ? null : r1(current * 100), targetPct: target, maxPct: max === null ? null : r1(max * 100),
@@ -107,7 +114,7 @@ export function validatePlan(raw: unknown, f: PlanFacts): Plan | { error: string
   for (const o of Array.isArray(r.opportunities) ? (r.opportunities as Record<string, unknown>[]) : []) {
     const symbol = str(o?.symbol, 12).toUpperCase();
     if (!symbol || opportunities.some((x) => x.symbol === symbol)) continue;
-    if (!ready.has(symbol)) { if (!passed.has(symbol)) problems.push(`${symbol} was suggested as an opportunity but is not Ready for decision, so it was left out`); continue; }
+    if (!ready.has(symbol)) { if (!passed.has(symbol)) problems.push(unapproved.has(symbol) ? `${symbol} was suggested as an opportunity but its research is not approved, so it was left out` : `${symbol} was suggested as an opportunity but is not Ready for decision, so it was left out`); continue; }
     const verdict = (["Buy now", "Wait for price", "Not yet"] as const).find((v) => v === o.verdict) ?? "Not yet";
     let amountUsd = num(o.amount_usd);
     if (amountUsd !== null && amountUsd <= 0) amountUsd = null;

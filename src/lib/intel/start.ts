@@ -3,6 +3,7 @@
  * Markets page (signed-in user) and by the morning schedule (intel-cron), so both run the same steps.
  */
 import { startPlan } from "@/lib/plan/job";
+import { automatedAllowed } from "@/lib/costs/spend";
 import { startTradeScan } from "@/lib/trades/job";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { buildWorkspace } from "@/lib/workspace-core";
@@ -34,7 +35,7 @@ export async function startBriefing(db: SupabaseClient, token: string, origin: s
 /** What has been spent today (UTC) on briefings, and on assistant answers plus company research (one shared bucket), from the stored rows. */
 export async function spentToday(db: SupabaseClient, now = new Date()) {
   const since = `${now.toISOString().slice(0, 10)}T00:00:00Z`;
-  const { data } = await db.from("model_runs").select("kind, outputs->>costUsd").in("kind", ["market_briefing", "assistant_answer", "research_result", "portfolio_plan", "watch_run", "trade_scan", "exposure_review"]).gte("computed_at", since);
+  const { data } = await db.from("model_runs").select("kind, outputs->>costUsd").in("kind", ["market_briefing", "assistant_answer", "research_result", "portfolio_plan", "watch_run", "trade_scan", "exposure_review", "investigation_step"]).gte("computed_at", since);
   let briefings = 0, answers = 0;
   for (const r of (data ?? []) as { kind: string; costUsd: string | null }[]) {
     const c = Number(r.costUsd ?? 0) || 0;
@@ -53,25 +54,37 @@ export const DAILY_CAP = { answers: 15, total: 20 };
 export async function runMorning(db: SupabaseClient, token: string, origin: string, ask: (requestId: string) => Promise<string>) {
   const spent = await spentToday(db);
   if (spent.total >= DAILY_CAP.total) return { skipped: `cost limit reached ($${spent.total.toFixed(2)} spent today)` };
+  // Each paid step checks the monthly budget before it starts, against what has been spent so far
+  // (including the steps before it); a step without room is skipped, never run over the limit.
+  const skipped: string[] = [];
+  const room = async (feature: string) => {
+    const g = await automatedAllowed(db, feature);
+    if (!g.ok) skipped.push(`${feature} ${g.reason}`);
+    return g.ok;
+  };
+  if (!(await room("market_briefing"))) return { skipped: skipped.join("; ") };
   const b = await startBriefing(db, token, origin);
   if ("error" in b) console.error(`morning: briefing did not start: ${b.error}`);
   else {
     // Wait for the briefing to be written (usually 3-5 minutes), so the answer reads today's evidence.
     for (let i = 0; i < 40 && !(await briefingFor(db, b.snapshotId!)); i++) await new Promise((r) => setTimeout(r, 15000));
   }
-  const requestId = await save(db, "assistant_request", AGENT_VERSION, { question: MORNING_QUESTION, mode: "app", purpose: "morning" }, {});
-  const answerId = await ask(requestId);
+  let requestId: string | null = null, answerId: string | null = null;
+  if (await room("assistant_answer")) {
+    requestId = await save(db, "assistant_request", AGENT_VERSION, { question: MORNING_QUESTION, mode: "app", purpose: "morning" }, {});
+    answerId = await ask(requestId);
+  }
   // The portfolio plan is rebuilt weekly (Mondays), after the briefing it reads.
   let plan: string | null = null;
-  if (new Intl.DateTimeFormat("en-US", { timeZone: "America/New_York", weekday: "short" }).format(new Date()) === "Mon") {
+  if (new Intl.DateTimeFormat("en-US", { timeZone: "America/New_York", weekday: "short" }).format(new Date()) === "Mon" && (await room("portfolio_plan"))) {
     plan = await startPlan(db, origin, token, "weekly").catch((e) => { console.error(`morning: plan did not start: ${(e as Error).message}`); return null; });
   }
   // A weekly look for a short-term trade (Wednesdays), so ideas come without being asked; "none" is the usual answer.
   let trades: string | null = null;
-  if (new Intl.DateTimeFormat("en-US", { timeZone: "America/New_York", weekday: "short" }).format(new Date()) === "Wed") {
+  if (new Intl.DateTimeFormat("en-US", { timeZone: "America/New_York", weekday: "short" }).format(new Date()) === "Wed" && (await room("trade_scan"))) {
     trades = await startTradeScan(db, origin, token, "weekly").catch((e) => { console.error(`morning: trade scan did not start: ${(e as Error).message}`); return null; });
   }
-  return { briefing: "error" in b ? null : b.snapshotId, requestId, answerId, plan, trades };
+  return { briefing: "error" in b ? null : b.snapshotId, requestId, answerId, plan, trades, skipped };
 }
 
 export const MORNING_QUESTION ="Morning briefing. Using today's market briefing and my portfolio: what happened in markets and the world, and why it matters; where short-term and long-term conditions appear to be heading and what changed in that view; what changed for my specific holdings (filings, results, research that needs reassessment); what deserves my attention; what actions, if any, are justified (including holding cash); and which opportunities warrant more research. Lead with the conclusions in a few lines, then the explanation.";

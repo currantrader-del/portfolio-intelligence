@@ -9,6 +9,8 @@ import { auditRules, type PolicyRuleRow } from "@/lib/policy/rules";
 import { reviewImported } from "@/lib/policy/importReview";
 import { fail, type ActionResult } from "@/lib/action-result";
 
+// A changed policy makes the stored plan outdated. The plan page says so and offers a rebuild with its
+// cost; it is not regenerated automatically after every change (several edits in a row would each pay).
 /**
  * Policy changes. Nothing is ever deleted and no earlier note is overwritten: each change APPENDS to the
  * row's approval note, so the original provenance stays readable, and every decision is also logged as a

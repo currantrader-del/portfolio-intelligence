@@ -1,3 +1,4 @@
+import { AUTHORITY_LABEL } from "@/lib/research/standing";
 /**
  * Tools the assistant may call. Every number it can cite comes from one of these,
  * and each result carries its source and timestamp.
@@ -16,7 +17,7 @@ import { screenCompany } from "@/lib/research/screen";
 import { getHistories } from "@/lib/market/history";
 import { buildRisk } from "@/lib/portfolio/risk";
 import { loadEventAlerts } from "@/lib/alerts/events";
-import { newCapital } from "@/lib/decision/newCapital";
+import { newCapital, parseSource, ruleRowsOf } from "@/lib/decision/newCapital";
 import { expectedReturnAt, repriceCheck, scenarioReturnsAt, zoneFor } from "@/lib/research/valuation";
 import { researchAgeDays } from "@/lib/research/records";
 import { LOOKTHROUGH_AS_OF } from "@/lib/portfolio/classify";
@@ -68,8 +69,8 @@ export const TOOLS: Anthropic.Beta.BetaTool[] = [
   },
   {
     name: "simulate_new_capital",
-    description: "Runs the deterministic new-capital engine for an amount in dollars. Compares researched holdings, ETFs, researched new positions, holding cash and trims; checks current holdings, known cash, approved limits and current research. Returns status recommend, recommend_with_checks (best answer on the evidence, with checks to confirm first) or wait (cash not known), the checks, what to verify, labelled alternatives with each stock's comparison against VOO and Treasuries, and the recommended split.",
-    input_schema: { type: "object", properties: { amount: { type: "number", description: "Dollars" }, source: { type: "string", enum: ["new", "existing"], description: "new = money coming in; existing = cash already held" } }, required: ["amount", "source"], additionalProperties: false },
+    description: "Runs the deterministic new-capital engine for an amount in dollars. Compares researched holdings, diversified ETFs (VOO, VXUS, AVUV), researched new positions, keeping cash and trims, including each option's effect on total-portfolio exposure (NVIDIA look-through, technology, semiconductors, AI infrastructure, US share, emerging markets). Returns status ready (verified money, verified holdings and balances, no unresolved material development: the split can be executed) or conditional (the recommendation and split stand, but only as what to do once the open conditions are met; never present it as an order). Planned money that has not been deposited is always conditional; cash already held is capped at what is deployable after the protected reserve. Each stock carries the research conclusion as written and today's recommendation: when price, valuation, results, filings or financing changed since the research, it says reassess first. Few-year stock cases vs 10-15-year index forecasts are approximate context, not pass/fail.",
+    input_schema: { type: "object", properties: { amount: { type: "number", description: "Dollars" }, source: { type: "string", enum: ["planned", "deposited", "existing"], description: "planned = new money not yet deposited (default when unsure); deposited = new money the user says has arrived; existing = cash already held" }, holdings_confirmed: { type: "boolean", description: "Only true if the user said in this conversation that they checked today that their holdings and balances match their broker accounts" } }, required: ["amount", "source"], additionalProperties: false },
     strict: true,
   },
   {
@@ -226,6 +227,10 @@ export async function runTool(name: string, input: Record<string, unknown>, ws: 
         conflict: r.conflict,
         versions: r.versions,
         is_current: !!r.current,
+        authority: r.authority ? AUTHORITY_LABEL[r.authority] : "No research in use",
+        approved_by_investor: !!r.authoritative,
+        authority_rule: r.authoritative ? "Approved research: may be used as the investment model." : "NOT approved: context only. Do not recommend adding, a buy zone, a target above today's weight or a buy-below price from it. Say plainly that no approved research exists and that a full investigation the investor approves is needed.",
+        pending_investigation: r.pendingReview ?? null,
         research_as_of: v?.research_as_of ?? null,
         age_days: researchAgeDays(r, ws.now),
         completeness: v?.completeness ?? null,
@@ -256,9 +261,9 @@ export async function runTool(name: string, input: Record<string, unknown>, ws: 
     case "simulate_new_capital": {
       const amount = Number(input.amount);
       if (!(amount > 0)) return { error: "amount must be positive" };
-      const source = input.source === "existing" ? "existing" : "new";
+      const source = parseSource(input.source);
       const filings = await loadDecisionFilings(ws);
-      return { layer: "model_output", ...newCapital({ amount, source, portfolio: p, research: ws.research, policy: ws.policy, now: ws.now, quotes: ws.quotes, filings }) };
+      return { layer: "model_output", ...newCapital({ amount, source, transfers: ws.transfers, holdingsConfirmed: input.holdings_confirmed === true, portfolio: p, research: ws.research, policy: ws.policy, now: ws.now, quotes: ws.quotes, filings, yields: ws.yields, rules: ruleRowsOf(ws.policy) }) };
     }
     case "get_policy": {
       const a = ws.policy?.audit;

@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Spinner } from "@/components/forms";
-import { requestJSON } from "@/lib/client/request";
+import { requestPaidJSON } from "@/lib/client/request";
 
 /** "Look for a trade" with an optional ticker; refreshes the page until the search finishes. */
 export function TradeRunner({ running }: { running: boolean }) {
@@ -23,7 +23,7 @@ export function TradeRunner({ running }: { running: boolean }) {
     e.preventDefault();
     if (active) return;
     setBusy(true); setError(null);
-    const r = await requestJSON("/api/trades", { json: { focus: focus.trim() || undefined } });
+    const r = await requestPaidJSON("/api/trades", { json: { focus: focus.trim() || undefined } });
     if (!r.ok) { setError(r.error); setBusy(false); return; }
     router.refresh();
   }
