@@ -66,7 +66,7 @@ describe("reviewer corrections over a saved investigation", () => {
   });
 
   it("tells a sourced input from an estimate", () => {
-    const rows = inputRows([{ name: "base", probability: 1, method: "ev_ebitda", inputs: { revenue: 1, multiple: 2 }, sources: { revenue: "F5", multiple: "estimate: peers" } }]);
+    const rows = inputRows([{ name: "base", probability: 1, method: "ev_ebitda", inputs: { revenue: 1, multiple: 2 } as never, sources: { revenue: "F5", multiple: "estimate: peers" }, rationale: "" }]);
     expect(rows.map((r) => r.kind)).toEqual(["sourced", "estimate"]);
   });
 

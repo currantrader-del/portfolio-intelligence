@@ -85,3 +85,14 @@ export function measuredRange(costs: number[], fallback: CostRange): CostRange {
   const at = (q: number) => xs[Math.min(xs.length - 1, Math.max(0, Math.round(q * (xs.length - 1))))];
   return { low: r2(at(0.1)), high: r2(Math.max(at(0.9), at(0.1) * 1.2)), basis: `measured from ${xs.length} past runs` };
 }
+
+/**
+ * The server's own check before a paid update starts: an update runs only when there is something new
+ * for it to read. A price move, or filings that could not be checked, never starts a paid run.
+ */
+export function updateAllowed(plan: UpdatePlan, filingsChecked: boolean): { ok: true } | { ok: false; message: string } {
+  if (!plan.foundation) return { ok: false, message: "There is no finished investigation to update yet. No paid run was started." };
+  if (!filingsChecked) return { ok: false, message: "SEC filings could not be checked just now, so the app cannot tell whether anything is new. No paid run was started; try again later." };
+  if (!plan.newEvidence.length) return { ok: false, message: `Nothing material has been filed since ${plan.foundation.asOf}, so there is nothing for an update to read. No paid run was started; price changes are re-priced for free on the research page.` };
+  return { ok: true };
+}

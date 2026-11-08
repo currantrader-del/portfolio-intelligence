@@ -64,8 +64,9 @@ export function InvestigationRunner({ symbol, hasResearch, plan }: { symbol: str
     setError(null);
     setNeedsConfirm(null);
     setStarting(kind);
-    // The full investigation is only reachable after ticking its cost confirmation, so it is sent confirmed.
-    const r = await requestJSON<{ needsConfirm?: boolean }>("/api/research/investigate", { json: kind === "resume" ? { symbol, resume: true } : { symbol, type: kind, confirm: confirm || kind === "full" } });
+    // The full investigation is only reachable after ticking its box, which the server requires (confirmFull).
+    // Going over the monthly budget is a separate "Start anyway" (confirm).
+    const r = await requestJSON<{ needsConfirm?: boolean }>("/api/research/investigate", { json: kind === "resume" ? { symbol, resume: true } : { symbol, type: kind, confirm, confirmFull: kind === "full" && confirmFull } });
     setStarting(null);
     if (!r.ok) {
       if (r.data?.needsConfirm && kind !== "resume") { setNeedsConfirm(kind); setError(r.error); return; }

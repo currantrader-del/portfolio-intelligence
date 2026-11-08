@@ -9,6 +9,8 @@ import { createClient } from "@/lib/supabase/server";
 import { dispatchJob } from "@/lib/intel/jobs";
 import { DAILY_CAP, spentToday } from "@/lib/intel/start";
 import { updateFoundation } from "@/lib/research/standing";
+import { updatePlanFor } from "@/lib/research/updateCheck";
+import { updateAllowed } from "@/lib/research/updatePlan";
 import { budgetGate, loadSpend } from "@/lib/costs/spend";
 import { measuredEstimates } from "@/lib/research/costEstimates";
 import type { VersionRow } from "@/lib/research/records";
@@ -27,7 +29,7 @@ export async function POST(req: Request) {
   const { data: sess } = await db.auth.getSession();
   const token = sess.session?.access_token;
   if (!auth.user || !token) return Response.json({ error: "Sign in first." }, { status: 401 });
-  const body = (await req.json().catch(() => null)) as { symbol?: string; type?: string; resume?: boolean; confirm?: boolean } | null;
+  const body = (await req.json().catch(() => null)) as { symbol?: string; type?: string; resume?: boolean; confirm?: boolean; confirmFull?: boolean } | null;
   const symbol = clean(body?.symbol);
   if (!symbol) return Response.json({ error: "No company given." }, { status: 400 });
   if (isEtf(symbol)) return Response.json({ error: "Broad ETFs don't need company research." }, { status: 400 });
@@ -46,12 +48,22 @@ export async function POST(req: Request) {
     const { error } = await db.from("companies").insert({ symbol, name: null, watchlist_status: "watch", pipeline_stage: "idea", pipeline_note: null, stage_updated_at: at, stage_history: [{ stage: "idea", at, note: "Added for research" }] });
     if (error) return Response.json({ error: `Could not add ${symbol}: ${error.message}` }, { status: 500 });
   }
-  if (type === "material_event_refresh" && !updateFoundation((company?.research_versions ?? []) as VersionRow[])) return Response.json({ error: "There is no finished investigation to update yet (a quick screen is not enough). Run a full investigation first." }, { status: 400 });
+  const versions = (company?.research_versions ?? []) as VersionRow[];
+  if (type === "material_event_refresh") {
+    if (!updateFoundation(versions)) return Response.json({ error: "There is no finished investigation to update yet (a quick screen is not enough). Run a full investigation first." }, { status: 400 });
+    // Checked here, not only in the browser: an update starts only when something new has been filed.
+    const { plan, filingsChecked } = await updatePlanFor(symbol, versions, null);
+    const allowed = updateAllowed(plan, filingsChecked);
+    if (!allowed.ok) return Response.json({ error: allowed.message, nothingNew: true }, { status: 409 });
+  } else if (body?.confirmFull !== true) {
+    // A full investigation is never started by a stray click: the page sends confirmFull only after you tick its box.
+    return Response.json({ error: "A full investigation is a separate, paid run and needs your explicit confirmation: tick the box under Full re-investigation first." }, { status: 409 });
+  }
   const spent = await spentToday(db);
   if (spent.answers >= DAILY_CAP.answers || spent.total >= DAILY_CAP.total) return Response.json({ error: `Today's cost limit is reached ($${spent.total.toFixed(2)} spent). It resets at midnight UTC.` }, { status: 429 });
   // Monthly research budget and the approval threshold, against what runs of this kind have cost.
   const [month, est] = await Promise.all([loadSpend(db), measuredEstimates(db)]);
-  const gate = budgetGate(month, "research", type === "material_event_refresh" ? est.update.high : est.full.high, body?.confirm === true);
+  const gate = budgetGate(month, "research", type === "material_event_refresh" ? est.update.high : est.full.high, body?.confirm === true, type === "full_investigation");
   if (!gate.ok) return Response.json({ error: gate.message, needsConfirm: gate.needsConfirm }, { status: 409 });
   try {
     const requestId = await startInvestigation(db, symbol, type);

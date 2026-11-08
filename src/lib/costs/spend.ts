@@ -80,11 +80,16 @@ export function summarizeSpend(rows: CostRow[], now: Date, settings: CostSetting
  * Whether a manual job may start: refused when it would take its budget past the limit, and it needs your
  * explicit OK when its estimate is above the approval threshold. The $20/day cap still applies separately.
  */
-export function budgetGate(s: SpendSummary, cls: BudgetClass, estimateHigh: number, confirmed: boolean): { ok: true } | { ok: false; needsConfirm: boolean; message: string } {
+/**
+ * Whether a manual paid job may start. `confirmed` is your "Start anyway" after seeing the warning;
+ * `costAcknowledged` is a cost you already accepted on the page (the full-investigation checkbox), which
+ * covers the approval threshold but never the monthly budget: going over it always asks separately.
+ */
+export function budgetGate(s: SpendSummary, cls: BudgetClass, estimateHigh: number, confirmed: boolean, costAcknowledged = false): { ok: true } | { ok: false; needsConfirm: boolean; message: string } {
   const c = s.classes[cls];
   const name = cls === "research" ? "research" : "everyday AI";
   if (c.spent + estimateHigh > c.budget && !confirmed) return { ok: false, needsConfirm: true, message: `This could take the ${name} budget over its $${c.budget} for the month ($${c.spent.toFixed(2)} spent, up to $${estimateHigh.toFixed(2)} more). Confirm to go ahead anyway.` };
-  if (estimateHigh > s.settings.approveAbove && !confirmed) return { ok: false, needsConfirm: true, message: `This may cost up to $${estimateHigh.toFixed(2)}, above your $${s.settings.approveAbove} approval threshold. Confirm to start it.` };
+  if (estimateHigh > s.settings.approveAbove && !confirmed && !costAcknowledged) return { ok: false, needsConfirm: true, message: `This may cost up to $${estimateHigh.toFixed(2)}, above your $${s.settings.approveAbove} approval threshold. Confirm to start it.` };
   return { ok: true };
 }
 

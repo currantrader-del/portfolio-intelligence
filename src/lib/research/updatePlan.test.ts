@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { measuredRange, planUpdate, type Foundation } from "./updatePlan";
+import { measuredRange, planUpdate, updateAllowed, type Foundation } from "./updatePlan";
 import { updateFoundation } from "./standing";
 import type { Filing } from "@/lib/market/sec";
 
@@ -48,5 +48,22 @@ describe("what an update builds on", () => {
     const approved = { ...inv, id: "a", is_current: true, conclusion: { research_type: "full_investigation", review_state: "adopted" } };
     const newer = { ...inv, id: "n", created_at: "2026-11-19T00:00:00Z" };
     expect(updateFoundation([{ ...screen, is_current: false }, approved, newer], now)?.v.id).toBe("a");
+  });
+});
+
+describe("the server refuses a paid update with nothing new to read", () => {
+  it("a price move alone, or filings the research already covers, starts nothing", () => {
+    const p = planUpdate({ foundation: iren, filings: [filing({ filed: "2026-11-05", form: "10-Q", category: "periodic" })], price: 25, now });
+    expect(updateAllowed(p, true)).toMatchObject({ ok: false, message: expect.stringMatching(/Nothing material has been filed since 2026-11-08.*No paid run was started/) });
+  });
+  it("filings that could not be checked start nothing", () => {
+    const p = planUpdate({ foundation: iren, filings: null, price: 25, now });
+    expect(updateAllowed(p, false)).toMatchObject({ ok: false, message: expect.stringMatching(/could not be checked/) });
+  });
+  it("no foundation starts nothing", () => {
+    expect(updateAllowed(planUpdate({ foundation: null, filings: [filing({})], price: 25, now }), true).ok).toBe(false);
+  });
+  it("a new material filing allows the update", () => {
+    expect(updateAllowed(planUpdate({ foundation: iren, filings: [filing({})], price: 21, now }), true)).toEqual({ ok: true });
   });
 });

@@ -28,6 +28,9 @@ describe("spending by feature, model and budget", () => {
     expect(budgetGate(s, "research", 6, true)).toEqual({ ok: true });
     const tight = summarizeSpend(rows, now, { everydayMonthly: 20, researchMonthly: 6, approveAbove: 3 });
     expect(budgetGate(tight, "research", 2.5, false)).toMatchObject({ ok: false, message: expect.stringMatching(/over its \$6 for the month/) });
+    // The full-investigation checkbox covers the approval threshold, never the monthly budget.
+    expect(budgetGate(s, "research", 6, false, true)).toEqual({ ok: true });
+    expect(budgetGate(tight, "research", 6, false, true)).toMatchObject({ ok: false, needsConfirm: true, message: expect.stringMatching(/over its \$6 for the month/) });
   });
   it("names model families", () => {
     expect(modelFamily("claude-opus-5-5")).toBe("Opus");

@@ -18,13 +18,12 @@ import { ResearchButton } from "@/components/ResearchButton";
 import { InvestigationRunner } from "@/components/InvestigationRunner";
 import { InvestigationReport, type InvVersion, type SourceRow } from "@/components/InvestigationReport";
 import type { ValidationReport } from "@/lib/research/validate";
-import { planUpdate } from "@/lib/research/updatePlan";
+import { updatePlanFor } from "@/lib/research/updateCheck";
 import { measuredEstimates } from "@/lib/research/costEstimates";
 import type { VersionRow } from "@/lib/research/records";
-import { getFilings } from "@/lib/market/sec";
 import { getQuote } from "@/lib/market/quotes";
 import { coverage } from "@/lib/research/status";
-import { researchStanding, qualityOf, QUALITY_LABEL, approvalOf, updateFoundation, AUTHORITY_LABEL, type Standing } from "@/lib/research/standing";
+import { researchStanding, qualityOf, QUALITY_LABEL, approvalOf, type Standing } from "@/lib/research/standing";
 import { pctStr, shortDate, toneOf, usd } from "@/lib/format";
 import { Card, CardHead, Chevron, DataLabel, Disclose, Pill, SourceRef } from "@/components/ui";
 
@@ -107,21 +106,8 @@ export default async function CompanyPage({ params, searchParams }: { params: Pr
   const shownInv = standing.pending?.v as Version | undefined ?? (standing.inUse && isInv(standing.inUse.v as Version) ? standing.inUse.v as Version : investigations[0]) ?? null;
   const latestInv = shownInv;
   // "Update research": what is new since the research it would build on, and the free re-pricing.
-  const found = updateFoundation(versions as unknown as (VersionRow & { created_at?: string | null })[]);
-  const [filingsRes, estimates] = etf ? [null, null] : await Promise.all([getFilings(company.symbol).catch(() => null), measuredEstimates(supabase).catch(() => null)]);
-  const fc = (found?.v.conclusion ?? {}) as Record<string, unknown>;
-  const fv = (fc.valuation ?? {}) as Record<string, number | string | null | undefined>;
-  const num = (x: unknown) => (typeof x === "number" && Number.isFinite(x) ? x : typeof x === "string" && x.trim() && Number.isFinite(Number(x.replace(/[$,]/g, ""))) ? Number(x.replace(/[$,]/g, "")) : null);
-  const updatePlan = etf ? null : planUpdate({
-    foundation: found ? {
-      versionId: found.v.id, asOf: found.v.research_as_of, label: `${shortDate(found.v.research_as_of)}, ${AUTHORITY_LABEL[found.authority].toLowerCase()}`,
-      complete: found.v.completeness === "complete", isInvestigation: true, referencePrice: num(fc.reference_price), terminalDate: typeof fv.terminal_date === "string" ? fv.terminal_date : null,
-      scenarios: { bear: num(fv.bear_value), base: num(fv.base_value), bull: num(fv.bull_value), pBear: num(fv.bear_probability), pBase: num(fv.base_probability), pBull: num(fv.bull_probability) },
-      reviewedAccessions: [],
-    } : null,
-    filings: filingsRes && !("error" in filingsRes) ? filingsRes.filings : null,
-    price, now: new Date(), estimates: estimates ?? undefined,
-  });
+  const estimates = etf ? null : await measuredEstimates(supabase).catch(() => null);
+  const updatePlan = etf ? null : (await updatePlanFor(company.symbol, versions as unknown as (VersionRow & { created_at?: string | null })[], price, estimates ?? undefined)).plan;
   // The code-only check of the investigation, saved separately from the research record.
   const { data: valRow } = latestInv
     ? await supabase.from("model_runs").select("outputs").eq("kind", "research_validation").eq("inputs->>version_id", latestInv.id).order("computed_at", { ascending: false }).limit(1).maybeSingle()
