@@ -94,7 +94,7 @@ describe("decisions follow research authority", () => {
     expect(o.label).toBe("Research not approved");
     expect(o.eligible).toBe(false);
     expect(o.highConviction).toBe(false);
-    expect(o.verdicts.research.detail).toMatch(/No approved research: the record on file is a preliminary screen you have not approved, so it is context only/);
+    expect(o.verdicts!.research.detail).toMatch(/No approved research: the record on file is a preliminary screen you have not approved, so it is context only/);
     expect(o.reassessment).toMatchObject({ status: "not_approved" });
     expect(o.reassessment!.current).toMatch(/^No approved research\. .*Until you approve research: hold what you own, no new money\./);
     expect(r.recommendation.allocations.some((a) => a.symbol === "AAA")).toBe(false);
@@ -105,7 +105,7 @@ describe("decisions follow research authority", () => {
   it("imported (historical) research is context only too", () => {
     const o = run(aaa({}, "chatgpt_original")).options.find((x) => x.symbol === "AAA")!;
     expect(o.label).toBe("Research not approved");
-    expect(o.verdicts.research.detail).toMatch(/older research you have not approved/);
+    expect(o.verdicts!.research.detail).toMatch(/older research you have not approved/);
   });
 
   it("no buy-zone alerts from unapproved bands", () => {
