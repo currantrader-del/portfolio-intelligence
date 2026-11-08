@@ -32,6 +32,7 @@ export function InvestigationRunner({ symbol, hasResearch, plan }: { symbol: str
   const [error, setError] = useState<string | null>(null);
   const [starting, setStarting] = useState<string | null>(null);
   const [confirmFull, setConfirmFull] = useState(false);
+  const [needsConfirm, setNeedsConfirm] = useState<"full" | "refresh" | null>(null);
   const [now, setNow] = useState(() => Date.now());
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -58,13 +59,18 @@ export function InvestigationRunner({ symbol, hasResearch, plan }: { symbol: str
     return () => clearInterval(t);
   }, [st?.status]);
 
-  async function start(kind: "full" | "refresh" | "resume") {
+  async function start(kind: "full" | "refresh" | "resume", confirm = false) {
     if (starting) return;
     setError(null);
+    setNeedsConfirm(null);
     setStarting(kind);
-    const r = await requestJSON("/api/research/investigate", { json: kind === "resume" ? { symbol, resume: true } : { symbol, type: kind } });
+    // The full investigation is only reachable after ticking its cost confirmation, so it is sent confirmed.
+    const r = await requestJSON<{ needsConfirm?: boolean }>("/api/research/investigate", { json: kind === "resume" ? { symbol, resume: true } : { symbol, type: kind, confirm: confirm || kind === "full" } });
     setStarting(null);
-    if (!r.ok) { setError(`Did not start. ${r.error}`); return; }
+    if (!r.ok) {
+      if (r.data?.needsConfirm && kind !== "resume") { setNeedsConfirm(kind); setError(r.error); return; }
+      setError(`Did not start. ${r.error}`); return;
+    }
     if (timer.current) clearTimeout(timer.current);
     timer.current = setTimeout(poll, 3000);
     setSt({ status: "running", requestId: "", type: kind, startedAt: new Date().toISOString(), run: null });
@@ -106,6 +112,7 @@ export function InvestigationRunner({ symbol, hasResearch, plan }: { symbol: str
       {st?.status === "paused" && run?.pauseReason && <p className="t-xs warn">{run.pauseReason}</p>}
       {st?.status === "failed" && <p className="t-xs warn">The last run failed at the start (the reading list could not be built).</p>}
       {error && <p role="alert" className="t-sm rounded-[12px] bg-warn-bg text-warn-ink px-3 py-2">{error}</p>}
+      {needsConfirm && <button type="button" className="btn btn-sm self-start" onClick={() => start(needsConfirm, true)} disabled={!!starting}>Start anyway</button>}
       <div className="flex flex-wrap gap-2">
         {(st?.status === "stalled" || st?.status === "paused") && (
           <button type="button" className={`btn btn-primary ${starting === "resume" ? "is-pending" : ""}`} onClick={() => start("resume")} disabled={!!starting}>{starting === "resume" ? <><Spinner />Resuming…</> : "Resume"}</button>

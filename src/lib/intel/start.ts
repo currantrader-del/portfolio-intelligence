@@ -3,6 +3,7 @@
  * Markets page (signed-in user) and by the morning schedule (intel-cron), so both run the same steps.
  */
 import { startPlan } from "@/lib/plan/job";
+import { loadSpend } from "@/lib/costs/spend";
 import { startTradeScan } from "@/lib/trades/job";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { buildWorkspace } from "@/lib/workspace-core";
@@ -53,6 +54,8 @@ export const DAILY_CAP = { answers: 15, total: 20 };
 export async function runMorning(db: SupabaseClient, token: string, origin: string, ask: (requestId: string) => Promise<string>) {
   const spent = await spentToday(db);
   if (spent.total >= DAILY_CAP.total) return { skipped: `cost limit reached ($${spent.total.toFixed(2)} spent today)` };
+  const month = await loadSpend(db).catch(() => null);
+  if (month?.classes.everyday.over) return { skipped: `monthly everyday AI budget reached ($${month.classes.everyday.spent.toFixed(2)} of $${month.classes.everyday.budget})` };
   const b = await startBriefing(db, token, origin);
   if ("error" in b) console.error(`morning: briefing did not start: ${b.error}`);
   else {

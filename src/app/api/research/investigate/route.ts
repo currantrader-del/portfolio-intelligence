@@ -9,6 +9,8 @@ import { createClient } from "@/lib/supabase/server";
 import { dispatchJob } from "@/lib/intel/jobs";
 import { DAILY_CAP, spentToday } from "@/lib/intel/start";
 import { updateFoundation } from "@/lib/research/standing";
+import { budgetGate, loadSpend } from "@/lib/costs/spend";
+import { measuredEstimates } from "@/lib/research/costEstimates";
 import type { VersionRow } from "@/lib/research/records";
 import { isEtf } from "@/lib/portfolio/classify";
 import { investigationStatus, resumeIfStalled, startInvestigation } from "@/lib/research/investigate/run";
@@ -25,7 +27,7 @@ export async function POST(req: Request) {
   const { data: sess } = await db.auth.getSession();
   const token = sess.session?.access_token;
   if (!auth.user || !token) return Response.json({ error: "Sign in first." }, { status: 401 });
-  const body = (await req.json().catch(() => null)) as { symbol?: string; type?: string; resume?: boolean } | null;
+  const body = (await req.json().catch(() => null)) as { symbol?: string; type?: string; resume?: boolean; confirm?: boolean } | null;
   const symbol = clean(body?.symbol);
   if (!symbol) return Response.json({ error: "No company given." }, { status: 400 });
   if (isEtf(symbol)) return Response.json({ error: "Broad ETFs don't need company research." }, { status: 400 });
@@ -47,6 +49,10 @@ export async function POST(req: Request) {
   if (type === "material_event_refresh" && !updateFoundation((company?.research_versions ?? []) as VersionRow[])) return Response.json({ error: "There is no finished investigation to update yet (a quick screen is not enough). Run a full investigation first." }, { status: 400 });
   const spent = await spentToday(db);
   if (spent.answers >= DAILY_CAP.answers || spent.total >= DAILY_CAP.total) return Response.json({ error: `Today's cost limit is reached ($${spent.total.toFixed(2)} spent). It resets at midnight UTC.` }, { status: 429 });
+  // Monthly research budget and the approval threshold, against what runs of this kind have cost.
+  const [month, est] = await Promise.all([loadSpend(db), measuredEstimates(db)]);
+  const gate = budgetGate(month, "research", type === "material_event_refresh" ? est.update.high : est.full.high, body?.confirm === true);
+  if (!gate.ok) return Response.json({ error: gate.message, needsConfirm: gate.needsConfirm }, { status: 409 });
   try {
     const requestId = await startInvestigation(db, symbol, type);
     await dispatchJob(origin, { job: "investigate", requestId, token });

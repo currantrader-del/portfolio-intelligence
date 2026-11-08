@@ -35,7 +35,7 @@ export default async function PlanPage() {
       <div className="flex flex-col gap-1">
         <span className="cap">Portfolio plan</span>
         <h1 className="h1">Your plan</h1>
-        <p className="t-sm">Built from your research, holdings, cash, policy and the latest market briefing. It rebuilds after each AI research, after a policy change and every Monday. Older plans are kept as history. It proposes; you decide, and it never trades.</p>
+        <p className="t-sm">Built from your research, holdings, cash, policy and the latest market briefing. It rebuilds every Monday morning or when you tap Rebuild (about $0.10); after a policy or research change it is marked outdated instead of rebuilt automatically. Older plans are kept as history. It proposes; you decide, and it never trades.</p>
       </div>
 
       <Card className="!gap-2">
