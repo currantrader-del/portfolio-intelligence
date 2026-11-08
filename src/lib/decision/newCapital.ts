@@ -185,6 +185,12 @@ export function newCapital(args: {
         : { requested, used: amount, verified: amount >= 1, detail: (amount < requested
           ? `You asked about ${fmt$(requested)}, but ${invName} holds ${fmt$(spendable)} of cash that can buy a stock or ETF, so this is sized on ${fmt$(amount)}.${savingsHint}`
           : `${fmt$(amount)} of cash already in ${invName}.`) + ` ${reserveNote}${elsewhereNote}` };
+  // A cash figure is only as good as what confirms it: arithmetic on recorded transactions is not a balance.
+  // Until a statement or your own check confirms the brokerage cash, money sized on it stays conditional.
+  if (source !== "planned" && inv && !(inv.confirmed ?? true) && !args.holdingsConfirmed && funds.verified) {
+    funds.verified = false;
+    funds.detail += ` The ${invName} cash is not confirmed: ${inv.basis?.detail ?? "it is worked out from records, not read from a statement"}${inv.basis?.checks.length ? ` ${inv.basis.checks.join(" ")}` : ""} Check the cash and buying power in the broker's app and confirm.`;
+  }
   const audit = policy?.audit;
   const yields = args.yields ?? { y2: null, y10: null };
   // Money already counted as deployable cash only moves within the portfolio; new money grows it.

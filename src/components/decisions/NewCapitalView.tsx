@@ -218,8 +218,9 @@ function AccountCashCard({ ws }: { ws: Workspace }) {
       <ul className="flex flex-col">
         {accounts.map((a) => (
           <li key={a.id} className="flex items-start justify-between gap-3 py-1.5 border-t border-line first:border-t-0">
-            <span className="flex flex-col min-w-0"><span className="t-sm text-ink">{a.name}</span><span className="t-xs">{a.use === "savings" ? `${a.note}. ${usd(cd.protectedReserve)} is your protected reserve; ${usd(cd.deployableSavings)} is above it.` : a.note}</span></span>
-            <span className="t-sm num text-ink shrink-0">{usd(a.cash, 2)}</span>
+            <span className="flex flex-col min-w-0"><span className="t-sm text-ink">{a.name}</span><span className="t-xs">{a.use === "savings" ? `${a.note}. ${usd(cd.protectedReserve)} is your protected reserve; ${usd(cd.deployableSavings)} is above it.` : a.note}</span>
+              {a.basis && <span className={`t-xs ${a.basis.confirmed ? "" : "warn"}`}>{a.basis.detail}{a.basis.checks.length ? ` ${a.basis.checks.join(" ")}` : ""}</span>}</span>
+            <span className="flex flex-col items-end shrink-0"><span className="t-sm num text-ink">{usd(a.cash, 2)}</span>{a.basis && <Pill small tone={a.basis.confirmed ? "gain" : "warn"}>{a.basis.confirmed ? (a.basis.status === "manual" ? "Your entry" : "Statement") : a.basis.status === "derived" ? "Worked out" : "Check"}</Pill>}</span>
           </li>
         ))}
       </ul>

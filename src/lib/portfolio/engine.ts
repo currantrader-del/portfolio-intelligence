@@ -102,7 +102,40 @@ export type AccountView = {
  * transfer you plan. Only the self-directed brokerage account can buy a chosen stock or ETF.
  */
 export type AccountCashUse = "self_directed" | "managed" | "retirement_managed" | "savings";
-export type AccountCash = { id: string; name: string; role: string; cash: number; use: AccountCashUse; canBuyChosen: boolean; note: string };
+export type AccountCash = { id: string; name: string; role: string; cash: number; use: AccountCashUse; canBuyChosen: boolean; note: string; basis?: CashBasis };
+/**
+ * Where an account's cash figure comes from, and whether anything confirms it. A figure that only follows from
+ * arithmetic (statement cash plus transactions you recorded since) is shown as derived, never as confirmed:
+ * a missing trade, a pending deposit or a fee would make it wrong without the arithmetic noticing.
+ */
+export type CashBasis = {
+  statementCash: number; statementAsOf: string; sourceKind: string; ledgerNet: number; ledgerRows: number; lastActivity: string | null;
+  confirmed: boolean; status: "statement" | "manual" | "derived"; detail: string; checks: string[];
+};
+/** A statement or your own entry older than this does not confirm today's cash. */
+export const CASH_CONFIRM_DAYS = 7;
+
+export function cashBasis(a: { cashValue: number | null; asOf: string; sourceKind?: string | null; after: { amount: number; tradeDate: string }[]; statementGap: number | null; now: Date }): CashBasis {
+  const stmt = a.cashValue ?? 0;
+  const net = Math.round(a.after.reduce((x, t) => x + t.amount, 0) * 100) / 100;
+  const last = a.after.reduce<string | null>((m, t) => (!m || t.tradeDate > m ? t.tradeDate : m), null);
+  const age = Math.max(0, Math.floor((a.now.getTime() - new Date(a.asOf).getTime()) / 86_400_000));
+  const kind = a.sourceKind ?? "statement";
+  const derived = a.after.length > 0;
+  const cash = Math.round((stmt + net) * 100) / 100;
+  const d = (iso: string) => iso.slice(0, 10);
+  const money = (n: number) => `$${Math.abs(n).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+  const checks: string[] = [];
+  if (a.cashValue === null) checks.push("The statement on file has no cash figure.");
+  if (cash < -0.005) checks.push(`Recorded transactions spend ${money(-cash)} more than the cash on the ${d(a.asOf)} statement: a deposit or trade is missing from the records.`);
+  if (a.statementGap !== null && Math.abs(a.statementGap) > 1) checks.push(`The ${d(a.asOf)} statement total differs from its positions plus cash by ${money(a.statementGap)}.`);
+  if (age > CASH_CONFIRM_DAYS) checks.push(`The ${kind === "manual" ? "balance you entered" : "statement"} is ${age} days old.`);
+  const status: CashBasis["status"] = derived ? "derived" : kind === "manual" ? "manual" : "statement";
+  const detail = derived
+    ? `${money(stmt)} on the ${d(a.asOf)} statement ${net >= 0 ? "plus" : "less"} ${money(net)} from ${a.after.length} recorded transaction${a.after.length === 1 ? "" : "s"} through ${last} = ${money(cash)}. Worked out, not confirmed: nothing since ${d(a.asOf)} shows the actual balance or buying power.`
+    : kind === "manual" ? `${money(stmt)} as you entered it on ${d(a.asOf)}.` : `${money(stmt)} on the ${d(a.asOf)} statement, with no recorded activity since.`;
+  return { statementCash: stmt, statementAsOf: a.asOf, sourceKind: kind, ledgerNet: net, ledgerRows: a.after.length, lastActivity: last, confirmed: !derived && checks.length === 0, status, detail, checks };
+}
 
 export function accountCashUse(name: string, role: string): AccountCashUse {
   if (role === "cash" || role === "protected_savings") return "savings";
@@ -124,7 +157,7 @@ export type CashView = {
   /** Each account's own cash and what it can be used for. */
   accounts: AccountCash[];
   /** The self-directed brokerage account new-money decisions buy in (null when none is on file). */
-  investingAccount: { id: string; name: string; cash: number } | null;
+  investingAccount: { id: string; name: string; cash: number; confirmed?: boolean; basis?: CashBasis } | null;
   brokerage: number; // cash inside brokerage and retirement accounts
   savings: number | null; // cash accounts; null when never entered
   savingsAsOf: string | null;
@@ -205,7 +238,8 @@ export function buildPortfolio(
     const after = ledger.filter((t) => t.accountId === s.accountId && t.tradeDate > s.asOf.slice(0, 10));
     const cashAfter = (s.cashValue ?? 0) + after.reduce((a, t) => a + t.amount, 0);
     const use = accountCashUse(s.accountName, s.accountRole);
-    accountCash.push({ id: s.accountId, name: s.accountName, role: s.accountRole, cash: round2(cashAfter), use, canBuyChosen: use === "self_directed", note: USE_NOTE[use] });
+    const acctCash: AccountCash = { id: s.accountId, name: s.accountName, role: s.accountRole, cash: round2(cashAfter), use, canBuyChosen: use === "self_directed", note: USE_NOTE[use] };
+    accountCash.push(acctCash);
     if (isCashAccount) {
       savings = (savings ?? 0) + cashAfter;
       if (!savingsAsOf || s.asOf < savingsAsOf) savingsAsOf = s.asOf;
@@ -247,6 +281,7 @@ export function buildPortfolio(
       bySymbol.set(sym, cur);
     }
     const gap = s.totalValue === null ? null : round2(s.totalValue - stmtComputed);
+    acctCash.basis = cashBasis({ cashValue: s.cashValue, asOf: s.asOf, sourceKind: s.sourceKind, after, statementGap: gap, now });
     const knownThrough = after.reduce((m, t) => (t.tradeDate > m ? t.tradeDate : m), s.asOf.slice(0, 10));
     accounts.push({
       id: s.accountId, name: s.accountName, role: s.accountRole, asOf: s.asOf, sourceKind: s.sourceKind ?? "statement", value: round2(acctValue),
@@ -260,7 +295,7 @@ export function buildPortfolio(
   const reserve = policy?.protectedSavingsFloor ?? 3000;
   const deployableSavings = savings === null ? 0 : Math.max(0, savings - reserve);
   const selfDirected = accountCash.filter((a) => a.use === "self_directed").sort((a, b) => b.cash - a.cash);
-  const investingAccount = selfDirected[0] ? { id: selfDirected[0].id, name: selfDirected[0].name, cash: Math.max(0, selfDirected[0].cash) } : null;
+  const investingAccount = selfDirected[0] ? { id: selfDirected[0].id, name: selfDirected[0].name, cash: Math.max(0, selfDirected[0].cash), confirmed: selfDirected[0].basis?.confirmed ?? false, basis: selfDirected[0].basis } : null;
   const cashDetail: CashView = {
     accounts: accountCash,
     investingAccount,

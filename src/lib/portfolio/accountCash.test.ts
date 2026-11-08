@@ -17,6 +17,36 @@ const policy = policyFromRules([{
   conditions: null, source_label: "You", source_date: null, source_status: "latest_approved", approval: "approved", approved_at: "2026-11-07T00:00:00Z", approval_note: null, created_at: "2026-11-07",
 } as PolicyRuleRow]);
 
+describe("a cash figure is checked, not assumed", () => {
+  // The real Schwab records: Oct 31 statement cash $82.20, then the Nov 5 deposit and three buys recorded from Thinkorswim.
+  const ledger = [
+    { accountId: "schwab", tradeDate: "2026-11-05", kind: "deposit" as const, symbol: null, quantity: null, price: null, amount: 1250 },
+    { accountId: "schwab", tradeDate: "2026-11-05", kind: "buy" as const, symbol: "VXUS", quantity: 8, price: 82.06, amount: -656.48 },
+    { accountId: "schwab", tradeDate: "2026-11-05", kind: "buy" as const, symbol: "AVUV", quantity: 3, price: 124.13, amount: -372.39 },
+    { accountId: "schwab", tradeDate: "2026-11-05", kind: "buy" as const, symbol: "VXUS", quantity: 1, price: 82.085, amount: -82.09 },
+  ];
+  const oct = { ...schwab, asOf: "2026-10-31T21:00:00Z", totalValue: 6082.2 };
+  it("statement cash plus recorded trades is shown as worked out, not confirmed", () => {
+    const p = buildPortfolio([oct, acorns, roth, usaa(3000)], new Map(), policy, {}, ledger, now);
+    const s = p.cashDetail.accounts.find((a) => a.id === "schwab")!;
+    expect(s.cash).toBe(221.24);
+    expect(s.basis).toMatchObject({ status: "derived", confirmed: false, statementCash: 82.2, ledgerNet: 139.04, ledgerRows: 4, lastActivity: "2026-11-05" });
+    expect(s.basis!.detail).toMatch(/^\$82\.20 on the 2026-10-31 statement plus \$139\.04 from 4 recorded transactions through 2026-11-05 = \$221\.24\. Worked out, not confirmed/);
+    expect(s.basis!.checks.join(" ")).toMatch(/statement is 8 days old/);
+    const r = newCapital({ amount: 200, source: "existing", portfolio: p, research: [], policy, now });
+    expect(r.funds.verified).toBe(false);
+    expect(r.funds.detail).toMatch(/Check the cash and buying power in the broker's app/);
+  });
+  it("flags records that spend more cash than the statement had", () => {
+    const p = buildPortfolio([oct, usaa(3000)], new Map(), policy, {}, ledger.filter((t) => t.kind !== "deposit"), now);
+    expect(p.cashDetail.accounts[0].basis!.checks[0]).toMatch(/spend \$1,028\.76 more than the cash on the 2026-10-31 statement: a deposit or trade is missing/);
+  });
+  it("a recent statement or your own entry with no later activity is confirmed", () => {
+    const p = buildPortfolio([schwab, { ...usaa(3000), sourceKind: "manual" }], new Map(), policy, {}, [], now);
+    expect(p.cashDetail.accounts.map((a) => [a.name, a.basis!.status, a.basis!.confirmed])).toEqual([["Schwab One (Thinkorswim)", "statement", true], ["USAA Savings", "manual", true]]);
+  });
+});
+
 describe("cash belongs to its account", () => {
   it("knows what each account's cash can do", () => {
     expect(accountCashUse("Schwab One (Thinkorswim)", "taxable_brokerage")).toBe("self_directed");
@@ -28,7 +58,7 @@ describe("cash belongs to its account", () => {
   it("only the Schwab cash can buy today; Acorns, the Roth and the reserve never pay", () => {
     const p = buildPortfolio([schwab, acorns, roth, usaa(3000)], new Map(), policy, {}, [], now);
     const cd = p.cashDetail;
-    expect(cd.investingAccount).toEqual({ id: "schwab", name: "Schwab One (Thinkorswim)", cash: 82.2 });
+    expect(cd.investingAccount).toMatchObject({ id: "schwab", name: "Schwab One (Thinkorswim)", cash: 82.2, confirmed: true });
     expect(cd.spendableNow).toBe(82.2);
     expect(cd.accounts.map((a) => [a.name, a.cash, a.canBuyChosen])).toEqual([
       ["Schwab One (Thinkorswim)", 82.2, true], ["Acorns Invest", 5, false], ["Acorns Later (Roth IRA)", 3.97, false], ["USAA Savings", 3000, false],

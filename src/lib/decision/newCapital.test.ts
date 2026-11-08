@@ -317,7 +317,11 @@ describe("new capital: hypothetical vs verified money", () => {
     expect(pRec.cashDetail.brokerage).toBe(1250);
     const dep = newCapital({ amount: 1250, source: "deposited", portfolio: pRec, research: [research("$26")], policy, now, filings: quiet });
     const planned = newCapital({ amount: 1250, source: "planned", portfolio: p, research: [research("$26")], policy, now, filings: quiet });
-    expect(dep.funds.verified).toBe(true);
+    // A recorded deposit is arithmetic, not a balance: it stays unconfirmed until you check the broker's app.
+    expect(dep.funds.verified).toBe(false);
+    expect(dep.funds.detail).toMatch(/cash is not confirmed: .*plus \$1,250\.00 from 1 recorded transaction through 2026-11-05/);
+    const checked = newCapital({ amount: 1250, source: "deposited", holdingsConfirmed: true, portfolio: pRec, research: [research("$26")], policy, now, filings: quiet });
+    expect(checked.funds.verified).toBe(true);
     // Same money, same resulting portfolio: the recorded deposit is already in the total.
     expect(dep.recommendation.allocations).toEqual(planned.recommendation.allocations);
   });
