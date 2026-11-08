@@ -102,7 +102,19 @@ export default async function TradesPage({ searchParams }: { searchParams: Promi
             </ul>
           </Disclose>
         )}
-        {last?.ok && !last.ideaIds.length && last.noneReason && <p className="t-sm whitespace-pre-line">{last.noneReason}</p>}
+        {last?.ok && !last.ideaIds.length && last.noneReason && (() => {
+          const [head, ...rest] = last.noneReason.split(/\n\s*\n/);
+          return (
+            <>
+              <p className="t-sm">{head}</p>
+              {rest.length > 0 && (
+                <Disclose summary={<span className="t-xs">Why each candidate was turned down</span>}>
+                  <div className="t-sm whitespace-pre-line flex flex-col gap-2">{rest.map((x) => <p key={x.slice(0, 40)}>{x}</p>)}</div>
+                </Disclose>
+              )}
+            </>
+          );
+        })()}
         {last?.ok && last.rejected.length > 0 && (
           <Disclose summary={<span className="t-xs">Turned down by the app&apos;s checks · {last.rejected.length}</span>}>
             <ul className="list-disc pl-5 t-xs">{last.rejected.map((x) => <li key={x.symbol + x.why}>{x.symbol}: {x.why}</li>)}</ul>
