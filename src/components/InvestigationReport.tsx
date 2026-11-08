@@ -6,6 +6,7 @@ import { adoptResearch, setAsideResearch } from "@/app/(app)/research/actions";
 import type { ConsistencyCheck, Conflict, Finding, InvestmentSummary, Objection, Question, ReviewVerdict } from "@/lib/research/investigate/types";
 import type { ScenarioSpec, ValuationResult } from "@/lib/research/investigate/valuationCalc";
 import type { ValidationReport } from "@/lib/research/validate";
+import { inputRows, type ReviewAnnotations } from "@/lib/research/review";
 
 export type InvVersion = {
   id: string; research_as_of: string; completeness: string; origin: string; is_current: boolean; conclusion: Record<string, unknown>;
@@ -47,6 +48,9 @@ export function InvestigationReport({ symbol, v, sources, inUse, validation }: {
   const keyF = findings.filter((f) => f.key && !f.withdrawn);
   const withdrawn = findings.filter((f) => f.withdrawn);
   const val = ev.valuation;
+  const review = (c.review ?? null) as ReviewAnnotations | null;
+  const original = (c.review_original ?? null) as { action?: string | null } | null;
+  const rows = val ? inputRows(val.specs, review) : [];
 
   if (state === "running") {
     return (
@@ -83,6 +87,18 @@ export function InvestigationReport({ symbol, v, sources, inUse, validation }: {
           {sm.changes_vs_prior && <p className="t-sm"><span className="t-xs block">Versus the earlier research</span>{sm.changes_vs_prior}</p>}
         </>
       ) : <p className="t-sm warn">No investment summary was produced.</p>}
+      {review && (
+        <div className="t-sm rounded-[12px] bg-warn-bg text-warn-ink px-3 py-2 flex flex-col gap-1">
+          <span className="font-semibold">Reviewer corrections ({shortDate(review.at)}, {review.by}). The original record is unchanged.</span>
+          <ul className="list-disc pl-4">
+            {review.material_inputs.map((m, i) => <li key={`m${i}`}><b>Material, not fully reconciled:</b> {m.input}{m.scenario === "all" ? "" : ` (${m.scenario})`}. {m.note}</li>)}
+            {review.corrections.map((x, i) => <li key={`c${i}`}><b>Corrected</b> “{x.find}” → “{x.replace}”</li>)}
+            {(review.finding_corrections ?? []).map((x, i) => <li key={`f${i}`}><b>Finding {x.id} restated:</b> {x.reason}</li>)}
+            {review.withdrawn_findings.map((w, i) => <li key={`w${i}`}><b>Finding {w.id} withdrawn:</b> {w.reason}</li>)}
+            {review.conditional_action && <li><b>Recommendation kept conditional.</b> The investigation wrote “{original?.action ?? "—"}”; it is shown and used as: {review.conditional_action}</li>}
+          </ul>
+        </div>
+      )}
       {completion && !completion.complete && (
         <div className="t-sm rounded-[12px] bg-warn-bg text-warn-ink px-3 py-2 flex flex-col gap-1">
           <span className="font-semibold">Not complete: {completion.reasons.length} item{completion.reasons.length === 1 ? "" : "s"} could not be closed</span>
@@ -103,7 +119,8 @@ export function InvestigationReport({ symbol, v, sources, inUse, validation }: {
             <input type="hidden" name="versionId" value={v.id} />
             {v.completeness === "complete" ? (
               <SubmitButton className="btn btn-primary self-start" pendingText="Approving…">Approve as my research</SubmitButton>
-            ) : (
+            ) : null}
+            {v.completeness !== "complete" && (
               <>
                 <label className="t-sm flex items-start gap-2"><input type="checkbox" name="acknowledge" value="yes" required className="mt-1" />
                   <span>I have read the {completion?.reasons.length ?? 0} open item{completion?.reasons.length === 1 ? "" : "s"} above. Approve provisionally: they stay listed on the record, and the app suggests no new money for {symbol} until a refresh resolves them.</span></label>
@@ -111,6 +128,16 @@ export function InvestigationReport({ symbol, v, sources, inUse, validation }: {
               </>
             )}
           </ActionForm>
+          {v.completeness === "complete" && (
+            <ActionForm action={adoptResearch} success="Approved provisionally" className="flex flex-col gap-1.5">
+              <input type="hidden" name="symbol" value={symbol} />
+              <input type="hidden" name="versionId" value={v.id} />
+              <input type="hidden" name="mode" value="provisional" />
+              <label className="t-sm flex items-start gap-2"><input type="checkbox" name="acknowledge" value="yes" required className="mt-1" />
+                <span>Approve provisionally instead: use this research, with {review ? "the reviewer corrections above" : "the validation caveats"} listed as open items. No new money is suggested for {symbol} until they are resolved, and no trade is approved.</span></label>
+              <SubmitButton className="btn self-start" pendingText="Approving…">Approve research provisionally</SubmitButton>
+            </ActionForm>
+          )}
           <ActionForm action={setAsideResearch} success="Kept your current research" className="flex">
             <input type="hidden" name="symbol" value={symbol} />
             <input type="hidden" name="versionId" value={v.id} />
@@ -140,7 +167,7 @@ export function InvestigationReport({ symbol, v, sources, inUse, validation }: {
             {[...keyF, ...findings.filter((f) => !f.key && !f.withdrawn), ...withdrawn].map((f, i) => (
               <div key={`${f.id}-${i}`} className={`flex flex-col ${f.withdrawn ? "opacity-60" : ""}`}>
                 <span className="text-ink">{f.id} · {f.claim}{f.value ? `: ${f.value} ${f.unit}` : ""} <span className="t-xs">({f.period})</span></span>
-                <span className={`t-xs ${f.check.status.startsWith("quote") ? "warn" : ""}`}>{CHECK_LABEL[f.check.status] ?? f.check.status}{f.doc_id ? ` · ${f.doc_id}` : ""}{f.key ? " · key" : ""}{f.withdrawn ? ` · withdrawn: ${f.withdrawn.reason}${f.withdrawn.replaced_by ? ` (see ${f.withdrawn.replaced_by})` : ""}` : ""}{f.quote && f.source === "primary" ? ` · “${f.quote.slice(0, 160)}${f.quote.length > 160 ? "…" : ""}”` : ""}</span>
+                <span className={`t-xs ${f.check.status.startsWith("quote") ? "warn" : ""}`}>{CHECK_LABEL[f.check.status] ?? f.check.status}{f.doc_id ? ` · ${f.doc_id}` : ""}{f.key ? " · key" : ""}{f.withdrawn ? ` · withdrawn: ${f.withdrawn.reason}${f.withdrawn.replaced_by ? ` (see ${f.withdrawn.replaced_by})` : ""}` : ""}{(f as { claim_original?: string }).claim_original ? ` · corrected by reviewer (${(f as { claim_correction?: string }).claim_correction}); originally: “${(f as { claim_original?: string }).claim_original}”` : ""}{f.quote && f.source === "primary" ? ` · “${f.quote.slice(0, 160)}${f.quote.length > 160 ? "…" : ""}”` : ""}</span>
                 {f.classification && <span className={`t-xs ${f.classification.cls === "unresolved_thesis_changing" ? "warn" : ""}`}><strong>{CLASS_LABEL[f.classification.cls]}</strong>{f.classification.replaced_by ? ` (${f.classification.replaced_by})` : ""}: {f.classification.explanation} Effect: {f.classification.impact}</span>}
               </div>
             ))}
@@ -156,7 +183,7 @@ export function InvestigationReport({ symbol, v, sources, inUse, validation }: {
                   <div key={sc.name} className="flex flex-col gap-0.5 border-b border-line pb-2 last:border-b-0">
                     <span className="text-ink font-semibold capitalize">{sc.name} · {pct(sc.probability)} · {usd(sc.value_per_share)} ({sc.method}){sc.floored ? " · floor applied" : ""}</span>
                     {sc.steps.map((st, i) => <span key={i} className="t-xs num">{st.label}: {st.formula} = {Math.abs(st.value) > 1e5 ? usd(st.value, 0) : st.value.toFixed(2)}</span>)}
-                    {spec && <span className="t-xs">Inputs from: {Object.entries(spec.sources ?? {}).map(([k, s]) => `${k} ${s}`).join("; ")}</span>}
+                    {spec && <InputTable rows={rows.filter((r) => r.scenario === sc.name)} />}
                     {spec?.rationale && <span className="t-xs">{spec.rationale}</span>}
                   </div>
                 );
@@ -264,6 +291,22 @@ const CHECK_TONE: Record<string, "gain" | "warn" | "alert"> = { pass: "gain", wa
 const VERDICT_TEXT: Record<string, string> = { passes: "Passes", passes_with_caveats: "Passes with caveats", does_not_pass: "Does not pass" };
 
 /** The code-only check of the record (arithmetic, documents, Q&A, sensitivity, bridges), shown before you decide. */
+const KIND_LABEL: Record<string, string> = { sourced: "Sourced", calculation: "Calculated", estimate: "Model estimate" };
+function InputTable({ rows }: { rows: ReturnType<typeof inputRows> }) {
+  if (!rows.length) return null;
+  return (
+    <div className="flex flex-col gap-0.5 mt-1">
+      <span className="t-xs font-semibold">Inputs: sourced from a finding, or the model&apos;s own estimate</span>
+      {rows.map((r) => (
+        <span key={r.input} className={`t-xs ${r.material ? "warn" : ""}`}>
+          <b className="text-ink">{r.input}</b> {Math.abs(r.value) >= 1e5 ? usd(r.value, 0) : r.value.toLocaleString("en-US", { maximumFractionDigits: 4 })} · <b>{KIND_LABEL[r.kind] ?? r.kind}</b>{r.cites.length ? ` (cites ${r.cites.join(", ")})` : ""}{r.material ? " · MATERIAL, not fully reconciled" : ""}
+          {r.source ? <span className="block opacity-80">{r.source}</span> : null}
+        </span>
+      ))}
+    </div>
+  );
+}
+
 function ValidationBox({ r }: { r: ValidationReport }) {
   return (
     <div className="flex flex-col gap-1.5 rounded-[12px] bg-surface-2 px-3 py-2">

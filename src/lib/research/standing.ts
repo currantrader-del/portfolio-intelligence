@@ -95,6 +95,9 @@ export const APPROVAL_LABEL: Record<Approval, string> = {
 export function openItems(v: V): string[] {
   const c = conc(v);
   const reasons = Array.isArray(c.completion?.reasons) ? (c.completion!.reasons as unknown[]).map(String) : [];
+  // Items you acknowledged when approving provisionally (a complete record can carry reviewer caveats).
+  const acknowledged = (c as { adoption?: { mode?: string; open_items?: unknown[] } }).adoption;
+  if (acknowledged?.mode === "provisional" && Array.isArray(acknowledged.open_items) && acknowledged.open_items.length) return acknowledged.open_items.map(String);
   if (isInvestigation(v)) return v.completeness === "complete" ? [] : reasons;
   return Array.isArray(c.not_verified) ? (c.not_verified as unknown[]).filter((x): x is string => typeof x === "string" && !!x.trim()) : [];
 }

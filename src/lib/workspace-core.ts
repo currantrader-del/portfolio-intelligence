@@ -1,4 +1,5 @@
 /** The investor's workspace, built from the database. No Next-only imports, so background jobs can use it too. */
+import { loadReviews, withReviews, type ReviewAnnotations } from "@/lib/research/review";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { BENCHMARKS, dayChangePct, getQuotes, type Quote } from "@/lib/market/quotes";
 import { isMarketOpen } from "@/lib/market/hours";
@@ -87,8 +88,9 @@ export async function loadResearch(db: SupabaseClient): Promise<ResearchRecord[]
       .order("symbol"),
     loadFilingChecks(db).catch(() => new Map<string, FilingCheckInfo>()),
   ]);
+  const reviews = await loadReviews(db).catch(() => new Map<string, ReviewAnnotations>());
   return (data ?? []).map((c) =>
-    toResearchRecord(c.symbol, c.name, c.watchlist_status, (c.research_versions ?? []) as VersionRow[], {
+    toResearchRecord(c.symbol, c.name, c.watchlist_status, withReviews((c.research_versions ?? []) as VersionRow[], reviews), {
       stage: c.pipeline_stage ?? "idea", note: c.pipeline_note ?? null, stageUpdatedAt: c.stage_updated_at ?? null, screen: c.screen ?? null, screenedAt: c.screened_at ?? null,
     }, checks.get(c.symbol) ?? null),
   );

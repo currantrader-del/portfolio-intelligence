@@ -1,3 +1,4 @@
+import { loadReviews, withReviews, type ReviewAnnotations } from "@/lib/research/review";
 import { ActionForm, SubmitButton } from "@/components/forms";
 import { AGE_REMINDER_DAYS } from "@/lib/policy/limits";
 import { Suspense } from "react";
@@ -93,7 +94,8 @@ export default async function CompanyPage({ params, searchParams }: { params: Pr
     );
   }
 
-  const versions = ([...(company.research_versions ?? [])] as unknown as Version[]).sort((a, b) => b.research_as_of.localeCompare(a.research_as_of));
+  const reviews = await loadReviews(supabase).catch(() => new Map<string, ReviewAnnotations>());
+  const versions = withReviews([...(company.research_versions ?? [])] as unknown as Version[], reviews).sort((a, b) => b.research_as_of.localeCompare(a.research_as_of));
   const record = ws.research.find((x) => x.symbol === company.symbol);
   const held = !!h;
   const cur = record?.current ?? record?.latest;

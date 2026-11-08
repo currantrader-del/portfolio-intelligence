@@ -1,5 +1,7 @@
 "use server";
 
+import { provisionalItems } from "@/lib/research/review";
+import type { ValidationReport } from "@/lib/research/validate";
 import { AGE_REMINDER_DAYS } from "@/lib/policy/limits";
 import { createHash } from "node:crypto";
 import { redirect } from "next/navigation";
@@ -124,9 +126,15 @@ export async function adoptResearch(formData: FormData): Promise<ActionResult> {
   const c = (v.conclusion ?? {}) as Record<string, unknown>;
   if (v.is_current) return fail("This research is already the one in use.");
   if (c.review_state !== "awaiting_approval") return fail("Only a finished investigation waiting for your decision can be approved.");
-  const complete = v.completeness === "complete";
-  const open = Array.isArray((c.completion as { reasons?: unknown } | undefined)?.reasons) ? ((c.completion as { reasons: unknown[] }).reasons.map(String)) : [];
-  if (!complete && formData.get("acknowledge") !== "yes") return fail("This investigation is incomplete. Tick the box to confirm you have read its open items before approving it provisionally.");
+  // A complete record can still be approved provisionally: its reviewer caveats become the open items.
+  const complete = v.completeness === "complete" && formData.get("mode") !== "provisional";
+  let open = Array.isArray((c.completion as { reasons?: unknown } | undefined)?.reasons) ? ((c.completion as { reasons: unknown[] }).reasons.map(String)) : [];
+  if (!complete) {
+    if (formData.get("acknowledge") !== "yes") return fail(v.completeness === "complete" ? "Tick the box to confirm you have read the reviewer caveats before approving provisionally." : "This investigation is incomplete. Tick the box to confirm you have read its open items before approving it provisionally.");
+    const { data: val } = await db.from("model_runs").select("outputs").eq("kind", "research_validation").eq("inputs->>version_id", v.id).order("computed_at", { ascending: false }).limit(1).maybeSingle();
+    open = [...open, ...provisionalItems((val?.outputs ?? null) as ValidationReport | null)];
+    if (!open.length) open = ["Approved provisionally by you, pending your own review."];
+  }
   const { data: prior } = await db.from("research_versions").select("id, research_as_of").eq("company_id", v.company_id).eq("is_current", true).maybeSingle();
   const at = new Date().toISOString();
   const mode = complete ? "full" : "provisional";
