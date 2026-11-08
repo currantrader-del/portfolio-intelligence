@@ -9,7 +9,7 @@
 import { checkLevels, type TA } from "@/lib/market/ta";
 
 export const TRADE_VERSION = "trade-idea@2";
-export const TRADE_LIMITS = { turns: 16, searches: 8, ms: 9 * 60_000, maxTokens: 12000 };
+export const TRADE_LIMITS = { turns: 22, searches: 10, ms: 11 * 60_000, maxTokens: 12000 };
 /** What VOO is assumed to earn per year; an idea must clear the same days of this, plus a margin. */
 export const VOO_YEARLY = 0.07;
 export const EDGE_MARGIN = 0.03;
@@ -64,15 +64,18 @@ Reply with exactly one JSON object in a \`\`\`json fenced block and nothing else
   "none_reason": string | null      // when ideas is empty: why nothing clears the bar today
 }`;
 
-export function tradeQuestion(today: string, focus?: string | null) {
-  return `Today is ${today}. Look for the best short-term trade available now${focus ? `, starting with ${focus}` : " across my holdings, my researched companies and anything the market briefing points to"}. Propose at most two, and none unless one clearly clears the bar.
-
+export function tradeQuestion(today: string, focus?: string | null, screen?: string | null) {
+  return `Today is ${today}. Look for the best short-term trade available now${focus ? `, starting with ${focus}` : " across the whole market"}. Propose at most two, and none unless one clearly clears the bar.
+${screen ? `
+MARKET SCREEN (computed by the app today)
+${screen}
+` : ""}
 Do the work before you answer; an answer without these steps is not accepted:
 1. get_briefing and get_pipeline to see what moved and what is researched.
-2. Shortlist 3 to 6 candidates${focus ? ` (${focus} first)` : ""}: holdings, researched companies, or names the briefing points to.
+2. Shortlist 4 to 8 candidates${focus ? ` (${focus} first)` : ""}: mostly the strongest setups from the market screen above, plus any holding, researched company or name from the briefing with a dated catalyst. A chart setup alone is not a reason; look for the business or event behind it.
 3. For each: get_quote and get_technicals; get_research when it is on file.
 4. For the one or two most promising: web_search for the catalyst, its date and the consensus; get_filings for anything recent.
-5. Argue against your best case, then reply with the JSON. "No trade" is fine, but only after steps 1-4, and the none_reason must name what you checked.`;
+5. Argue against your best case, then reply with the JSON. "No trade" is fine, but only after steps 1-4, and the none_reason must name what you checked, including which screened setups you looked at and why they failed.`;
 }
 
 const num = (v: unknown) => (typeof v === "number" && Number.isFinite(v) ? v : typeof v === "string" && v.trim() && Number.isFinite(Number(v)) ? Number(v) : null);

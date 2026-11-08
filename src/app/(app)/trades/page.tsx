@@ -4,6 +4,7 @@ import { Card, CardHead, Disclose, Metric, Pill } from "@/components/ui";
 import { TradeRunner } from "@/components/TradeRunner";
 import { loadTrades, markOpen, scanStatus, type Trade } from "@/lib/trades/job";
 import { evaluate, scoreboard, type Result } from "@/lib/trades/trades";
+import { setupLabel } from "@/lib/trades/scan";
 import { shortDate } from "@/lib/format";
 import { markTaken } from "./actions";
 
@@ -80,7 +81,7 @@ export default async function TradesPage({ searchParams }: { searchParams: Promi
       <div className="flex flex-col gap-1">
         <span className="cap">Short term</span>
         <h1 className="h1">Trade ideas</h1>
-        <p className="t-sm">A few trades a year, only when the evidence is strong: a dated reason, a target, a stop and an end date, and an expected result that beats simply holding VOO over the same days. Every idea is locked in as a paper trade the moment it is made and tracked automatically, so the scoreboard shows honestly whether these ideas are worth acting on. It looks once a week on its own; you can ask any time. It never trades.</p>
+        <p className="t-sm">Each search first screens about 500 large US stocks (the S&P 500, plus your holdings and researched companies) for chart setups, then the AI researches the best of them. A few trades a year, only when the evidence is strong: a dated reason, a target, a stop and an end date, and an expected result that beats simply holding VOO over the same days. Every idea is locked in as a paper trade the moment it is made and tracked automatically, so the scoreboard shows honestly whether these ideas are worth acting on. It looks once a week on its own; you can ask any time. It never trades.</p>
       </div>
       {sp.saved && <p role="status" className="t-sm text-ink">Saved. The paper record is unchanged; your actual trade is noted beside it.</p>}
 
@@ -92,7 +93,16 @@ export default async function TradesPage({ searchParams }: { searchParams: Promi
             {!last.ok ? <span className="warn">failed: {last.error}</span> : last.ideaIds.length ? `${last.ideaIds.length} idea${last.ideaIds.length > 1 ? "s" : ""}` : "no trade cleared the bar"}
           </p>
         )}
-        {last?.ok && !last.ideaIds.length && last.noneReason && <p className="t-sm">{last.noneReason}</p>}
+        {last?.screen && (
+          <Disclose summary={<span className="t-xs">Market screen: {last.screen.scanned} stocks checked · {last.screen.found} chart setups · best {last.screen.setups.length} sent to the AI</span>}>
+            <ul className="flex flex-col gap-1 t-xs">
+              {last.screen.setups.map((s) => (
+                <li key={s.symbol}><Link href={`/research/${s.symbol}`} className="text-ink font-semibold">{s.symbol}</Link> · {setupLabel(s.kind)} · ${s.price.toFixed(2)}, stop ${s.stop}, target ${s.target} ({s.rewardRisk}x) · {s.why}</li>
+              ))}
+            </ul>
+          </Disclose>
+        )}
+        {last?.ok && !last.ideaIds.length && last.noneReason && <p className="t-sm whitespace-pre-line">{last.noneReason}</p>}
         {last?.ok && last.rejected.length > 0 && (
           <Disclose summary={<span className="t-xs">Turned down by the app&apos;s checks · {last.rejected.length}</span>}>
             <ul className="list-disc pl-5 t-xs">{last.rejected.map((x) => <li key={x.symbol + x.why}>{x.symbol}: {x.why}</li>)}</ul>
