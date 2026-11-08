@@ -121,7 +121,7 @@ export async function runTradeScan(db: SupabaseClient, requestId: string, notify
       ideaIds.push(id);
       made.push({ id, at: entry.at, idea: v.idea, entry, close: null, taken: null });
     }
-    const id = await out({ ok: true, ideaIds, rejected, noneReason: typeof json.none_reason === "string" ? json.none_reason.slice(0, 1500) : null, ...meta });
+    const id = await out({ ok: true, ideaIds, rejected, noneReason: typeof json.none_reason === "string" ? json.none_reason.slice(0, 6000) : null, ...meta });
     if (made.length && notify) await notify(made).catch((e) => console.error(`trades: notify failed: ${(e as Error).message}`));
     return id;
   } catch (e) {
