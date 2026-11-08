@@ -63,7 +63,7 @@ export async function GET(req: Request) {
   const st = await investigationStatus(db, symbol);
   // A run whose hand-off between steps was lost is restarted from its last checkpoint when anyone
   // looks at it (the scheduled sweep does the same when nobody is looking). Capped in resumeIfStalled.
-  if (st.status === "stalled" && process.env.ANTHROPIC_API_KEY) {
+  if (st.status === "stalled" && st.autoResume && process.env.ANTHROPIC_API_KEY) {
     const { data: sess } = await db.auth.getSession();
     const token = sess.session?.access_token;
     const restarted = token ? await resumeIfStalled(db, st.requestId, () => dispatchJob(new URL(req.url).origin, { job: "investigate", requestId: st.requestId, token })).catch(() => false) : false;

@@ -23,7 +23,7 @@ import { pendingParts, markReviewed, reviewPart } from "./reader";
 import { makeExec, nextId, T } from "./tools";
 import { addUsage, emptyUsage, type InvDoc, type PhaseState, type ResearchType, type RunState } from "./types";
 
-export const INVESTIGATION_VERSION = "investigation@1";
+export const INVESTIGATION_VERSION = "investigation@2";
 /** A safety ceiling per run, not a target: a run that reaches it stops and is saved as incomplete. */
 export const RUN_CEILING_USD = 12;
 const STEP_MS = 11 * 60_000;
@@ -456,16 +456,18 @@ export function isStalled(p: { requestAt: string; checkpointAt: string | null; h
 }
 
 export async function investigationStatus(db: SupabaseClient, symbol: string) {
-  const { data: req } = await db.from("model_runs").select("id, computed_at, inputs").eq("kind", "investigation_request").eq("inputs->>symbol", symbol).order("computed_at", { ascending: false }).limit(1).maybeSingle();
+  const { data: req } = await db.from("model_runs").select("id, computed_at, inputs, code_version").eq("kind", "investigation_request").eq("inputs->>symbol", symbol).order("computed_at", { ascending: false }).limit(1).maybeSingle();
   if (!req) return { status: "none" as const };
   return statusForRequest(db, req);
 }
 
-async function statusForRequest(db: SupabaseClient, req: { id: string; computed_at: string; inputs: unknown }) {
+async function statusForRequest(db: SupabaseClient, req: { id: string; computed_at: string; inputs: unknown; code_version?: string | null }) {
   const [cp, hb] = await Promise.all([latestCheckpoint(db, req.id), latestHeartbeat(db, req.id)]);
   const lastAt = cp?.at ?? req.computed_at;
   const stalled = isStalled({ requestAt: req.computed_at, checkpointAt: cp?.at ?? null, heartbeatAt: hb, running: !cp || cp.state.status === "running" });
-  return { status: stalled ? ("stalled" as const) : cp ? (cp.state.status) : ("running" as const), requestId: req.id, type: (req.inputs as { type: ResearchType }).type, startedAt: req.computed_at, run: cp ? statusOf(cp.state, lastAt) : null };
+  return { status: stalled ? ("stalled" as const) : cp ? (cp.state.status) : ("running" as const), requestId: req.id, type: (req.inputs as { type: ResearchType }).type, startedAt: req.computed_at, run: cp ? statusOf(cp.state, lastAt) : null,
+    // Only runs started by this version restart on their own; older ones wait for the Resume button.
+    autoResume: req.code_version === INVESTIGATION_VERSION };
 }
 
 /**
@@ -488,11 +490,11 @@ export async function resumeIfStalled(db: SupabaseClient, requestId: string, dis
 /** Investigations started in the last two days that have stalled (for the scheduled sweep). */
 export async function stalledInvestigations(db: SupabaseClient) {
   const since = new Date(Date.now() - 2 * 86400_000).toISOString();
-  const { data } = await db.from("model_runs").select("id, computed_at, inputs").eq("kind", "investigation_request").gte("computed_at", since).order("computed_at", { ascending: false }).limit(20);
+  const { data } = await db.from("model_runs").select("id, computed_at, inputs, code_version").eq("kind", "investigation_request").gte("computed_at", since).order("computed_at", { ascending: false }).limit(20);
   const out: { requestId: string; symbol: string }[] = [];
   for (const req of data ?? []) {
     const st = await statusForRequest(db, req);
-    if (st.status === "stalled") out.push({ requestId: req.id, symbol: String((req.inputs as { symbol?: string }).symbol ?? "") });
+    if (st.status === "stalled" && st.autoResume) out.push({ requestId: req.id, symbol: String((req.inputs as { symbol?: string }).symbol ?? "") });
   }
   return out;
 }
