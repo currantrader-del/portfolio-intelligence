@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { budgetGate, modelFamily, summarizeSpend, type CostRow } from "./spend";
+import { automatedGate, budgetGate, manualGate, modelFamily, runEstimate, summarizeSpend, type CostRow } from "./spend";
 
 const now = new Date("2026-11-10T12:00:00Z");
 const rows: CostRow[] = [
@@ -35,5 +35,30 @@ describe("spending by feature, model and budget", () => {
   it("names model families", () => {
     expect(modelFamily("claude-opus-5-5")).toBe("Opus");
     expect(modelFamily(null)).toBe("Not recorded");
+  });
+});
+
+describe("monthly limits on automated and manual jobs", () => {
+  const nearly = summarizeSpend([...rows, { at: "2026-11-09T13:05:00Z", feature: "market_briefing", cost: 19.2, model: "claude-sonnet-5-5" }], now);
+  it("an automated job starts only when the month has room for its usual cost", () => {
+    expect(automatedGate(summarizeSpend(rows, now), "market_briefing")).toEqual({ ok: true });
+    // $19.66 of $20 spent: a briefing (about $0.60) is skipped, a watch summary (about $0.05) still fits.
+    expect(automatedGate(nearly, "market_briefing")).toMatchObject({ ok: false, reason: expect.stringMatching(/everyday AI budget has \$0\.34 left of \$20/) });
+    expect(automatedGate(nearly, "watch_run")).toEqual({ ok: true });
+  });
+  it("research jobs are held to the research budget, not the everyday one", () => {
+    const research = summarizeSpend(rows, now, { everydayMonthly: 20, researchMonthly: 5, approveAbove: 3 });
+    expect(automatedGate(research, "research_result")).toMatchObject({ ok: false });
+    expect(automatedGate(research, "portfolio_plan")).toEqual({ ok: true });
+  });
+  it("estimates a run from this month's average once there are two runs", () => {
+    const s = summarizeSpend(rows, now);
+    expect(runEstimate(s, "assistant_answer")).toBe(0.15);
+    expect(runEstimate(nearly, "market_briefing")).toBeCloseTo((0.36 + 19.2) / 2, 2);
+  });
+  it("a manual job past the budget is a warning you confirm, not a silent start", () => {
+    expect(manualGate(nearly, "portfolio_plan", false)).toMatchObject({ ok: false, needsConfirm: true, message: expect.stringMatching(/everyday AI budget over its \$20/) });
+    expect(manualGate(nearly, "portfolio_plan", true)).toEqual({ ok: true });
+    expect(manualGate(summarizeSpend(rows, now), "assistant_answer", false)).toEqual({ ok: true });
   });
 });

@@ -37,3 +37,14 @@ export async function requestJSON<T = Record<string, unknown>>(url: string, init
     clearTimeout(timer);
   }
 }
+
+/**
+ * A request that starts a paid AI job. When the server warns that it could take the month over its AI budget
+ * (409 with needsConfirm), the warning is shown and the job is sent again only if you press OK.
+ */
+export async function requestPaidJSON<T = Record<string, unknown>>(url: string, init: RequestInit & { json?: Record<string, unknown>; timeoutMs?: number } = {}): Promise<JsonResult<T>> {
+  const first = await requestJSON<T & { needsConfirm?: boolean }>(url, { ...init, json: init.json ?? {}, method: init.method ?? "POST" });
+  if (first.ok || first.status !== 409 || !(first.data as { needsConfirm?: boolean })?.needsConfirm) return first as JsonResult<T>;
+  if (typeof window === "undefined" || !window.confirm(`${first.error}\n\nStart it anyway?`)) return { ...first, error: `Not started. ${first.error}` } as JsonResult<T>;
+  return requestJSON<T>(url, { ...init, json: { ...(init.json ?? {}), confirm: true }, method: init.method ?? "POST" });
+}

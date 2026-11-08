@@ -3,7 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import { AnswerView } from "@/components/AnswerView";
 import { Spinner } from "@/components/forms";
-import { requestJSON } from "@/lib/client/request";
+import { requestPaidJSON } from "@/lib/client/request";
 
 export type StoredAnswer = { question: string; answer: string; at: string; ms: number; costUsd: number; searches: number } | null;
 
@@ -20,7 +20,7 @@ export function QuickQuestion({ slot, initial, last }: { slot: number; initial: 
     const question = q.trim();
     if (!question || busy) return;
     setBusy(true); setError(null);
-    const r = await requestJSON<{ requestId?: string }>("/api/ask", { json: { messages: [{ role: "user", content: question }], page: "/assistant", slot } });
+    const r = await requestPaidJSON<{ requestId?: string }>("/api/ask", { json: { messages: [{ role: "user", content: question }], page: "/assistant", slot } });
     const j = r.data;
     if (!r.ok || !j.requestId) { setBusy(false); setError(r.ok ? "The question didn't start. Try again." : r.error); return; }
     const started = Date.now();

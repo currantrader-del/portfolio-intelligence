@@ -3,6 +3,7 @@
  * bands for researched ideas); the AI is only asked for a one-line "why it matters" when something new
  * fires, so a quiet day costs nothing. Every run is stored, so the Alerts page shows what was sent.
  */
+import { automatedAllowed } from "@/lib/costs/spend";
 import Anthropic from "@anthropic-ai/sdk";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { Alert } from "@/lib/alerts/rules";
@@ -96,7 +97,8 @@ export async function runWatch(db: SupabaseClient, origin: string, opts: { force
   if (fresh.length) {
     const items = fresh.map((f) => f.alert);
     const spent = await spentToday(db, now);
-    if (spent.total < DAILY_CAP.total) {
+    // The one-line summary is the only paid part; without budget room the alert is still sent, unsummarized.
+    if (spent.total < DAILY_CAP.total && (await automatedAllowed(db, "watch_run", now)).ok) {
       const theses = new Map(ws.research.filter((r) => r.current?.parsed.thesis).map((r) => [r.symbol, r.current!.parsed.thesis!]));
       const s = await summarize(items, theses).catch((e) => { console.error(`watch: summary failed: ${(e as Error).message}`); return { text: null, costUsd: 0 }; });
       run.summary = s.text; run.costUsd = s.costUsd;

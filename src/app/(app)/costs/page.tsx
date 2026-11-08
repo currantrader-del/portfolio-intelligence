@@ -24,6 +24,7 @@ export default async function CostsPage() {
         <span className="cap">Costs</span>
         <h1 className="h1">AI spending</h1>
         <p className="t-sm">What the app&apos;s AI has cost in {monthName}, by feature and by model, against your two monthly budgets. Code-only work (prices, filing checks, re-pricing research, validation) costs nothing and is not listed.</p>
+        <p className="t-sm">How the budgets are enforced: a <b className="text-ink">scheduled job</b> (morning briefing and answer, weekly plan, weekly trade scan, alert summaries, restarting a stopped investigation, the plan rebuild after research) starts only if its budget has room for its usual cost; otherwise it is skipped. A job <b className="text-ink">you start</b> that could take a budget past its limit shows a warning first and runs only if you confirm.</p>
       </div>
 
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">

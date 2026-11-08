@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Spinner } from "@/components/forms";
-import { requestJSON } from "@/lib/client/request";
+import { requestJSON, requestPaidJSON } from "@/lib/client/request";
 
 const GIVE_UP_MS = 6 * 60_000;
 
@@ -33,7 +33,7 @@ export function MorningRunner({ label }: { label: string }) {
     if (starting || id) return;
     setError(null);
     setStarting(true);
-    const r = await requestJSON<{ requestId?: string }>("/api/ask", { json: { action: "morning" } });
+    const r = await requestPaidJSON<{ requestId?: string }>("/api/ask", { json: { action: "morning" } });
     setStarting(false);
     if (!r.ok || !r.data.requestId) setError(r.ok ? "It didn't start. Try again." : r.error); else setId(r.data.requestId);
   }

@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Spinner } from "@/components/forms";
-import { requestJSON } from "@/lib/client/request";
+import { requestPaidJSON } from "@/lib/client/request";
 
 /** Rebuild button for the portfolio plan; refreshes the page until a running rebuild finishes. */
 export function PlanRunner({ running, hasPlan }: { running: boolean; hasPlan: boolean }) {
@@ -21,7 +21,7 @@ export function PlanRunner({ running, hasPlan }: { running: boolean; hasPlan: bo
   async function start() {
     if (active) return;
     setBusy(true); setError(null);
-    const r = await requestJSON("/api/plan", { method: "POST" });
+    const r = await requestPaidJSON("/api/plan", { json: {} });
     if (!r.ok) { setError(r.error); setBusy(false); return; }
     router.refresh();
   }

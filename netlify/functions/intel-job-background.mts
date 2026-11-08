@@ -11,6 +11,7 @@ import { runAskJob } from "../../src/lib/assistant/jobs";
 import { runResearchJob } from "../../src/lib/research/aiResearchJob";
 import { resumeIfStalled, runInvestigationStep, stalledInvestigations } from "../../src/lib/research/investigate/run";
 import { runPlanJob, startPlan } from "../../src/lib/plan/job";
+import { automatedAllowed, loadSpend } from "../../src/lib/costs/spend";
 import { runMorning } from "../../src/lib/intel/start";
 import { pushTradeNews, runWatch, watchSettings } from "../../src/lib/watch/job";
 import { runTradeScan } from "../../src/lib/trades/job";
@@ -61,6 +62,9 @@ export default async (req: Request) => {
       const origin = new URL(req.url).origin;
       if (job === "investigate_sweep") {
         // Scheduled safety net: restarts investigations whose chain of steps stopped (capped per run).
+        // Restarting a stopped run spends research money, so it waits for you when the research budget is used up.
+        const month = await loadSpend(db).catch(() => null);
+        if (!month || month.classes.research.over) { console.log(`investigate_sweep: skipped, ${month ? `research budget used ($${month.classes.research.spent.toFixed(2)} of $${month.classes.research.budget})` : "spending could not be read"}; stopped runs stay stopped until you resume them`); return; }
         const stalled = await stalledInvestigations(db);
         for (const r of stalled) {
           const ok = await resumeIfStalled(db, r.requestId, () => dispatchWithRetry(origin, { job: "investigate", requestId: r.requestId, token })).catch((e) => { console.error(`sweep ${r.symbol}: ${(e as Error).message}`); return false; });
@@ -89,7 +93,9 @@ export default async (req: Request) => {
       console.log(`intel job: research result saved ${id}`);
       // New research changes the plan: rebuild it (skipped when a rebuild is already running).
       const { data: r } = await db.from("model_runs").select("outputs->>ok").eq("id", id).maybeSingle();
-      if ((r as { ok?: string } | null)?.ok === "true") await startPlan(db, origin, body.token, "research").catch((e) => console.error(`intel job: plan did not start: ${(e as Error).message}`));
+      const room = await automatedAllowed(db, "portfolio_plan");
+      if (!room.ok) console.log(`intel job: plan rebuild ${room.reason}`);
+      else if ((r as { ok?: string } | null)?.ok === "true") await startPlan(db, origin, body.token, "research").catch((e) => console.error(`intel job: plan did not start: ${(e as Error).message}`));
     } else if (body.job === "investigate" && body.requestId) {
       // One step of a research investigation; the next step is started as a new invocation, so no
       // single invocation runs into the 15-minute limit. A token close to expiry is replaced with a

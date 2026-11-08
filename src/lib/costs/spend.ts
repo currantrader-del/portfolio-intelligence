@@ -134,3 +134,39 @@ export async function loadSpend(db: SupabaseClient, now = new Date()): Promise<S
   const settings: CostSettings = { ...DEFAULT_COST_SETTINGS, ...Object.fromEntries(Object.entries(saved ?? {}).filter(([, v]) => typeof v === "number" && v >= 0)) };
   return summarizeSpend(rows, now, settings);
 }
+
+/** What one run of a feature usually costs, until the month has enough runs of it to measure. */
+export const DEFAULT_RUN_COST: Record<string, number> = {
+  market_briefing: 0.6, assistant_answer: 0.15, portfolio_plan: 0.5, trade_scan: 0.6, watch_run: 0.05, exposure_review: 0.3, research_result: 0.35,
+};
+
+/** The expected cost of one more run: this month's average once there are two runs, never below half the default. */
+export function runEstimate(s: SpendSummary, feature: string): number {
+  const d = DEFAULT_RUN_COST[feature] ?? 0.5;
+  const f = s.byFeature.find((x) => x.feature === feature);
+  return r2(f && f.runs >= 2 ? Math.max(f.cost / f.runs, d / 2) : d);
+}
+
+/**
+ * Automated jobs never ask and never go over: one starts only when its budget has room for its expected cost,
+ * otherwise it is skipped and the reason is recorded. Manual jobs use manualGate (a warning, then your OK).
+ */
+export function automatedGate(s: SpendSummary, feature: string): { ok: true } | { ok: false; reason: string } {
+  const cls = FEATURES[feature]?.cls ?? "everyday";
+  const c = s.classes[cls];
+  const est = runEstimate(s, feature);
+  if (c.spent + est > c.budget) return { ok: false, reason: `skipped: the monthly ${cls === "research" ? "research" : "everyday AI"} budget has $${Math.max(0, c.left).toFixed(2)} left of $${c.budget}, and ${FEATURES[feature]?.label ?? feature} usually costs about $${est.toFixed(2)}` };
+  return { ok: true };
+}
+
+/** Manual job check by feature: a warning that needs your OK when it could take the month over its budget. */
+export function manualGate(s: SpendSummary, feature: string, confirmed: boolean) {
+  return budgetGate(s, FEATURES[feature]?.cls ?? "everyday", runEstimate(s, feature), confirmed);
+}
+
+/** The automated-job check against the stored spend. If spending cannot be read, the job does not start. */
+export async function automatedAllowed(db: SupabaseClient, feature: string, now = new Date()): Promise<{ ok: true } | { ok: false; reason: string }> {
+  const s = await loadSpend(db, now).catch(() => null);
+  if (!s) return { ok: false, reason: "skipped: this month's AI spending could not be read, so no paid job was started" };
+  return automatedGate(s, feature);
+}

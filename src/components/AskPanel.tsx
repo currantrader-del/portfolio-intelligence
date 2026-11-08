@@ -5,7 +5,7 @@ import { usePathname } from "next/navigation";
 import { Markdown } from "./Markdown";
 import { titleOf } from "./shell/nav";
 import { Spinner } from "./forms";
-import { requestJSON } from "@/lib/client/request";
+import { requestPaidJSON } from "@/lib/client/request";
 
 type Evidence = { name: string; input: unknown; ok: boolean; preview: string };
 type Msg = { role: "user" | "assistant"; content: string; model?: string; evidence?: Evidence[]; error?: boolean; meta?: string; retry?: string };
@@ -107,7 +107,7 @@ export function AskPanel() {
     setBusy("Sending");
     const settle = (m: Msg) => { setMsgs([...next, m]); if (!openRef.current) setUnread(true); };
     try {
-      const r = await requestJSON<{ requestId?: string }>("/api/ask", {
+      const r = await requestPaidJSON<{ requestId?: string }>("/api/ask", {
         json: { messages: next.filter((m) => !m.error).map(({ role, content }) => ({ role, content })), page: path, symbol, deep },
       });
       const j = r.data;

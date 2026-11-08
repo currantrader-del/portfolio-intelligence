@@ -6,6 +6,7 @@
  *   GET ?snapshotId= -> progress: which desks have stored results, and whether the briefing exists
  * Every stored row is new (nothing is updated), with its inputs hashed, so every briefing can be audited.
  */
+import { loadSpend, manualGate } from "@/lib/costs/spend";
 import { createClient } from "@/lib/supabase/server";
 import { startBriefing } from "@/lib/intel/start";
 import type { Snapshot } from "@/lib/intel/snapshot";
@@ -24,13 +25,15 @@ async function session() {
 }
 
 export async function POST(req: Request) {
-  const body = (await req.json().catch(() => null)) as { action?: string; snapshotId?: string; force?: boolean } | null;
+  const body = (await req.json().catch(() => null)) as { action?: string; snapshotId?: string; force?: boolean; confirm?: boolean } | null;
   const { db, user, token } = await session();
   if (!user || !token) return Response.json({ error: "Sign in first." }, { status: 401 });
   const origin = new URL(req.url).origin;
   try {
     if (body?.action === "start") {
       if (!process.env.ANTHROPIC_API_KEY) return Response.json({ error: "ANTHROPIC_API_KEY is not set in Netlify." }, { status: 503 });
+      const gate = manualGate(await loadSpend(db), "market_briefing", body.confirm === true);
+      if (!gate.ok) return Response.json({ error: gate.message, needsConfirm: gate.needsConfirm }, { status: 409 });
       const r = await startBriefing(db, token, origin, !!body.force);
       return Response.json(r, { status: "error" in r ? 502 : 200 });
     }
