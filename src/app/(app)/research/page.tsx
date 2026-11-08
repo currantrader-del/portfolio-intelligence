@@ -1,3 +1,5 @@
+import { ActionForm, SubmitButton } from "@/components/forms";
+import { AGE_REMINDER_DAYS } from "@/lib/policy/limits";
 import { getWorkspace } from "@/lib/workspace";
 import { isEtf } from "@/lib/portfolio/classify";
 import { coverage } from "@/lib/research/status";
@@ -14,7 +16,7 @@ const md = (iso: string | null | undefined) => (iso ? shortDate(iso).replace(/, 
 export default async function ResearchPage({ searchParams }: { searchParams: Promise<{ stage?: string }> }) {
   const sp = await searchParams;
   const ws = await getWorkspace();
-  const freshDays = ws.policy?.researchFreshnessDays ?? 120;
+  const freshDays = AGE_REMINDER_DAYS;
   const holdings = ws.portfolio.holdings.filter((h) => !isEtf(h.symbol)).sort((a, b) => b.value - a.value);
   const ownedSet = new Set(holdings.map((h) => h.symbol));
 
@@ -61,11 +63,11 @@ export default async function ResearchPage({ searchParams }: { searchParams: Pro
         <div className="lg:col-span-4 lg:col-start-9 flex flex-col gap-3 lg:gap-4">
           <Card tight className="!gap-0 !py-0.5">
             <Disclose summary={<span className="text-ink font-semibold">+ Add an idea</span>}>
-              <form action={addToPipeline} className="flex flex-col gap-2.5">
+              <ActionForm action={addToPipeline} success="Idea added" className="flex flex-col gap-2.5">
                 <label className="field">Ticker<input name="symbol" required maxLength={10} placeholder="e.g. MSFT" className="input uppercase num" autoCapitalize="characters" /></label>
                 <label className="field">Why it is interesting (optional)<input name="note" maxLength={300} className="input" /></label>
-                <button className="btn btn-primary">Add idea</button>
-              </form>
+                <SubmitButton className="btn btn-primary" pendingText="Adding…">Add idea</SubmitButton>
+              </ActionForm>
             </Disclose>
           </Card>
           <p className="t-xs px-1">Owned positions come first. The screen uses SEC data to decide what is worth researching; it never makes a buy call. Every conclusion keeps its date and source.</p>

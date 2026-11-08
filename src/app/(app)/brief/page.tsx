@@ -54,8 +54,8 @@ export default async function BriefPage({ searchParams }: { searchParams: Promis
           <p className="text-muted text-sm">{weekly && spyMove ? `Week of ${shortDate(spyMove.from)} to ${shortDate(spyMove.to)}` : dateLabel}</p>
         </div>
         <nav className="flex gap-1.5 text-sm" aria-label="Period">
-          <Link href="/brief" aria-current={!weekly ? "page" : undefined} className={`min-h-10 px-3 inline-flex items-center rounded-full border no-underline ${!weekly ? "bg-ink text-ground border-ink" : "border-line-strong text-ink"}`}>Day</Link>
-          <Link href="/brief?period=week" aria-current={weekly ? "page" : undefined} className={`min-h-10 px-3 inline-flex items-center rounded-full border no-underline ${weekly ? "bg-ink text-ground border-ink" : "border-line-strong text-ink"}`}>Week</Link>
+          <Link href="/brief" aria-current={!weekly ? "page" : undefined} className={`min-h-11 px-3.5 active:opacity-70 inline-flex items-center rounded-full border no-underline ${!weekly ? "bg-ink text-ground border-ink" : "border-line-strong text-ink"}`}>Day</Link>
+          <Link href="/brief?period=week" aria-current={weekly ? "page" : undefined} className={`min-h-11 px-3.5 active:opacity-70 inline-flex items-center rounded-full border no-underline ${weekly ? "bg-ink text-ground border-ink" : "border-line-strong text-ink"}`}>Week</Link>
         </nav>
       </div>
 

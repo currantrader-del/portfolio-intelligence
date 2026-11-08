@@ -2,38 +2,39 @@
  * The new-capital decision ("I have $1,250, where should it go?").
  *
  * Deterministic. It compares: adding to researched holdings, buying diversified ETFs, starting researched
- * new positions, holding cash, and reviewing positions that are above their limits.
+ * new positions, holding cash, and reviewing positions that are above their limits. It always gives its
+ * best recommendation on the evidence it has, with the checks still open listed beside it.
  *
- * It only calls a result ACTIONABLE when the evidence behind it passes every gate: recent holdings, known
- * cash, limits you approved, return assumptions you chose, and research current enough to rank the
- * alternatives. Otherwise the status is WAIT / REVIEW, with a list of what to verify, and any split it
- * computes is shown as illustrative only.
+ * Three assessments are kept separate, and a stock receives money only when all three support it:
+ *  1. Portfolio limit: the company has its own limit. New cash fills to the top of the normal range, or to the
+ *     top of the high-conviction range when you approved that range and the case is favourable and current.
+ *     A company without its own limit gets no new money; it never inherits the generic maximum.
+ *  2. Valuation: the research's own price zone allows adding, AND the comparison with the alternatives
+ *     (VOO's published forecasts, a Treasury for the same horizon) is favourable. See assessVsAlternatives.
+ *  3. Research is current: nothing has happened since it was written (results, financing, material filings,
+ *     a move into another action zone). Age alone never decides this.
  *
- * A price drop never makes a stock more attractive by itself: once the price is far from the research
- * reference (either direction) the research must be refreshed before it can size anything.
+ * Status: "recommend" when every check passes, "recommend_with_checks" when it is the best answer on the
+ * evidence but something should be confirmed first, "wait" only when the cash itself is not known or not there.
  */
 import type { PortfolioView } from "@/lib/portfolio/engine";
 import { DEFAULT_ETF_FOR_BUCKET, type Bucket } from "@/lib/portfolio/classify";
-import type { Policy } from "@/lib/policy/limits";
+import { companyLimit, type Policy } from "@/lib/policy/limits";
 import type { ResearchRecord } from "@/lib/research/records";
-import { researchAgeDays } from "@/lib/research/records";
-import { expectedReturnAt, REPRICE_LIMIT, zoneFor } from "@/lib/research/valuation";
+import { zoneFor } from "@/lib/research/valuation";
 import type { Quote } from "@/lib/market/quotes";
+import type { FilingsResult } from "@/lib/market/sec";
+import { ALTERNATIVES, assessVsAlternatives, refreshState, riskFreeFor, zoneKind, type Alternative, type Assessment, type RiskFree } from "@/lib/policy/evidence";
+import type { Yields } from "@/lib/workspace-core";
 
-export const CODE_VERSION = "new-capital@2";
+export const CODE_VERSION = "new-capital@4";
 
-/** Placeholders until you set your own on the Policy page. Shown on screen whenever they are used. */
-export const DEFAULT_ASSUMPTIONS = {
-  etfExpectedReturn: 0.07, // long-run broad-equity estimate, nominal, before tax
-  hurdlePoints: 0.03, // a stock must beat the ETF by this much to be preferred
-};
-
-/** Price this far from the research reference (up or down) means the scenarios must be refreshed before use. */
-export const BIG_MOVE = REPRICE_LIMIT;
 /** Holdings older than this are not reliable enough to size a purchase. */
 export const HOLDINGS_FRESH_DAYS = 7;
 
-export type OptionLabel = "Candidate" | "Valid option" | "Refresh required" | "Research needed" | "At limit" | "Below hurdle" | "Trim review";
+export type OptionLabel = "Candidate" | "Valid option" | "Refresh required" | "Research needed" | "No limit set" | "At limit" | "Not ahead of VOO" | "Research says wait" | "Trim review";
+
+export type Verdict = { ok: boolean; detail: string };
 
 export type Option = {
   kind: "stock" | "new_stock" | "etf" | "cash" | "trim";
@@ -42,6 +43,11 @@ export type Option = {
   price: number | null;
   priceSource: "quote" | "statement" | null;
   expectedReturn: number | null; // only when the research is current enough to re-price
+  assessment?: Assessment | null;
+  /** Published forecast span for an ETF alternative (never averaged). */
+  forecast?: Alternative | null;
+  /** True when new cash may fill to the top of an approved high-conviction range. */
+  highConviction?: boolean;
   headroomDollars: number | null;
   weightNow: number | null;
   maxWeight: number | null;
@@ -51,6 +57,8 @@ export type Option = {
   researchAction: string | null;
   zoneAction: string | null;
   refreshFirst?: boolean;
+  /** The three independent checks, so a pass on one never hides a fail on another. */
+  verdicts?: { limit: Verdict; valuation: Verdict; research: Verdict };
   toVerify: string[];
 };
 
@@ -60,19 +68,19 @@ export type NewCapitalResult = {
   amount: number;
   source: "new" | "existing";
   asOf: string;
-  status: "actionable" | "wait_review";
+  status: "recommend" | "recommend_with_checks" | "wait";
   gates: Gate[];
   toVerify: string[];
   options: Option[];
   recommendation: {
     allocations: { symbol: string; amount: number }[];
-    illustrative: boolean; // true when status is wait_review: not a recommendation to act on
+    illustrative: boolean; // true only when status is wait: the cash is not known or not there
     confidence: number;
     headline: string;
     rationale: string[];
     wouldChange: string[];
   };
-  assumptions: { etfExpectedReturn: number; hurdlePoints: number; etfSource: string; hurdleSource: string; approved: boolean };
+  assumptions: { alternatives: Alternative[]; riskFree10y: RiskFree };
   warnings: string[];
 };
 
@@ -86,15 +94,15 @@ export function newCapital(args: {
   now: Date;
   source?: "new" | "existing";
   quotes?: Map<string, Quote>;
-  assumptions?: Partial<typeof DEFAULT_ASSUMPTIONS>;
+  /** SEC filings per symbol. A symbol missing here could not be checked, so its research is "unverified". */
+  filings?: Map<string, FilingsResult>;
+  /** Treasury yields for the risk-free alternative. */
+  yields?: Yields | null;
 }): NewCapitalResult {
   const { amount, portfolio, research, policy, now } = args;
   const source = args.source ?? "new";
   const audit = policy?.audit;
-  const etfReturn = args.assumptions?.etfExpectedReturn ?? audit?.assumptions.etfExpectedReturn.value ?? DEFAULT_ASSUMPTIONS.etfExpectedReturn;
-  const hurdle = args.assumptions?.hurdlePoints ?? policy?.hurdleOverEtfPoints ?? audit?.assumptions.hurdle.value ?? DEFAULT_ASSUMPTIONS.hurdlePoints;
-  const assumptionsApproved = !!audit && audit.assumptions.etfExpectedReturn.status === "approved" && audit.assumptions.hurdle.status === "approved";
-  const freshDays = policy?.researchFreshnessDays ?? 120;
+  const yields = args.yields ?? { y2: null, y10: null };
   // Money already counted as deployable cash only moves within the portfolio; new money grows it.
   const postTotal = source === "new" ? portfolio.total + amount : portfolio.total;
   const warnings: string[] = [];
@@ -110,56 +118,83 @@ export function newCapital(args: {
     const v = r?.current;
     const notes: string[] = [];
     const toVerify: string[] = [];
-    let label: OptionLabel = "Candidate";
     let er: number | null = null;
+    let assessment: Assessment | null = null;
     let zoneAction: string | null = null;
     let refreshFirst = false;
     const lim = policy?.companies[symbol];
-    const max = e?.max ?? lim?.hardMax ?? policy?.genericCompanyHardMax ?? 0.1;
+    const cl = companyLimit(policy, symbol);
 
-    if (!r || (!v && !r.conflict)) { label = "Research needed"; notes.push("No current research on file"); toVerify.push(`${symbol}: full research before it can be compared`); }
-    else if (r.conflict) { label = "Research needed"; notes.push("Research records conflict and none is marked current"); toVerify.push(`${symbol}: resolve which research record is current`); }
-    else if (v) {
-      const age = researchAgeDays(r, now);
-      const ref = v.parsed.referencePrice;
-      const drift = ref && price ? price / ref - 1 : null;
-      zoneAction = price ? zoneFor(v.parsed.zones, price)?.action ?? null : null;
-      if (v.completeness !== "complete") { label = "Refresh required"; notes.push(`Research is ${v.completeness}`); toVerify.push(`${symbol}: complete the missing research phases`); }
-      if (age !== null && age > freshDays) { label = "Refresh required"; notes.push(`Research is ${age} days old (limit ${freshDays})`); toVerify.push(`${symbol}: refresh research older than ${freshDays} days`); }
-      if (drift !== null && Math.abs(drift) > BIG_MOVE) {
-        label = "Refresh required";
-        refreshFirst = true;
-        notes.push(`Price is ${Math.round(Math.abs(drift) * 100)}% ${drift < 0 ? "below" : "above"} the $${ref} research reference (${v.parsed.referenceDate}). Not re-priced: a move this large can change the scenario probabilities, financing, dilution and cash-flow assumptions`);
-        toVerify.push(`${symbol}: re-underwrite the scenarios at today's price (${drift < 0 ? "a lower price is not a buy signal by itself" : "check the valuation still holds"})`);
-      }
-      if (label === "Candidate" && price) {
-        er = expectedReturnAt(v.parsed, price, now);
-        if (er === null) { label = "Research needed"; notes.push("Research has no scenario valuation to compare"); }
-        else if (er < etfReturn + hurdle) { label = "Below hurdle"; notes.push(`Expected return ${pct(er)} does not clear the ETF + ${pct(hurdle)} hurdle`); }
-      }
-      if (v.parsed.action) notes.push(`Research action at the reference price: ${v.parsed.action}`);
+    // ---- 3. Research current? (event-driven) ----
+    let fresh: Verdict;
+    if (!r || (!v && !r.conflict)) { fresh = { ok: false, detail: "No current research on file" }; toVerify.push(`${symbol}: full research before it can be compared`); }
+    else if (r.conflict) { fresh = { ok: false, detail: "Research records conflict and none is marked current" }; toVerify.push(`${symbol}: resolve which research record is current`); }
+    else if (v!.completeness !== "complete") { fresh = { ok: false, detail: `Research is ${v!.completeness}` }; toVerify.push(`${symbol}: complete the missing research phases`); }
+    else {
+      const st = refreshState({ asOf: v!.research_as_of, pc: v!.parsed, price, filings: args.filings?.get(symbol) ?? null });
+      refreshFirst = st.status === "refresh";
+      fresh = st.status === "current"
+        ? { ok: true, detail: `Nothing material filed since ${v!.research_as_of}, and the price is still in the research's own zone` }
+        : { ok: false, detail: st.triggers.map((t) => t.detail).join("; ") };
+      if (st.status !== "current") toVerify.push(`${symbol}: ${st.status === "refresh" ? "refresh the research for what changed" : "check SEC filings since the research"} (${st.triggers.map((t) => t.kind.replace(/_/g, " ")).join(", ")})`);
     }
 
-    // New cash fills a position only to the top of its normal range; higher needs an explicit high-conviction decision.
+    // ---- 2. Valuation: the research's own zone, and the comparison with the alternatives ----
     const normalHigh = lim?.normal?.high ?? null;
-    const ceiling = Math.min(max, normalHigh ?? max);
+    const hcHigh = lim?.highConviction?.high ?? null;
+    let valuation: Verdict = { ok: false, detail: "No valuation to compare" };
+    if (v && price) {
+      const zone = zoneFor(v.parsed.zones, price);
+      zoneAction = zone?.action ?? null;
+      const years = v.parsed.horizonDate ? Math.max(0.25, (new Date(v.parsed.horizonDate).getTime() - now.getTime()) / (365.25 * 864e5)) : 10;
+      assessment = assessVsAlternatives(v.parsed, price, now, {
+        riskFree: riskFreeFor(years, yields), weightNow: e?.total ?? 0,
+        limit: cl.hasLimit ? { normalHigh, hcHigh, max: cl.newMoneyMax } : null, completeness: v.completeness, confidence: v.parsed.confidence,
+      });
+      er = fresh.ok ? assessment?.expected ?? null : null;
+      if (!assessment) valuation = { ok: false, detail: "Research has no complete bear/base/bull scenarios to compare with the alternatives" };
+      else if (zone && zoneKind(zone.action) !== "buy") valuation = { ok: false, detail: `Research zone at $${price.toFixed(2)}: ${zone.action}. ${assessment.summary}` };
+      else valuation = { ok: assessment.judgment === "favourable", detail: assessment.summary };
+    } else if (v) valuation = { ok: false, detail: "No price to compare" };
+
+    // ---- 1. Portfolio limit: own limit only. Normal range by default; the high-conviction range only when you
+    //      approved it and the case is favourable and current. ----
+    const lowConfidence = /low/i.test(v?.parsed.confidence ?? "");
+    const highConviction = !!(cl.hasLimit && lim?.authority === "you" && hcHigh !== null && normalHigh !== null && hcHigh > normalHigh && valuation.ok && fresh.ok && !lowConfidence);
+    const target = highConviction ? hcHigh! : normalHigh ?? cl.newMoneyMax;
+    const ceiling = cl.hasLimit ? Math.min(cl.newMoneyMax, target) : 0;
     const current = (e?.total ?? 0) * portfolio.total;
-    const headroom = Math.max(0, Math.round((ceiling * postTotal - current) * 100) / 100);
-    if (headroom <= 0) {
-      if (label === "Candidate") label = "At limit";
-      notes.push(ceiling < max ? `At the top of its normal range (${pct(ceiling)})` : `At or above its ${pct(max)} maximum, including ETF look-through`);
+    const headroom = cl.hasLimit ? Math.max(0, Math.round((ceiling * postTotal - current) * 100) / 100) : 0;
+    const rangeName = highConviction ? "high-conviction range" : "normal range";
+    let limit: Verdict;
+    if (!cl.hasLimit) {
+      limit = { ok: false, detail: `No limit of its own. It does not inherit the generic ${policy?.portfolioCeiling ? `${pct(policy.portfolioCeiling, 0)} ` : ""}maximum, so it gets no new money until research sets a limit and you approve it` };
+      toVerify.push(`${symbol}: approve a company limit from its research`);
+    } else if (headroom <= 0) limit = { ok: false, detail: ceiling < cl.newMoneyMax ? `At the top of its ${rangeName} (${pct(ceiling)})` : `At or above its ${pct(cl.newMoneyMax)} maximum, including ETF look-through` };
+    else limit = { ok: true, detail: `Room of $${Math.floor(headroom).toLocaleString()} to the top of its ${rangeName} (${pct(ceiling)})` };
+    if (highConviction) {
+      notes.push(`High-conviction range applies: you approved up to ${pct(hcHigh!)}, the comparison is favourable and the research is current`);
+      if (lim?.conditions) toVerify.push(`${symbol}: confirm the high-conviction condition in its research: ${lim.conditions}`);
+    } else if (cl.hasLimit && hcHigh !== null && normalHigh !== null && hcHigh > normalHigh) {
+      notes.push(`High-conviction range (to ${pct(hcHigh)}) not used: ${lim?.authority !== "you" ? "you have not approved it" : !valuation.ok ? "the comparison is not favourable" : !fresh.ok ? "the research needs a refresh" : "research confidence is low"}`);
     }
     if (lim?.status === "conflict") {
-      notes.push(lim.provisional
-        ? `Provisional ${pct(max)} maximum (${lim.source}) controls until you approve a limit on the Policy page; normal range ${lim.normal ? `${pct(lim.normal.low)}–${pct(lim.normal.high)}` : "not set"}. Room below the maximum is not a reason to buy`
-        : `Your sources disagree on its limit; using the stricter ${pct(max)} until you choose on the Policy page`);
-      toVerify.push(`${symbol}: choose which allocation limit is authoritative`);
-    } else if (!lim || lim.status === "none") notes.push(`No company-specific limit; the generic ${pct(max)} maximum applies`);
+      notes.push(`Your sources disagree on its limit; the app uses ${lim.provisional ? "your provisional" : "the stricter"} ${pct(lim.hardMax ?? 0)} as a temporary safety limit until you decide on the Policy page`);
+      toVerify.push(`${symbol}: decide which allocation limit controls`);
+    } else if (lim && lim.authority === "imported") notes.push(`Its ${pct(lim.hardMax ?? 0)} maximum is imported from the old archive and not yet confirmed by you`);
+
+    let label: OptionLabel = "Candidate";
+    if (!fresh.ok) label = !v || r?.conflict ? "Research needed" : "Refresh required";
+    else if (!cl.hasLimit) label = "No limit set";
+    else if (!limit.ok) label = "At limit";
+    else if (!valuation.ok) label = assessment && zoneAction && zoneKind(zoneAction) !== "buy" ? "Research says wait" : "Not ahead of VOO";
+    notes.unshift(`Limit: ${limit.detail}`, `Valuation: ${valuation.detail}`, `Research: ${fresh.detail}`);
+    if (v?.parsed.action) notes.push(`Research action at its reference price: ${v.parsed.action}`);
 
     return {
-      kind: held ? "stock" : "new_stock", symbol, label, price, priceSource: h?.priceSource ?? (q ? "quote" : null), expectedReturn: er,
-      headroomDollars: headroom, weightNow: e?.total ?? 0, maxWeight: ceiling, limitStatus: lim?.status ?? null,
-      eligible: label === "Candidate", notes, researchAction: v?.parsed.action ?? null, zoneAction, refreshFirst, toVerify,
+      kind: held ? "stock" : "new_stock", symbol, label, price, priceSource: h?.priceSource ?? (q ? "quote" : null), expectedReturn: er, assessment, highConviction,
+      headroomDollars: headroom, weightNow: e?.total ?? 0, maxWeight: cl.hasLimit ? ceiling : null, limitStatus: lim?.authority === "you" ? "approved" : lim?.authority === "imported" ? "imported" : lim?.status ?? "none",
+      eligible: label === "Candidate", notes, researchAction: v?.parsed.action ?? null, zoneAction, refreshFirst, verdicts: { limit, valuation, research: fresh }, toVerify,
     };
   };
 
@@ -175,12 +210,14 @@ export function newCapital(args: {
     .map(({ b, gap }, i) => {
       const symbol = DEFAULT_ETF_FOR_BUCKET[b.bucket] ?? "VOO";
       const h = portfolio.holdings.find((x) => x.symbol === symbol);
-      const notes = [`${b.bucket} is ${pct(b.weight)}${b.normal ? `, normal range ${pct(b.normal.low)}–${pct(b.normal.high)}` : ""}`, `Expected return is an assumption (${pct(etfReturn)}), not a forecast`];
+      const alt = ALTERNATIVES.find((x) => x.symbol === symbol) ?? null;
+      const notes = [`${b.bucket} is ${pct(b.weight)}${b.normal ? `, normal range ${pct(b.normal.low)}–${pct(b.normal.high)}` : ""}`,
+        alt ? `Published forecasts: ${alt.forecasts.map((f) => `${f.firm} ${f.asset} ${f.kind === "range" ? `${pct(f.low)}–${pct(f.high)}` : pct(f.low)} (${f.horizonYears[0] === f.horizonYears[1] ? f.horizonYears[0] : f.horizonYears.join("–")} years, as of ${f.asOf})`).join("; ")}. Forecasts, not promises` : "No published forecast on file for this bucket, so it is not ranked on return"];
       if (b.status === "over_max" || b.status === "above") notes.push("Already above its normal range");
       return {
         kind: "etf" as const, symbol, label: (i === 0 && gap > 0 ? "Candidate" : "Valid option") as OptionLabel, price: h?.price ?? args.quotes?.get(symbol)?.price ?? null,
-        priceSource: h?.priceSource ?? null, expectedReturn: etfReturn, headroomDollars: null, weightNow: b.weight, maxWeight: b.hardMax,
-        limitStatus: b.status === "no_limit" ? "none" : "approved", eligible: b.status !== "over_max", notes, researchAction: null, zoneAction: null, toVerify: [],
+        priceSource: h?.priceSource ?? null, expectedReturn: null, forecast: alt, headroomDollars: null, weightNow: b.weight, maxWeight: b.hardMax,
+        limitStatus: b.status === "no_limit" ? "none" : policy?.buckets.find((x) => x.bucket === b.bucket)?.status ?? "none", eligible: b.status !== "over_max", notes, researchAction: null, zoneAction: null, toVerify: [],
       };
     });
 
@@ -194,7 +231,8 @@ export function newCapital(args: {
   const cash: Option = {
     kind: "cash", symbol: "CASH", label: "Valid option", price: null, priceSource: null, expectedReturn: null, headroomDollars: null,
     weightNow: portfolio.total ? portfolio.cash / portfolio.total : 0, maxWeight: null, limitStatus: null, eligible: true,
-    notes: ["Policy: new cash does not have to be invested immediately", `The $${portfolio.cashDetail.protectedReserve.toLocaleString()} protected reserve is excluded from sizing`, "Cash yield not entered, so it is not compared on return"],
+    notes: ["Policy: new cash does not have to be invested immediately", `The $${portfolio.cashDetail.protectedReserve.toLocaleString()} protected reserve is excluded from sizing`,
+      yields.y2 ? `Risk-free alternative: 2-year Treasury ${yields.y2.value.toFixed(2)}% (FRED, ${yields.y2.date}); your savings yield is not entered` : "Treasury yields not loaded; your savings yield is not entered"],
     researchAction: null, zoneAction: null, toVerify: [],
   };
 
@@ -211,9 +249,9 @@ export function newCapital(args: {
     if (toStock <= 0) continue;
     allocations.push({ symbol: c.symbol, amount: toStock });
     remaining -= toStock;
-    rationale.push(`${c.symbol}: about ${pct(c.expectedReturn!)} a year expected at today's price from current research, against ${pct(etfReturn)} assumed for an ETF.`);
+    rationale.push(`${c.symbol}: ${c.assessment?.summary ?? ""}${c.highConviction ? " Sized to its approved high-conviction range." : ""}`);
     if (/specul|asymmetric/i.test(research.find((r) => r.symbol === c.symbol)?.current?.parsed.classification ?? "")) confidence -= 1;
-    wouldChange.push(`${c.symbol} rising until its expected return is below ${pct(etfReturn + hurdle)}, or new evidence against its thesis.`);
+    wouldChange.push(`${c.symbol} rising until its expected return is no longer above every published VOO forecast, a filing that changes its scenarios, or new evidence against its thesis.`);
   }
   const etf = etfOptions.find((o) => o.eligible) ?? etfOptions[0];
   if (remaining > 0 && etf) {
@@ -230,8 +268,8 @@ export function newCapital(args: {
   const gaps = brokerAccounts.filter((a) => a.statementGap !== null && Math.abs(a.statementGap) > 1);
   const refresh = [...stockOptions].filter((o) => o.label === "Refresh required" || o.label === "Research needed");
   const receiving = allocations.map((x) => x.symbol);
-  const limitIssues = stockOptions.filter((o) => receiving.includes(o.symbol) && o.limitStatus !== "approved").map((o) => o.symbol);
-  const conflicts = audit?.conflicts.map((c) => c.subject) ?? [];
+  const notYours = [...stockOptions, ...newOptions].filter((o) => receiving.includes(o.symbol) && o.limitStatus !== "approved").map((o) => o.symbol);
+  const conflicts = (audit?.conflicts ?? []).filter((c) => receiving.includes(c.subject)).map((c) => c.subject);
   const gates: Gate[] = [
     { key: "holdings", label: "Holdings are current", ok: oldest <= HOLDINGS_FRESH_DAYS && !gaps.length && portfolio.quality.reconciliation.complete,
       detail: oldest > HOLDINGS_FRESH_DAYS ? `Oldest statement is ${oldest} days old. Confirm holdings or record trades since then`
@@ -241,21 +279,20 @@ export function newCapital(args: {
     { key: "cash", label: "Cash and savings are known", ok: portfolio.cashDetail.savings !== null && (source === "new" || amount <= portfolio.cashDetail.deployable),
       detail: portfolio.cashDetail.savings === null ? "Enter your savings balance so the protected reserve and deployable cash are known"
         : source === "existing" && amount > portfolio.cashDetail.deployable ? `Only $${portfolio.cashDetail.deployable.toLocaleString()} is deployable after the protected reserve` : `Deployable cash $${portfolio.cashDetail.deployable.toLocaleString()}` },
-    { key: "limits", label: "Limits you approved", ok: !limitIssues.length && !conflicts.length,
-      detail: conflicts.length ? `Your sources disagree on limits for ${conflicts.join(", ")}` : limitIssues.length ? `No approved limit for ${limitIssues.join(", ")}` : "Every limit used is approved" },
-    { key: "assumptions", label: "Return assumptions you chose", ok: assumptionsApproved,
-      detail: assumptionsApproved ? `ETF ${pct(etfReturn)}, hurdle ${pct(hurdle)}` : `ETF return ${pct(etfReturn)} and hurdle ${pct(hurdle)} are app placeholders, not your numbers` },
-    { key: "research", label: "Research can rank the alternatives", ok: !refresh.length,
-      detail: refresh.length ? `${refresh.map((o) => o.symbol).join(", ")} cannot be compared on current evidence` : "Every held stock has current research" },
+    { key: "limits", label: "Limits used are ones you approved", ok: !notYours.length && !conflicts.length,
+      detail: conflicts.length ? `Open policy decision for ${conflicts.join(", ")}` : notYours.length ? `Imported, not confirmed by you: ${notYours.join(", ")}` : receiving.some((x) => x !== "VOO" && x !== "VXUS") ? "Every company limit used is one you approved" : "Only diversified ETFs receive money" },
+    { key: "research", label: "Research is current (event check)", ok: !refresh.length,
+      detail: refresh.length ? `${refresh.map((o) => o.symbol).join(", ")}: something changed since the research, or filings could not be checked. Those stocks get no new money until it is checked` : "No new results, financings or zone changes since each held stock's research" },
   ];
-  const status: NewCapitalResult["status"] = gates.every((g) => g.ok) ? "actionable" : "wait_review";
+  const cashOk = gates.find((g) => g.key === "cash")!.ok;
+  const status: NewCapitalResult["status"] = !cashOk ? "wait" : gates.every((g) => g.ok) ? "recommend" : "recommend_with_checks";
   const toVerify = [
     ...gates.filter((g) => !g.ok && g.key !== "research").map((g) => g.detail),
+    ...[...stockOptions, ...newOptions].filter((o) => receiving.includes(o.symbol)).flatMap((o) => o.toVerify),
     ...refresh.flatMap((o) => o.toVerify),
   ].filter((x, i, a) => a.indexOf(x) === i);
 
   if (refresh.length) wouldChange.unshift(`Refreshed research on ${refresh.map((o) => o.symbol).join(", ")} that sets expected returns at today's prices.`);
-  if (!assumptionsApproved) wouldChange.push("Your own ETF return and hurdle assumptions.");
   confidence -= gates.filter((g) => !g.ok).length;
 
   const split = allocations.map((x) => `$${x.amount.toLocaleString()} ${x.symbol}`).join(" + ");
@@ -275,21 +312,18 @@ export function newCapital(args: {
     ],
     recommendation: {
       allocations,
-      illustrative: status !== "actionable",
+      illustrative: status === "wait",
       confidence: Math.max(1, Math.min(10, confidence)),
-      headline: status === "actionable" ? split : "WAIT / REVIEW",
+      headline: status === "wait" ? "Wait: confirm your cash first" : split || "Hold cash",
       rationale,
       wouldChange,
     },
-    assumptions: {
-      etfExpectedReturn: etfReturn, hurdlePoints: hurdle, approved: assumptionsApproved,
-      etfSource: audit?.assumptions.etfExpectedReturn.source ?? "App default", hurdleSource: audit?.assumptions.hurdle.source ?? "App default",
-    },
+    assumptions: { alternatives: ALTERNATIVES, riskFree10y: riskFreeFor(10, yields) },
     warnings,
   };
 }
 
-const LABEL_ORDER: OptionLabel[] = ["Candidate", "Refresh required", "Below hurdle", "At limit", "Research needed", "Valid option", "Trim review"];
+const LABEL_ORDER: OptionLabel[] = ["Candidate", "Refresh required", "Not ahead of VOO", "Research says wait", "At limit", "No limit set", "Research needed", "Valid option", "Trim review"];
 const rankLabel = (l: OptionLabel) => LABEL_ORDER.indexOf(l);
 
 export function pct(n: number, digits = 1) {

@@ -13,11 +13,18 @@ export default function LoginPage() {
 
   async function onSubmit(e: React.FormEvent) {
     e.preventDefault();
+    if (busy) return;
     setBusy(true);
     setError(null);
-    const { error } = await createClient().auth.signInWithPassword({ email, password });
-    setBusy(false);
-    if (error) return setError("Sign-in failed. Check your email and password.");
+    let failed: string | null = null;
+    try {
+      const { error } = await createClient().auth.signInWithPassword({ email, password });
+      if (error) failed = /fetch|network/i.test(error.message) ? "Couldn't reach the sign-in service. Check your connection and try again." : "Sign-in failed. Check your email and password.";
+    } catch {
+      failed = "Couldn't reach the sign-in service. Check your connection and try again.";
+    }
+    // On success the button keeps its spinner until the app has opened.
+    if (failed) { setBusy(false); return setError(failed); }
     router.replace("/");
     router.refresh();
   }
@@ -38,8 +45,8 @@ export default function LoginPage() {
             className="min-h-11 px-3 rounded-lg border border-line-strong bg-surface text-base" />
         </label>
         {error && <p role="alert" className="text-sm text-alert-ink">{error}</p>}
-        <button disabled={busy} className="min-h-11 rounded-lg bg-ink text-ground font-medium disabled:opacity-60">
-          {busy ? "Signing in…" : "Continue"}
+        <button disabled={busy} aria-busy={busy || undefined} className={`btn btn-primary ${busy ? "is-pending" : ""}`}>
+          {busy ? <><span className="spin" aria-hidden="true" />Signing in…</> : "Continue"}
         </button>
       </form>
     </main>

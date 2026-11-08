@@ -4,6 +4,8 @@
  * (approved and newer versions, with age), the pipeline, recent decisions and the latest briefing.
  * It is compact text (a few thousand tokens) and is cached between questions by the API.
  */
+import { VOO } from "@/lib/policy/evidence";
+import { AGE_REMINDER_DAYS } from "@/lib/policy/limits";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { Workspace } from "@/lib/workspace-core";
 import { researchAgeDays } from "@/lib/research/records";
@@ -33,22 +35,26 @@ export async function investorContext(ws: Workspace, db: SupabaseClient): Promis
   const exp = p.exposures.filter((e) => e.total > 0.01).slice(0, 12);
   lines.push(`Single-company exposure incl. ETF look-through: ${exp.map((e) => `${e.symbol} ${pct(e.total)}${e.max != null ? ` (max ${pct(e.max, 0)}, ${ws.policy?.companies[e.symbol]?.status ?? "no limit"})` : ""}`).join("; ")}.`);
 
+  const ex = ws.exposure;
+  const top = (k: "sector" | "industry" | "theme" | "country" | "market", n: number) => ex.dims[k].lines.slice(0, n).map((l) => `${l.key} ${pct(l.pct)}${l.upperPct !== undefined ? ` (up to ${pct(l.upperPct)})` : ""}`).join("; ");
+  lines.push(`Look-through exposure, % of stocks (use get_exposure for detail): sectors ${top("sector", 4)}. Industries ${top("industry", 3)}. Themes (overlap) ${top("theme", 3)}. Markets ${top("market", 3)}. Countries ${top("country", 4)}.`);
+  if (ws.exposureLimits.length) lines.push(`Exposure limits: ${ws.exposureLimits.map((c) => `${c.label} ${pct(c.value)} of investable (${c.status}, ${c.state.replace(/_/g, " ")})`).join("; ")}.`);
   lines.push("\nRESEARCH RECORDS (stored; historical, check the age)");
-  const fresh = ws.policy?.researchFreshnessDays ?? 120;
+  const fresh = AGE_REMINDER_DAYS;
   for (const r of ws.research) {
     const cur = r.current, last = r.latest;
     const age = researchAgeDays(r, ws.now);
     const newer = cur && last && last.id !== cur.id && last.research_as_of > cur.research_as_of ? last : null;
     const v = cur ?? last;
     const held = p.holdings.some((h) => h.symbol === r.symbol);
-    lines.push(`- ${r.symbol}${r.name ? ` (${r.name})` : ""}${held ? " [held]" : ` [${r.pipeline.stage}]`}: ${v ? `${cur ? "approved" : "NOT approved"} ${v.completeness} research dated ${v.research_as_of} (${age} days${age != null && age > fresh ? ", STALE" : ""})${v.parsed.action ? `, call ${v.parsed.action}` : ""}${v.parsed.referencePrice ? `, reference price ${v.parsed.referencePrice}` : ""}` : "no research"}${newer ? `; NEWER VERSION IN PROGRESS dated ${newer.research_as_of} (${newer.parsed.action ?? newer.completeness}): treat the approved call as under review` : ""}`);
+    lines.push(`- ${r.symbol}${r.name ? ` (${r.name})` : ""}${held ? " [held]" : ` [${r.pipeline.stage}]`}: ${v ? `${cur ? "approved" : "NOT approved"} ${v.completeness} research dated ${v.research_as_of} (${age} days${age != null && age > fresh ? ", old: check filings since" : ""})${v.parsed.action ? `, call ${v.parsed.action}` : ""}${v.parsed.referencePrice ? `, reference price ${v.parsed.referencePrice}` : ""}` : "no research"}${newer ? `; NEWER VERSION IN PROGRESS dated ${newer.research_as_of} (${newer.parsed.action ?? newer.completeness}): treat the approved call as under review` : ""}`);
   }
   const noResearch = p.holdings.filter((h) => !ws.research.some((r) => r.symbol === h.symbol) && !/ETF|fund|broad|International|Bonds|Small\/mid/i.test(h.bucket)).map((h) => h.symbol);
   if (noResearch.length) lines.push(`Held single companies with no research record: ${noResearch.join(", ")}.`);
 
   if (ws.policy) {
-    const lim = Object.values(ws.policy.companies).filter((x) => x.hardMax != null).map((x) => `${x.symbol} max ${pct(x.hardMax, 0)}${x.normal ? ` normal ${pct(x.normal.low, 0)}-${pct(x.normal.high, 0)}` : ""} (${x.provisional ? "provisional" : x.status})`);
-    lines.push(`\nPOLICY (${ws.policy.version}): ${lim.join("; ")}. Research freshness limit ${fresh} days. New cash does not have to be invested immediately; holding cash is always an option.`);
+    const lim = Object.values(ws.policy.companies).filter((x) => x.hardMax != null).map((x) => `${x.symbol} max ${pct(x.hardMax, 1)}${x.normal ? ` normal ${pct(x.normal.low, 1)}-${pct(x.normal.high, 1)}` : ""} (${x.provisional ? "provisional" : x.authority === "you" ? "approved by the investor" : x.authority === "imported" ? "imported from old archive, not confirmed" : x.status})`);
+    lines.push(`Return comparison: no fixed cutoff. Each stock's research scenarios, re-priced at today's price, are compared with VOO's published forecasts shown separately (${VOO.forecasts.map((f) => `${f.firm} ${f.kind === "range" ? `${pct(f.low, 1)}-${pct(f.high, 1)}` : pct(f.low, 1)}, ${f.horizonYears[0] === f.horizonYears[1] ? f.horizonYears[0] : f.horizonYears.join("-")} years, as of ${f.asOf}`).join("; ")}), with a Treasury for the same horizon${ws.yields?.y10 ? ` (10-year ${ws.yields.y10.value.toFixed(2)}%, 2-year ${ws.yields.y2?.value.toFixed(2) ?? "n/a"}%)` : ""}, and with downside, valuation uncertainty and concentration. Give a reasoned judgment: favourable only when the expected return is above every VOO forecast and the research's own odds favour beating the lowest one. A company may go up to its high-conviction range only if the investor approved that range and the case is favourable and current. Research needs a refresh when events happen (new results, financing, material 8-K, price moving into another zone of the research), not because of age. New cash does not have to be invested immediately; holding cash is always an option.`);
   }
   if (decisions?.length) {
     lines.push("\nRECENT DECISIONS");

@@ -242,3 +242,17 @@ export async function getFundamentals(symbol: string): Promise<Fundamentals | { 
     fetchedAt: new Date().toISOString(),
   };
 }
+
+export type SecProfile = { cik: string; company: string; sic: string | null; sicDescription: string | null; stateOfIncorporation: string | null; businessLocation: string | null; source: string };
+
+/** What SEC EDGAR says about any US-registered company: its SIC industry code and where it is incorporated and based. */
+export async function getSecProfile(symbol: string): Promise<SecProfile | { error: string }> {
+  const id = await lookupCik(symbol);
+  if (!id) return { error: `${symbol} was not found in SEC EDGAR (it may be an ETF, a foreign listing, or SEC could not be reached).` };
+  const src = `https://data.sec.gov/submissions/CIK${id.cik}.json`;
+  const body = (await secJson(src, 3 * 3600)) as Record<string, unknown> | null;
+  if (!body) return { error: "SEC EDGAR could not be reached." };
+  const addr = ((body.addresses as Record<string, Record<string, unknown>> | undefined)?.business ?? {}) as Record<string, unknown>;
+  const s = (v: unknown) => (typeof v === "string" && v.trim() ? v.trim() : null);
+  return { cik: id.cik, company: s(body.name) ?? id.title, sic: s(body.sic), sicDescription: s(body.sicDescription), stateOfIncorporation: s(body.stateOfIncorporationDescription) ?? s(body.stateOfIncorporation), businessLocation: s(addr.stateOrCountryDescription) ?? s(addr.stateOrCountry), source: src };
+}

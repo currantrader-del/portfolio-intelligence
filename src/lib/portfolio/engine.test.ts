@@ -48,8 +48,9 @@ describe("portfolio engine", () => {
     ] });
     const p = buildPortfolio([s], new Map(), null);
     const nvda = p.exposures.find((e) => e.symbol === "NVDA")!;
-    expect(nvda.viaEtfs).toBeCloseTo(75 / 1100, 6);
-    expect(nvda.total).toBeCloseTo(175 / 1100, 6);
+    // VOO holds 8.39% NVIDIA (Vanguard/stockanalysis, 2026-09-30).
+    expect(nvda.viaEtfs).toBeCloseTo(83.9 / 1100, 6);
+    expect(nvda.total).toBeCloseTo(183.9 / 1100, 6);
   });
 
   it("rolls holdings forward with recorded trades and keeps the estimate label", () => {
@@ -72,10 +73,11 @@ describe("portfolio engine", () => {
   it("separates brokerage cash, deployable savings and the protected reserve", () => {
     const sav: SnapshotInput = { accountId: "s", accountName: "Savings", accountRole: "cash", asOf: "2026-11-04T23:59:00Z", totalValue: 14000, cashValue: 14000, positions: [] };
     const p = buildPortfolio([snap(), sav], new Map(), null);
-    expect(p.cashDetail).toMatchObject({ brokerage: 100, savings: 14000, protectedReserve: 10000, deployableSavings: 4000, deployable: 4100 });
+    // With no policy loaded the reserve defaults to the $3,000 USAA reserve you set (the old $10,000 is retired).
+    expect(p.cashDetail).toMatchObject({ brokerage: 100, savings: 14000, protectedReserve: 3000, deployableSavings: 11000, deployable: 11100 });
     // the reserve is excluded from the denominator
-    expect(p.total).toBe(1000 + 100 + 4000);
-    expect(p.holdings.find((h) => h.symbol === "VOO")!.weight).toBeCloseTo(600 / 5100, 6);
+    expect(p.total).toBe(1000 + 100 + 11000);
+    expect(p.holdings.find((h) => h.symbol === "VOO")!.weight).toBeCloseTo(600 / 12100, 6);
     expect(p.netWorthTracked).toBe(15100);
   });
 

@@ -1,3 +1,4 @@
+import Form from "next/form";
 import { Suspense } from "react";
 import { after } from "next/server";
 import Link from "next/link";
@@ -148,7 +149,7 @@ export default async function TodayPage() {
           )}
         </Card>
 
-        <form action="/decisions/new-capital" className="card card-tight lg:col-span-12 !flex-row flex-wrap items-center justify-between gap-3">
+        <Form action="/decisions/new-capital" className="card card-tight lg:col-span-12 !flex-row flex-wrap items-center justify-between gap-3">
           <div className="flex flex-col min-w-0 flex-1 basis-56">
             <span className="font-semibold">Invest new cash</span>
             <span className="t-xs">Compares holdings, ETFs, new ideas and holding cash. A recommendation appears only when the evidence is current.</span>
@@ -157,11 +158,11 @@ export default async function TodayPage() {
             <label htmlFor="amt" className="sr-only">Amount in dollars</label>
             <div className="flex items-center rounded-[12px] border border-line-strong bg-ground px-3 min-h-11 w-32">
               <span className="text-muted">$</span>
-              <input id="amt" name="amount" inputMode="decimal" defaultValue="1250" className="w-full bg-transparent px-1 num outline-none" />
+              <input id="amt" name="amount" inputMode="decimal" defaultValue="1250" className="w-full min-h-11 bg-transparent px-1 num outline-none" />
             </div>
             <button className="btn">Compare <Chevron /></button>
           </div>
-        </form>
+        </Form>
       </div>
     </div>
   );

@@ -2,6 +2,8 @@ import { Suspense } from "react";
 import { Sidebar, TabBar, TopBar } from "@/components/shell/Shell";
 import { Status } from "@/components/shell/Status";
 import { AskPanel } from "@/components/AskPanel";
+import { NavProgress } from "@/components/shell/NavProgress";
+import { Toaster } from "@/components/forms";
 
 export const dynamic = "force-dynamic";
 
@@ -12,6 +14,7 @@ export const dynamic = "force-dynamic";
 export default function AppLayout({ children }: { children: React.ReactNode }) {
   const status = <Suspense fallback={null}><Status /></Suspense>;
   return (
+    <NavProgress>
     <div className="flex min-h-dvh">
       <Sidebar status={status} />
       <div className="flex-1 min-w-0 flex flex-col">
@@ -22,6 +25,8 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
       </div>
       <TabBar />
       <AskPanel />
+      <Toaster />
     </div>
+    </NavProgress>
   );
 }

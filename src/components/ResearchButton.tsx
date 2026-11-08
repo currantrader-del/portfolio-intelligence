@@ -3,6 +3,8 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Card, CardHead, Pill } from "@/components/ui";
+import { Spinner } from "@/components/forms";
+import { requestJSON } from "@/lib/client/request";
 
 type Result = { ok: boolean; error?: string; madeCurrent?: boolean; completeness?: string; problems?: string[]; summary?: string; costUsd: number; ms: number; searches: number };
 type Status =
@@ -17,6 +19,7 @@ export function ResearchButton({ symbol, hasResearch, needsResearch }: { symbol:
   const router = useRouter();
   const [st, setSt] = useState<Status | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [starting, setStarting] = useState(false);
   const [now, setNow] = useState(() => Date.now());
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -43,10 +46,12 @@ export function ResearchButton({ symbol, hasResearch, needsResearch }: { symbol:
   }, [st?.status]);
 
   async function start() {
+    if (starting) return;
     setError(null);
-    const res = await fetch("/api/research", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ symbol }) });
-    const j = (await res.json().catch(() => ({}))) as { error?: string };
-    if (!res.ok) { setError(j.error ?? "Research did not start."); return; }
+    setStarting(true);
+    const r = await requestJSON("/api/research", { json: { symbol } });
+    setStarting(false);
+    if (!r.ok) { setError(`Research did not start. ${r.error}`); return; }
     setSt({ status: "running", startedAt: new Date().toISOString() });
     setNow(Date.now());
     if (timer.current) clearTimeout(timer.current);
@@ -87,8 +92,8 @@ export function ResearchButton({ symbol, hasResearch, needsResearch }: { symbol:
       )}
       {st?.status === "lost" && <p className="t-xs warn">The last run never finished. You can start it again.</p>}
       {error && <p role="alert" className="t-sm rounded-[12px] bg-warn-bg text-warn-ink px-3 py-2">{error}</p>}
-      <button type="button" className={`btn ${needsResearch ? "btn-primary" : ""} self-start`} onClick={start} disabled={running || st === null}>
-        {running ? "Research running…" : hasResearch ? "Refresh research with AI" : "Research this with AI"}
+      <button type="button" className={`btn ${needsResearch ? "btn-primary" : ""} self-start ${starting || running ? "is-pending" : ""}`} onClick={start} disabled={running || starting || st === null} aria-busy={starting || running || undefined}>
+        {starting ? <><Spinner />Starting…</> : running ? <><Spinner />Research running…</> : st === null ? <><Spinner />Checking status…</> : hasResearch ? "Refresh research with AI" : "Research this with AI"}
       </button>
     </Card>
   );

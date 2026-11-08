@@ -10,7 +10,7 @@
  * protected reserve. The protected reserve is tracked but excluded from every percentage (policy rule).
  */
 import type { Quote } from "@/lib/market/quotes";
-import { companyMax, type Policy, type Range } from "@/lib/policy/limits";
+import { companyLimit, type Policy, type Range } from "@/lib/policy/limits";
 import { bucketOf, LOOKTHROUGH, type Bucket } from "./classify";
 
 export type SnapshotInput = {
@@ -93,7 +93,7 @@ export function reconciliationGaps(args: { brokerAsOfs: string[]; savingsEntered
 }
 
 export type BucketRow = { bucket: Bucket; value: number; weight: number; normal: Range; hardMax: number | null; status: "below" | "within" | "above" | "over_max" | "no_limit" };
-export type CompanyExposure = { symbol: string; direct: number; viaEtfs: number; total: number; max: number; headroomDollars: number };
+export type CompanyExposure = { symbol: string; direct: number; viaEtfs: number; total: number; max: number; hasLimit: boolean; headroomDollars: number };
 
 export type PortfolioView = {
   total: number; // investable capital: the denominator for every weight
@@ -181,7 +181,7 @@ export function buildPortfolio(
     if (gap !== null && Math.abs(gap) > 1) missing.push(`${s.accountName}: statement total differs from its positions plus cash by ${gap > 0 ? "" : "-"}$${Math.abs(gap).toFixed(2)}`);
   }
 
-  const reserve = policy?.protectedSavingsFloor ?? 10000;
+  const reserve = policy?.protectedSavingsFloor ?? 3000;
   const deployableSavings = savings === null ? 0 : Math.max(0, savings - reserve);
   const cashDetail: CashView = {
     brokerage: round2(brokerageCash),
@@ -255,7 +255,8 @@ export function buildPortfolio(
     .filter((h) => h.bucket === "Quality/growth individual stocks" || h.bucket === "Asymmetric/high-risk growth sleeve")
     .map((h) => {
       const via = holdings.reduce((a, e) => a + (LOOKTHROUGH[e.symbol]?.[h.symbol] ?? 0) * e.value, 0);
-      const max = companyMax(policy, h.symbol);
+      const lim = companyLimit(policy, h.symbol);
+      const max = lim.monitorMax;
       const totalExp = h.value + via;
       return {
         symbol: h.symbol,
@@ -263,7 +264,9 @@ export function buildPortfolio(
         viaEtfs: total ? via / total : 0,
         total: total ? totalExp / total : 0,
         max,
-        headroomDollars: round2(Math.max(0, max * total - totalExp)),
+        hasLimit: lim.hasLimit,
+        // No company-specific limit means no room for new money, whatever the generic ceiling says.
+        headroomDollars: lim.hasLimit ? round2(Math.max(0, lim.newMoneyMax * total - totalExp)) : 0,
       };
     });
 

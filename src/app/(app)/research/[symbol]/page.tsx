@@ -1,3 +1,5 @@
+import { ActionForm, SubmitButton } from "@/components/forms";
+import { AGE_REMINDER_DAYS } from "@/lib/policy/limits";
 import { Suspense } from "react";
 import Link from "next/link";
 import { ResearchSummary } from "@/components/ResearchSummary";
@@ -67,11 +69,11 @@ export default async function CompanyPage({ params, searchParams }: { params: Pr
         {!etf && <ResearchButton symbol={symbol} hasResearch={false} needsResearch />}
         <Card flush>
           <Disclose summary={<span className="t-sm">Add to your list without researching</span>}>
-            <form action={addToPipeline} className="flex flex-col gap-2">
+            <ActionForm action={addToPipeline} success="Added to your pipeline" className="flex flex-col gap-2">
               <input type="hidden" name="symbol" value={symbol} />
               <label className="field">Why it is interesting (optional)<input name="note" maxLength={300} className="input" /></label>
-              <button className="btn btn-sm self-start">Add to pipeline</button>
-            </form>
+              <SubmitButton className="btn btn-sm self-start" pendingText="Adding…">Add to pipeline</SubmitButton>
+            </ActionForm>
           </Disclose>
         </Card>
         {!etf && <Suspense fallback={<FeedSkeleton title="Reported financials" />}><FundamentalsCard symbol={symbol} /></Suspense>}
@@ -108,7 +110,7 @@ export default async function CompanyPage({ params, searchParams }: { params: Pr
         </div>
 
         <div className="lg:col-span-5 flex flex-col gap-3 lg:gap-4 min-w-0">
-          {!etf && <ResearchButton symbol={company.symbol} hasResearch={versions.length > 0} needsResearch={coverage(record, price, ws.now, ws.policy?.researchFreshnessDays ?? 120).key !== "current"} />}
+          {!etf && <ResearchButton symbol={company.symbol} hasResearch={versions.length > 0} needsResearch={coverage(record, price, ws.now, AGE_REMINDER_DAYS).key !== "current"} />}
           {versions.length > 0 && (
             <Card flush>
               <Disclose summary={`Your research · ${versions.length} record${versions.length > 1 ? "s" : ""}${phases ? `, ${phases} phases` : ""}`}>
@@ -145,7 +147,7 @@ export default async function CompanyPage({ params, searchParams }: { params: Pr
             </Card>
           )}
           {record && !etf && (
-            <ResearchSummary r={record} held={held} price={price} now={ws.now} freshDays={ws.policy?.researchFreshnessDays ?? 120} error={sp.error ? ERRORS[sp.error] : undefined} />
+            <ResearchSummary r={record} held={held} price={price} now={ws.now} freshDays={AGE_REMINDER_DAYS} error={sp.error ? ERRORS[sp.error] : undefined} />
           )}
           {!etf && versions.length > 0 && (
             <Card flush>

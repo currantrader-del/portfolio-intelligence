@@ -1,7 +1,9 @@
 import type { Workspace } from "@/lib/workspace";
 import { getQuote } from "@/lib/market/quotes";
-import { DEFAULT_ASSUMPTIONS } from "@/lib/decision/newCapital";
-import { expectedReturnAt, repriceCheck, scenarioReturnsAt, zoneFor } from "@/lib/research/valuation";
+import { scenarioReturnsAt, zoneFor } from "@/lib/research/valuation";
+import { getFilings } from "@/lib/market/sec";
+import { assessVsAlternatives, refreshState, riskFreeFor } from "@/lib/policy/evidence";
+import { AGE_REMINDER_DAYS } from "@/lib/policy/limits";
 import { researchAgeDays } from "@/lib/research/records";
 import { coverage } from "@/lib/research/status";
 import { pctStr, shortDate, usd } from "@/lib/format";
@@ -23,18 +25,22 @@ export async function InvestmentSummary({ ws, symbol }: { ws: Workspace; symbol:
   const v = r?.current;
   const any = r?.current ?? r?.latest;
   const age = r ? researchAgeDays(r, ws.now) : null;
-  const freshDays = ws.policy?.researchFreshnessDays ?? 120;
-  const check = v ? repriceCheck(v.parsed, price, age, freshDays) : null;
-  const er = v && price && check?.ok ? expectedReturnAt(v.parsed, price, ws.now) : null;
+  const filings = v ? await getFilings(symbol, ws.now).catch(() => null) : null;
+  const st = v ? refreshState({ asOf: v.research_as_of, pc: v.parsed, price, filings: filings && !("error" in filings) ? filings : null }) : null;
+  const check = st ? { ok: st.status !== "refresh", reason: st.triggers.map((t) => t.detail).join("; ") } : null;
+  const exp0 = ws.portfolio.exposures.find((e) => e.symbol === symbol);
+  const lim0 = ws.policy?.companies[symbol];
+  const years = v?.parsed.horizonDate ? Math.max(0.25, (new Date(v.parsed.horizonDate).getTime() - ws.now.getTime()) / (365.25 * 864e5)) : 10;
+  const cmp = v && price && check?.ok ? assessVsAlternatives(v.parsed, price, ws.now, {
+    riskFree: riskFreeFor(years, ws.yields ?? { y2: null, y10: null }), weightNow: exp0?.total ?? null,
+    limit: exp0?.hasLimit ? { normalHigh: lim0?.normal?.high ?? null, hcHigh: lim0?.highConviction?.high ?? null, max: exp0.max } : null, completeness: v.completeness, confidence: v.parsed.confidence,
+  }) : null;
+  const er = cmp?.expected ?? null;
   const scen = v && price && check?.ok ? scenarioReturnsAt(v.parsed, price, ws.now) : [];
   const zone = v && price ? zoneFor(v.parsed.zones, price) : null;
-  const exp = ws.portfolio.exposures.find((e) => e.symbol === symbol);
-  const cov = coverage(r, price, ws.now, freshDays);
-  const audit = ws.policy?.audit;
-  const etf = audit?.assumptions.etfExpectedReturn.value ?? DEFAULT_ASSUMPTIONS.etfExpectedReturn;
-  const hurdle = ws.policy?.hurdleOverEtfPoints ?? audit?.assumptions.hurdle.value ?? DEFAULT_ASSUMPTIONS.hurdlePoints;
-  const approved = !!audit && audit.assumptions.etfExpectedReturn.status === "approved" && audit.assumptions.hurdle.status === "approved";
-  const lim = ws.policy?.companies[symbol];
+  const exp = exp0;
+  const cov = coverage(r, price, ws.now, AGE_REMINDER_DAYS);
+  const lim = lim0;
 
   return (
     <Card labelledBy="inv-h">
@@ -59,15 +65,16 @@ export async function InvestmentSummary({ ws, symbol }: { ws: Workspace; symbol:
             {check?.ok ? (
               <>
                 <div className="flex items-center justify-between gap-3"><span className="t-sm">Expected return</span><span className="num font-semibold">{er === null ? "—" : `≈ ${pctStr(er)} a year`}</span></div>
-                {er !== null && (
-                  <div className="flex items-center justify-between gap-3 t-xs">
-                    <span>Hurdle: ETF {pctStr(etf, 0)} + {pctStr(hurdle, 0).replace("%", "")} pts{approved ? "" : " (placeholder)"}</span>
-                    <span className={er >= etf + hurdle ? "gain" : "warn"}>{er >= etf + hurdle ? "clears it" : "below it"}</span>
+                {cmp && (
+                  <div className="flex flex-col gap-1">
+                    <div className="flex items-center justify-between gap-3 t-sm"><span>Compared with VOO and Treasuries</span><span className={cmp.judgment === "favourable" ? "gain" : cmp.judgment === "unfavourable" ? "warn" : ""}>{cmp.judgment === "favourable" ? "Favourable" : cmp.judgment === "unfavourable" ? "Unfavourable" : "Mixed"}</span></div>
+                    <ul className="t-xs flex flex-col gap-0.5">{cmp.factors.map((f) => <li key={f.label}><span className="text-ink">{f.label}:</span> {f.finding}</li>)}</ul>
                   </div>
                 )}
+                {st?.status === "unverified" && <span className="t-xs warn">{check?.reason}</span>}
               </>
             ) : (
-              <p className="t-sm rounded-[12px] bg-warn-bg text-warn-ink px-3 py-2">Not re-priced. {check?.reason}</p>
+              <p className="t-sm rounded-[12px] bg-warn-bg text-warn-ink px-3 py-2">Not re-priced until the research is refreshed: {check?.reason}</p>
             )}
           </div>
         </>

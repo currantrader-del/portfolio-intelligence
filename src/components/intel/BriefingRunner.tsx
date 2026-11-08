@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
+import { Spinner } from "@/components/forms";
 
 type State = "wait" | "run" | "done" | "fail" | "reused";
 type Step = { key: string; label: string; state: State; note?: string | null };
@@ -16,7 +17,9 @@ const POLL_MS = 4000;
 const DEADLINE_MS = 8 * 60000; // matches DESK_DEADLINE_MIN on the server
 
 async function call(body: Record<string, unknown>) {
-  const res = await fetch("/api/intel", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+  const res = await fetch("/api/intel", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) }).catch(() => {
+    throw new Error(navigator.onLine === false ? "You're offline. Results that were already saved are kept; try again when you're connected." : "Couldn't reach the app. Check your connection and try again.");
+  });
   const json = await res.json().catch(() => ({ error: `HTTP ${res.status}` }));
   if (!res.ok || json.error) throw new Error(json.error ?? `HTTP ${res.status}`);
   return json;
@@ -114,7 +117,7 @@ export function BriefingRunner({ auto, resume, label = "Generate briefing" }: { 
       )}
       {error && <p role="alert" className="t-sm rounded-[12px] bg-warn-bg text-warn-ink px-3 py-2">{error}</p>}
       <div className="flex flex-wrap gap-2">
-        <button type="button" className="btn" disabled={busy} onClick={() => void run(false)}>{busy ? "Working… 2 to 4 minutes" : label}</button>
+        <button type="button" className={`btn ${busy ? "is-pending" : ""}`} disabled={busy} aria-busy={busy || undefined} onClick={() => void run(false)}>{busy ? <><Spinner />Working… 2 to 4 minutes</> : label}</button>
         {!busy && label !== "Generate briefing" && <button type="button" className="btn" onClick={() => void run(true)}>Search again from scratch</button>}
       </div>
       {busy && <p className="t-xs">Research runs in the background and is saved as each part finishes. You can leave this page.</p>}

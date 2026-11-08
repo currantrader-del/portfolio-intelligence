@@ -2,6 +2,7 @@
 
 import { redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
+import { fail, type ActionResult } from "@/lib/action-result";
 import { createClient } from "@/lib/supabase/server";
 
 const money = (v: FormDataEntryValue | null) => {
@@ -14,11 +15,11 @@ const isoDate = (v: FormDataEntryValue | null) => {
 };
 
 /** Records today's savings balance as a dated manual entry. Earlier entries stay as history. */
-export async function saveSavings(formData: FormData) {
+export async function saveSavings(formData: FormData): Promise<ActionResult> {
   const balance = money(formData.get("balance"));
   const date = isoDate(formData.get("as_of"));
   const name = String(formData.get("name") ?? "Savings").trim().slice(0, 80) || "Savings";
-  if (!(balance >= 0) || !date) throw new Error("Enter a balance and a date");
+  if (!(balance >= 0) || !date) return fail("Enter a balance (for example 3000) and a date.");
   const db = await createClient();
   let { data: acct } = await db.from("accounts").select("id").eq("account_role", "cash").eq("name", name).maybeSingle();
   if (!acct) {
@@ -37,22 +38,22 @@ export async function saveSavings(formData: FormData) {
 const KINDS = ["buy", "sell", "deposit", "withdrawal", "dividend", "interest", "fee", "transfer_in", "transfer_out"] as const;
 
 /** Adds one trade or cash flow after a statement, so holdings roll forward. */
-export async function recordTransaction(formData: FormData) {
+export async function recordTransaction(formData: FormData): Promise<ActionResult> {
   const kind = String(formData.get("kind")) as (typeof KINDS)[number];
   const accountId = String(formData.get("account_id") ?? "");
   const date = isoDate(formData.get("trade_date"));
-  if (!KINDS.includes(kind) || !accountId || !date) throw new Error("Choose an account, a type and a date");
+  if (!KINDS.includes(kind) || !accountId || !date) return fail("Choose an account, a type and a date.");
   const symbol = String(formData.get("symbol") ?? "").trim().toUpperCase() || null;
   const quantity = money(formData.get("quantity"));
   const price = money(formData.get("price"));
   const note = String(formData.get("note") ?? "").slice(0, 500) || null;
   let amount: number;
   if (kind === "buy" || kind === "sell") {
-    if (!symbol || !(quantity > 0) || !(price >= 0)) throw new Error("A trade needs a symbol, quantity and price");
+    if (!symbol || !(quantity > 0) || !(price >= 0)) return fail("A buy or sell needs a symbol, a share count above 0 and a price.");
     amount = (kind === "buy" ? -1 : 1) * Math.round(quantity * price * 100) / 100;
   } else {
     const raw = Math.abs(money(formData.get("amount")));
-    if (!(raw > 0)) throw new Error("Enter an amount");
+    if (!(raw > 0)) return fail("Enter an amount above 0.");
     amount = ["withdrawal", "fee", "transfer_out"].includes(kind) ? -raw : raw;
   }
   const db = await createClient();

@@ -57,6 +57,7 @@ export default function ImportPage() {
     if (state.kind !== "ready") return;
     const lines: string[] = [];
     const log = (l: string) => { lines.push(l); setState({ kind: "running", lines: [...lines] }); };
+    log("Starting import…"); // hides the Import button at once, so a second tap can't start it twice
     try {
       const db = createClient();
       const { data } = await db.auth.getUser();
@@ -102,7 +103,7 @@ export default function ImportPage() {
             <h3 className="text-sm font-semibold mb-1">What will be saved</h3>
             <ul className="text-sm list-disc pl-5 flex flex-col gap-1">{state.plan.report.map((l) => <li key={l}>{l}</li>)}</ul>
           </div>
-          <button onClick={onImport} className="self-start min-h-11 px-5 rounded-lg bg-ink text-ground font-medium">Import</button>
+          <button type="button" onClick={onImport} className="btn btn-primary self-start">Import</button>
         </section>
       )}
 

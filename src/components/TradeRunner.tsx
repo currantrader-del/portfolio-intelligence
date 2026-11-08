@@ -2,6 +2,8 @@
 
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
+import { Spinner } from "@/components/forms";
+import { requestJSON } from "@/lib/client/request";
 
 /** "Look for a trade" with an optional ticker; refreshes the page until the search finishes. */
 export function TradeRunner({ running }: { running: boolean }) {
@@ -19,18 +21,18 @@ export function TradeRunner({ running }: { running: boolean }) {
 
   async function start(e: React.FormEvent) {
     e.preventDefault();
+    if (active) return;
     setBusy(true); setError(null);
-    const res = await fetch("/api/trades", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ focus: focus.trim() || undefined }) });
-    const j = (await res.json().catch(() => ({}))) as { error?: string };
-    if (!res.ok) { setError(j.error ?? `HTTP ${res.status}`); setBusy(false); return; }
+    const r = await requestJSON("/api/trades", { json: { focus: focus.trim() || undefined } });
+    if (!r.ok) { setError(r.error); setBusy(false); return; }
     router.refresh();
   }
   return (
     <form onSubmit={start} className="flex flex-wrap items-center gap-2">
       <input value={focus} onChange={(e) => setFocus(e.target.value)} placeholder="Ticker (optional)" aria-label="Ticker to start with (optional)" maxLength={10}
         className="min-h-11 w-40 rounded-[12px] bg-surface-2 border border-line px-3 text-[15px] uppercase placeholder:normal-case" disabled={active} />
-      <button type="submit" className="btn btn-primary btn-sm" disabled={active}>{active ? "Looking… (2–5 min)" : "Look for a trade"}</button>
-      {error && <span role="alert" className="t-sm warn">{error}</span>}
+      <button type="submit" className={`btn btn-primary btn-sm ${active ? "is-pending" : ""}`} disabled={active} aria-busy={active || undefined}>{busy && !running ? <><Spinner />Starting…</> : active ? <><Spinner />Looking… (2–5 min)</> : "Look for a trade"}</button>
+      {error && <span role="alert" className="form-note form-note-error basis-full">{error}</span>}
     </form>
   );
 }

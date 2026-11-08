@@ -80,7 +80,7 @@ export function researchItems(r: ResearchState, weight: number | null, now: Date
     const age = Math.floor((now.getTime() - new Date(`${cur.research_as_of}T00:00:00Z`).getTime()) / 86400000);
     if (age > freshDays) out.push({
       headline: `${r.symbol}: research is ${age} days old`,
-      detail: `The approved research is dated ${cur.research_as_of}${action(cur) ? ` (${action(cur)})` : ""}, older than the ${freshDays}-day freshness limit.`,
+      detail: `The approved research is dated ${cur.research_as_of}${action(cur) ? ` (${action(cur)})` : ""}, more than ${freshDays} days ago. A reminder to check what has been filed since, not a rule that it is wrong.`,
       kind: "verified", significance: "medium", sources: [{ ...page, published: cur.research_as_of }], portfolio: `${held}${NOT_A_SIGNAL}`, unsourced: false, period: cur.research_as_of,
       check: { status: "primary", url: page.url, found: [], missing: [], note: "read from the stored research versions", retrievedAt: now.toISOString() },
     });

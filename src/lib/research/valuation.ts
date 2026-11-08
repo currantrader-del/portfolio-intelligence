@@ -104,12 +104,13 @@ export const REPRICE_LIMIT = 0.15;
  * Whether stored scenarios may be re-priced at today's price. A big move (especially a drop) can change the
  * probabilities, financing, dilution and cash-flow assumptions, so the old scenarios are not stretched to fit it.
  */
-export function repriceCheck(p: ParsedConclusion, price: number | null, ageDays: number | null, freshDays = 120): { ok: boolean; reason: string | null; drift: number | null } {
+export function repriceCheck(p: ParsedConclusion, price: number | null, ageDays?: number | null, reminderDays = 120): { ok: boolean; reason: string | null; drift: number | null; note?: string } {
   if (!price || !p.referencePrice) return { ok: false, reason: "No reference price to compare", drift: null };
   const drift = price / p.referencePrice - 1;
   if (Math.abs(drift) > REPRICE_LIMIT) {
     return { ok: false, drift, reason: `Price is ${Math.round(Math.abs(drift) * 100)}% ${drift < 0 ? "below" : "above"} the $${p.referencePrice} research reference. The scenarios need a refresh before they can be re-priced; a lower price is not a buy signal by itself.` };
   }
-  if (ageDays !== null && ageDays > freshDays) return { ok: false, drift, reason: `Research is ${ageDays} days old, past the ${freshDays}-day limit.` };
+  // Age alone never blocks re-pricing: events do (see refreshState in policy/evidence). Old research only earns a reminder.
+  if (ageDays != null && ageDays > reminderDays) return { ok: true, drift, reason: null, note: `${ageDays} days since the research: check what has been filed since.` };
   return { ok: true, reason: null, drift };
 }

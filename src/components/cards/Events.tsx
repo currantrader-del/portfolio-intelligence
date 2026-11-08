@@ -36,7 +36,7 @@ function Rows({ rows }: { rows: Alert[] }) {
     <ul className="flex flex-col gap-2.5">
       {rows.map((a) => (
         <li key={a.id}>
-          <Link href={a.href} className="flex items-start gap-2.5 no-underline min-h-9">
+          <Link href={a.href} className="flex items-start gap-2.5 no-underline min-h-11 active:opacity-70">
             <Dot kind={a.severity === "low" ? "hollow" : "solid"} className="mt-[7px]" style={{ color: COLOR[a.severity] }} />
             <span className="flex-1 min-w-0 flex flex-col">
               <span className="t-sm text-ink">{a.title}</span>

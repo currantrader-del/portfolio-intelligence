@@ -1,3 +1,4 @@
+import { ActionForm, SubmitButton } from "@/components/forms";
 import { shortDate, usd } from "@/lib/format";
 import { STAGES, type ScreenResult, type CheckStatus } from "@/lib/research/screen";
 import type { ResearchRecord } from "@/lib/research/records";
@@ -39,13 +40,13 @@ export function ResearchSummary({ r, held, price, now, freshDays, error }: { r: 
       </div>
       {next.length > 0 && <p className="t-sm"><span className="text-ink font-semibold">Next: </span>{next.join(" ")}</p>}
       {suggested && (
-        <form action={setStage} className="rounded-[12px] bg-surface-2 px-3 py-2.5 flex flex-wrap items-center justify-between gap-2">
+        <ActionForm action={setStage} success="Stage saved" className="rounded-[12px] bg-surface-2 px-3 py-2.5 flex flex-wrap items-center justify-between gap-2">
           <input type="hidden" name="symbol" value={r.symbol} />
           <input type="hidden" name="stage" value={suggested.stage} />
           <input type="hidden" name="note" value={`Suggested by the app: ${suggested.reason}`.slice(0, 500)} />
           <span className="t-sm min-w-0"><span className="text-ink font-semibold">Suggested: {STAGES.find((x) => x.key === suggested.stage)?.label}</span> · {suggested.reason}</span>
-          <button className="btn btn-sm btn-primary shrink-0">Accept</button>
-        </form>
+          <SubmitButton className="btn btn-sm btn-primary shrink-0">Accept</SubmitButton>
+        </ActionForm>
       )}
 
       {sc && (
@@ -64,10 +65,10 @@ export function ResearchSummary({ r, held, price, now, freshDays, error }: { r: 
               <div className="t-sm"><div className="text-ink font-semibold mb-1">To verify in research</div><ul className="list-disc pl-5 flex flex-col gap-0.5">{sc.toVerify.map((t) => <li key={t}>{t}</li>)}</ul></div>
             )}
             <p className="t-xs">At {sc.price != null ? usd(sc.price, 2) : "—"} · SEC data through {sc.dataThrough ? shortDate(sc.dataThrough) : "—"} · screened {shortDate(r.pipeline.screenedAt)}. Screening defaults, not your policy: revenue growth 10%+, positive operating profit and free cash flow, debt below cash, share count up no more than 2%, price to sales up to 10×. A screen decides what to research; it is never a buy signal.</p>
-            <form action={runScreen}>
+            <ActionForm action={runScreen} success="Screen updated" className="flex flex-col gap-2">
               <input type="hidden" name="symbol" value={r.symbol} />
-              <button className="btn btn-sm">Screen again</button>
-            </form>
+              <SubmitButton className="btn btn-sm self-start" pendingText="Screening…">Screen again</SubmitButton>
+            </ActionForm>
           </Disclose>
         </div>
       )}
@@ -75,7 +76,7 @@ export function ResearchSummary({ r, held, price, now, freshDays, error }: { r: 
       {!held && (
         <div className="border-t border-line">
           <Disclose summary={<span className="t-sm">Change stage</span>}>
-            <form action={setStage} className="flex flex-col gap-2">
+            <ActionForm action={setStage} success="Stage saved" className="flex flex-col gap-2">
               <input type="hidden" name="symbol" value={r.symbol} />
               <div className="grid grid-cols-2 gap-2">
                 <label className="field">Move to
@@ -85,8 +86,8 @@ export function ResearchSummary({ r, held, price, now, freshDays, error }: { r: 
                 </label>
                 <label className="field">Note (needed to pass)<input name="note" maxLength={500} className="input" /></label>
               </div>
-              <button className="btn btn-sm self-start">Save stage</button>
-            </form>
+              <SubmitButton className="btn btn-sm self-start">Save stage</SubmitButton>
+            </ActionForm>
           </Disclose>
         </div>
       )}

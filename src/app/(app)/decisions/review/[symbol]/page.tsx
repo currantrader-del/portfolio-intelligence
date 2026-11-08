@@ -1,7 +1,9 @@
+import { ActionForm, SubmitButton } from "@/components/forms";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { getWorkspace } from "@/lib/workspace";
 import { reviewPosition } from "@/lib/decision/review";
+import { getFilings } from "@/lib/market/sec";
 import { Tag } from "@/components/Tag";
 import { AskButton } from "@/components/AskPanel";
 import { pctStr, shortDate, toneOf, usd } from "@/lib/format";
@@ -11,7 +13,8 @@ export default async function ReviewPage({ params }: { params: Promise<{ symbol:
   const { symbol } = await params;
   const ws = await getWorkspace();
   const sym = symbol.toUpperCase();
-  const rv = reviewPosition(ws, sym);
+  const f = await getFilings(sym, ws.now).catch(() => null);
+  const rv = reviewPosition(ws, sym, f && !("error" in f) ? f : null);
   if (!rv) notFound();
   const alerts = ws.alerts.filter((a) => a.symbol === sym);
   const spy = ws.benchmarks.find((b) => b.symbol === "SPY")?.dayPct ?? null;
@@ -39,7 +42,7 @@ export default async function ReviewPage({ params }: { params: Promise<{ symbol:
               {rv.dayPct !== null && spy !== null && <li>Today {pctStr(rv.dayPct, 1, true)} against {pctStr(spy, 1, true)} for the S&amp;P 500. <span className="text-xs text-muted">Market data</span></li>}
               {!alerts.length && <li>No alerts on {sym} right now.</li>}
             </ul>
-            <div className="mt-3"><AskButton question={`Has anything material happened to ${sym} recently (filings, financing, guidance)? What does it mean for the thesis?`} className="min-h-10 px-3 rounded-lg border border-line-strong text-sm font-medium">Ask what caused it</AskButton></div>
+            <div className="mt-3"><AskButton question={`Has anything material happened to ${sym} recently (filings, financing, guidance)? What does it mean for the thesis?`} className="btn btn-sm">Ask what caused it</AskButton></div>
           </section>
 
           <section aria-labelledby="th-h" className="bg-surface border border-line rounded-2xl p-6 flex flex-col gap-3">
@@ -78,7 +81,7 @@ export default async function ReviewPage({ params }: { params: Promise<{ symbol:
 
           <section className="bg-surface border border-line rounded-2xl p-5 flex flex-col gap-3">
             <h2 className="font-semibold">Your options</h2>
-            <form action={recordReview} className="flex flex-col gap-2">
+            <ActionForm action={recordReview} success="Decision recorded" className="flex flex-col gap-2">
               <input type="hidden" name="symbol" value={sym} />
               {rv.options.map((o) => (
                 <label key={o.key} className={`grid grid-cols-[20px_56px_1fr] gap-2 items-start p-3 rounded-lg border ${o.key === rv.suggestion.key ? "border-accent bg-accent-soft" : "border-line"} ${o.available ? "" : "opacity-50"}`}>
@@ -92,8 +95,8 @@ export default async function ReviewPage({ params }: { params: Promise<{ symbol:
               ))}
               <label htmlFor="rnote" className="text-sm text-muted mt-1">Note (optional)</label>
               <textarea id="rnote" name="note" rows={2} className="rounded-lg border border-line-strong bg-ground px-3 py-2" />
-              <button className="min-h-11 px-4 rounded-lg bg-ink text-ground font-medium">Record my decision</button>
-            </form>
+              <SubmitButton className="btn btn-primary">Record my decision</SubmitButton>
+            </ActionForm>
             <AskButton question={`Deep review of ${sym}: given the research, today's price and my limits, should I add, hold, trim or exit? Give the strongest case each way.`} className="min-h-11 px-4 rounded-lg border border-line-strong font-medium">Deep review</AskButton>
             <p className="text-xs text-muted">Recording saves your choice; it does not trade. Place any order yourself at Schwab.</p>
           </section>

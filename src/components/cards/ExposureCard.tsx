@@ -11,9 +11,9 @@ import { Bar, Cap, LinkRow, Pill } from "@/components/ui";
 export function ExposureCard({ e, name, limit, conflict }: { e: CompanyExposure; name: string | null; limit?: CompanyLimit; conflict: boolean }) {
   const over = e.total > e.max + 1e-9;
   const near = !over && e.total >= e.max * 0.9;
-  const approved = limit?.status === "approved";
+  const approved = limit?.status === "approved" && limit.authority === "you";
   const pill = conflict ? { tone: "warn" as const, text: "Policy review" } : over ? { tone: "alert" as const, text: "Over limit" } : near ? { tone: "warn" as const, text: "Near limit" } : { tone: "neutral" as const, text: "Within limit" };
-  const limitNote = limit?.provisional ? "Provisional maximum · awaiting your approval" : conflict ? "Displayed limit · needs verification" : approved ? "Approved maximum" : limit?.hardMax != null ? "Proposed limit · not approved" : "Generic limit";
+  const limitNote = limit?.provisional ? "Provisional maximum · awaiting your approval" : conflict ? "Displayed limit · needs verification" : approved ? "Approved by you" : limit?.authority === "imported" ? "Imported limit · not confirmed" : limit?.hardMax != null ? "Proposed limit · not approved" : "No limit of its own · no new money";
   return (
     <section className="card" aria-labelledby={`exp-${e.symbol}`}>
       <div className="flex items-start justify-between gap-3">
