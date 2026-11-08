@@ -23,8 +23,20 @@ export type ResearchRecord = {
 
 const NO_PIPELINE: PipelineInfo = { stage: "idea", note: null, stageUpdatedAt: null, screen: null, screenedAt: null };
 
+/**
+ * Whether a version may inform decisions. A new investigation is saved while it runs and then waits
+ * for the investor's approval; a preliminary screen is never an investment rating. Neither is used
+ * until it is made current (approved), so they never replace or compete with the research in use.
+ */
+export function usableVersion(v: Pick<VersionRow, "is_current" | "conclusion">): boolean {
+  if (v.is_current) return true;
+  const c = (v.conclusion ?? {}) as { review_state?: unknown; research_type?: unknown };
+  if (c.research_type === "preliminary_screen") return false;
+  return !["running", "awaiting_approval", "failed"].includes(String(c.review_state ?? ""));
+}
+
 export function toResearchRecord(symbol: string, name: string | null, watchlistStatus: string, versions: VersionRow[], pipeline: PipelineInfo = NO_PIPELINE, filingCheck: FilingCheckInfo | null = null): ResearchRecord {
-  const sorted = [...versions].sort((a, b) => b.research_as_of.localeCompare(a.research_as_of));
+  const sorted = versions.filter(usableVersion).sort((a, b) => b.research_as_of.localeCompare(a.research_as_of));
   const cur = sorted.find((v) => v.is_current) ?? null;
   const latest = sorted[0] ?? null;
   return {

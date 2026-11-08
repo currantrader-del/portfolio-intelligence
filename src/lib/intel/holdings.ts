@@ -12,6 +12,7 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import { getFilings, type Filing } from "../market/sec";
 import type { DeskResult, Item, Source } from "./desks";
 import { DESK_VERSION } from "./desks";
+import { usableVersion } from "../research/records";
 import type { PortfolioContext } from "./synthesis";
 
 export const FILING_WINDOW_DAYS = 14;
@@ -107,7 +108,7 @@ export async function loadResearch(db: SupabaseClient, symbols: string[]): Promi
     db.from("model_runs").select("id, computed_at, inputs, outputs").eq("kind", "research_filing_check").in("inputs->>symbol", symbols).order("computed_at", { ascending: false }).limit(50),
   ]);
   return (cos ?? []).map((c) => {
-    const versions = ((c.research_versions ?? []) as Version[]).sort((a, b) => b.research_as_of.localeCompare(a.research_as_of));
+    const versions = ((c.research_versions ?? []) as Version[]).filter((v) => usableVersion({ is_current: v.is_current, conclusion: v.conclusion ?? {} })).sort((a, b) => b.research_as_of.localeCompare(a.research_as_of));
     const current = versions.find((v) => v.is_current) ?? null;
     const newer = versions.filter((v) => !v.is_current && (!current || v.research_as_of > current.research_as_of));
     const row = (checks ?? []).find((k) => (k.inputs as { symbol?: string }).symbol === c.symbol);

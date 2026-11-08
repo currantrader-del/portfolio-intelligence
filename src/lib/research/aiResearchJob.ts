@@ -1,7 +1,8 @@
 /**
- * Runs a full AI research request as a background job and saves it as a NEW research version
- * (origin "claude_full"). Earlier versions are never edited; the only change to them is the "current" flag,
- * and that moves to the new version only when the report passed every check (or nothing was current before).
+ * Runs a PRELIMINARY SCREEN as a background job: one quick pass (about a minute) that decides whether a
+ * company deserves a full investigation. It is saved as a new research version (origin "claude_full",
+ * research_type "preliminary_screen") for the record, but it is never made current and never used for
+ * decisions. Full investigations live in src/lib/research/investigate.
  */
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { buildWorkspace } from "@/lib/workspace-core";
@@ -54,7 +55,7 @@ export async function runResearchJob(db: SupabaseClient, requestId: string): Pro
   const report = validateReport(extractJson(ans.answer), { today, appPrice });
   if ("error" in report) return done({ ok: false, error: `${report.error}${ans.stopped ? ` (stopped: ${ans.stopped})` : ""}`, ...meta });
 
-  const changeSummary = `AI research (${ans.model}, ${ans.searches} searches, $${ans.costUsd.toFixed(2)}). ${report.summary}${report.problems.length ? ` Not complete: ${report.problems.join("; ")}.` : ""}`.slice(0, 2000);
+  const changeSummary = `Preliminary screen (${ans.model}, ${ans.searches} searches, $${ans.costUsd.toFixed(2)}). ${report.summary}${report.problems.length ? ` Not complete: ${report.problems.join("; ")}.` : ""}`.slice(0, 2000);
   const { data: version, error: vErr } = await db.from("research_versions").insert({
     company_id: company.id, research_as_of: today, completeness: report.completeness, origin: "claude_full", is_current: false,
     supersedes_id: prior?.id ?? null, conclusion: { ...report.conclusion, generated_by: RESEARCH_VERSION, request_id: requestId }, change_summary: changeSummary,
@@ -66,21 +67,15 @@ export async function runResearchJob(db: SupabaseClient, requestId: string): Pro
     if (error) report.problems.push(`Phases not saved: ${error.message}`);
   }
   if (report.sources.length) {
-    const { error } = await db.from("research_sources").insert(report.sources.map((s) => ({ version_id: version.id, title: s.title, url: s.url, document_date: s.document_date, details: { cited_by: RESEARCH_VERSION } })));
+    // Honest source status: a page opened with read_document was read as an excerpt (at most 9,000
+    // characters of matching passages); anything else was only seen in search results or app data.
+    const opened = new Set(ans.steps.filter((x) => x.tool === "read_document" && x.ok).map((x) => String((x.input as { url?: string })?.url ?? "")));
+    const { error } = await db.from("research_sources").insert(report.sources.map((s) => ({ version_id: version.id, title: s.title, url: s.url, document_date: s.document_date, details: { cited_by: RESEARCH_VERSION, review_status: opened.has(s.url) ? "excerpt_read" : "search_result_or_app_data" } })));
     if (error) report.problems.push(`Sources not saved: ${error.message}`);
   }
 
-  // Only a report that passed every check replaces the current research. A partial one is kept beside it.
-  let madeCurrent = false;
-  if (report.completeness === "complete" || !current) {
-    if (current) {
-      const { error } = await db.from("research_versions").update({ is_current: false }).eq("id", current.id);
-      if (error) report.problems.push(`Could not retire the previous current research: ${error.message}`);
-    }
-    const { error } = await db.from("research_versions").update({ is_current: true }).eq("id", version.id);
-    if (error) report.problems.push(`Could not mark the new research current: ${error.message}`);
-    else madeCurrent = true;
-  }
+  // A preliminary screen never replaces the research in use and is never used for decisions (see usableVersion).
+  const madeCurrent = false;
   // Research on file moves an idea along the pipeline (never past "researching"; Ready stays the investor's call).
   if (company.pipeline_stage === "idea" || company.pipeline_stage === "screening") {
     const at = new Date().toISOString();

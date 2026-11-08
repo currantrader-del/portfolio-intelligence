@@ -14,17 +14,21 @@ import { InvestmentSummary } from "@/components/TodayValuation";
 import { AskButton } from "@/components/AskPanel";
 import { FilingCheckCard, type StoredFilingCheck } from "@/components/FilingCheckCard";
 import { ResearchButton } from "@/components/ResearchButton";
+import { InvestigationRunner } from "@/components/InvestigationRunner";
+import { InvestigationReport, type InvVersion, type SourceRow } from "@/components/InvestigationReport";
 import { getQuote } from "@/lib/market/quotes";
 import { coverage } from "@/lib/research/status";
 import { pctStr, shortDate, toneOf, usd } from "@/lib/format";
 import { Card, CardHead, Chevron, DataLabel, Disclose, Pill, SourceRef } from "@/components/ui";
 
-type Phase = { phase_number: number; title: string | null; extraction: string; body_markdown: string | null };
+type Phase = { phase_number: number; title: string | null; extraction: string; body_markdown: string | null; details?: Record<string, unknown> | null };
 type Version = {
   id: string; research_as_of: string; completeness: string; origin: string; is_current: boolean;
   conclusion: Record<string, unknown>; change_summary: string | null;
   source_documents: { file_name: string; sha256: string } | null;
   research_phases: Phase[];
+  research_sources?: SourceRow[];
+  created_at?: string;
 };
 
 const ERRORS: Record<string, string> = {
@@ -32,7 +36,7 @@ const ERRORS: Record<string, string> = {
   ready: "Ready for decision needs complete research marked current. Refresh or finish the research first.",
   nofiling: "There is no stored research to check a filing against.",
 };
-const SAVED: Record<string, string> = { stage: "Stage saved.", screen: "Screen updated.", filing: "SEC filing checked and the result stored." };
+const SAVED: Record<string, string> = { adopted: "The investigation is now your research in use. The earlier research stays on file.", stage: "Stage saved.", screen: "Screen updated.", filing: "SEC filing checked and the result stored." };
 
 export default async function CompanyPage({ params, searchParams }: { params: Promise<{ symbol: string }>; searchParams: Promise<{ error?: string; saved?: string }> }) {
   const { symbol: raw } = await params;
@@ -42,7 +46,7 @@ export default async function CompanyPage({ params, searchParams }: { params: Pr
   const [{ data: company }, ws, { data: lastCheck }] = await Promise.all([
     supabase
       .from("companies")
-      .select("symbol, name, research_versions(id, research_as_of, completeness, origin, is_current, conclusion, change_summary, source_documents(file_name, sha256), research_phases(phase_number, title, extraction, body_markdown))")
+      .select("symbol, name, research_versions(id, research_as_of, created_at, completeness, origin, is_current, conclusion, change_summary, source_documents(file_name, sha256), research_phases(phase_number, title, extraction, body_markdown, details), research_sources(title, url, document_date, details))")
       .eq("symbol", symbol)
       .maybeSingle(),
     getWorkspace(),
@@ -66,6 +70,7 @@ export default async function CompanyPage({ params, searchParams }: { params: Pr
     return (
       <div className="flex flex-col gap-3 lg:gap-4 max-w-3xl">
         <Header symbol={symbol} name={null} kicker={`${symbol} · not in your research yet`} price={price} day={day} />
+        {!etf && <InvestigationRunner symbol={symbol} hasResearch={false} hasInvestigation={false} />}
         {!etf && <ResearchButton symbol={symbol} hasResearch={false} needsResearch />}
         <Card flush>
           <Disclose summary={<span className="t-sm">Add to your list without researching</span>}>
@@ -88,6 +93,9 @@ export default async function CompanyPage({ params, searchParams }: { params: Pr
   const cur = record?.current ?? record?.latest;
   const thesis = cur?.parsed.thesis;
   const phases = versions.reduce((n, v) => n + (v.research_phases?.length ?? 0), 0);
+  const isInv = (v: Version) => v.conclusion?.research_type === "full_investigation" || v.conclusion?.research_type === "material_event_refresh";
+  const investigations = versions.filter(isInv).sort((a, b) => (b.created_at ?? b.research_as_of).localeCompare(a.created_at ?? a.research_as_of));
+  const latestInv = investigations[0] ?? null;
 
   return (
     <div className="flex flex-col gap-3 lg:gap-4">
@@ -99,6 +107,7 @@ export default async function CompanyPage({ params, searchParams }: { params: Pr
 
       <div className="grid grid-cols-1 gap-3 lg:gap-4 lg:grid-cols-12 items-start">
         <div className="lg:col-span-7 flex flex-col gap-3 lg:gap-4 min-w-0">
+          {latestInv && <InvestigationReport symbol={company.symbol} v={latestInv as unknown as InvVersion} sources={latestInv.research_sources ?? []} />}
           <InvestmentSummary ws={ws} symbol={company.symbol} />
           {thesis && (
             <Card labelledBy="th-h" className="!gap-2">
@@ -110,7 +119,8 @@ export default async function CompanyPage({ params, searchParams }: { params: Pr
         </div>
 
         <div className="lg:col-span-5 flex flex-col gap-3 lg:gap-4 min-w-0">
-          {!etf && <ResearchButton symbol={company.symbol} hasResearch={versions.length > 0} needsResearch={coverage(record, price, ws.now, AGE_REMINDER_DAYS).key !== "current"} />}
+          {!etf && <InvestigationRunner symbol={company.symbol} hasResearch={versions.some((v) => v.is_current || isInv(v))} hasInvestigation={investigations.some((v) => v.is_current)} />}
+          {!etf && <ResearchButton symbol={company.symbol} hasResearch={versions.length > 0} needsResearch={!latestInv && coverage(record, price, ws.now, AGE_REMINDER_DAYS).key !== "current"} />}
           {versions.length > 0 && (
             <Card flush>
               <Disclose summary={`Your research · ${versions.length} record${versions.length > 1 ? "s" : ""}${phases ? `, ${phases} phases` : ""}`}>
@@ -122,7 +132,8 @@ export default async function CompanyPage({ params, searchParams }: { params: Pr
                         <span className="text-ink font-semibold mr-1">{shortDate(v.research_as_of)}</span>
                         {v.is_current && <Pill small tone="gain" dot="solid">Current</Pill>}
                         <Pill small tone={v.completeness === "complete" ? "neutral" : "warn"}>{v.completeness.replace("_", " ")}</Pill>
-                        <Pill small>{ORIGIN_LABEL[v.origin] ?? v.origin}</Pill>
+                        <Pill small>{v.conclusion?.research_type === "preliminary_screen" ? "Preliminary screen" : v.conclusion?.research_type === "full_investigation" ? "Full investigation" : v.conclusion?.research_type === "material_event_refresh" ? "Material-event refresh" : ORIGIN_LABEL[v.origin] ?? v.origin}</Pill>
+                        {v.conclusion?.review_state === "awaiting_approval" && !v.is_current && <Pill small tone="copper">Awaiting approval</Pill>}
                       </div>
                       <div className="grid grid-cols-2 gap-x-4 gap-y-1 t-sm">
                         {(["action", "confidence", "classification", "reference_price"] as const).map((k) => (

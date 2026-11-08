@@ -34,7 +34,7 @@ export async function startBriefing(db: SupabaseClient, token: string, origin: s
 /** What has been spent today (UTC) on briefings, and on assistant answers plus company research (one shared bucket), from the stored rows. */
 export async function spentToday(db: SupabaseClient, now = new Date()) {
   const since = `${now.toISOString().slice(0, 10)}T00:00:00Z`;
-  const { data } = await db.from("model_runs").select("kind, outputs->>costUsd").in("kind", ["market_briefing", "assistant_answer", "research_result", "portfolio_plan", "watch_run", "trade_scan", "exposure_review"]).gte("computed_at", since);
+  const { data } = await db.from("model_runs").select("kind, outputs->>costUsd").in("kind", ["market_briefing", "assistant_answer", "research_result", "portfolio_plan", "watch_run", "trade_scan", "exposure_review", "investigation_step"]).gte("computed_at", since);
   let briefings = 0, answers = 0;
   for (const r of (data ?? []) as { kind: string; costUsd: string | null }[]) {
     const c = Number(r.costUsd ?? 0) || 0;

@@ -6,7 +6,8 @@
  */
 import { parseZone } from "./valuation";
 
-export const RESEARCH_VERSION = "ai-research@2";
+/** The preliminary screen: one quick pass, never an investment rating and never used for decisions. */
+export const RESEARCH_VERSION = "preliminary-screen@3";
 
 /** Cost controls for one company (more room than a question, still bounded). */
 export const RESEARCH_LIMITS = { turns: 22, searches: 10, ms: 11 * 60_000, maxTokens: 16000 };
@@ -34,6 +35,7 @@ How to work:
 When done, reply with exactly one JSON object in a \`\`\`json fenced block and nothing else. Shape:
 {
   "summary": string,                       // 2-4 sentences: the conclusion and why
+  "screen_verdict": string,                // "Worth a full investigation" or "Not worth a full investigation now", then why in one sentence
   "action": string,
   "classification": string,                // e.g. "Quality compounder", "Speculative growth", "Cyclical"
   "confidence": "Low" | "Moderate" | "High",
@@ -47,6 +49,8 @@ When done, reply with exactly one JSON object in a \`\`\`json fenced block and n
   "phases": [{ "number": 1-6, "title": string, "body_markdown": string }],   // all six: ${PHASES.map((p) => `${p.n} ${p.title}`).join("; ")}
   "sources": [{ "title": string, "url": string, "date": "YYYY-MM-DD" | null }]
 }`;
+
+export const SCREEN_NOTE = "This is a preliminary screen: a quick first pass to decide whether the company deserves a full investigation. It reads excerpts, not whole documents, and is never used as an investment rating.";
 
 export function researchQuestion(a: { symbol: string; name: string | null; today: string; price: number | null; earlier: string | null; screen?: string | null }) {
   return `Research ${a.symbol}${a.name ? ` (${a.name})` : ""} from scratch for the research record. Today is ${a.today}.${a.price ? ` The app's latest (delayed) price is $${a.price}.` : " The app has no current price; get one with get_quote."}
@@ -139,6 +143,9 @@ export function validateReport(raw: unknown, ctx: { today: string; appPrice: num
     price_framework: parsedZones,
     allocation: r.allocation && typeof r.allocation === "object" ? r.allocation : null,
     would_change: Array.isArray(r.would_change) ? (r.would_change as unknown[]).map((x) => str(x, 400)).filter(Boolean).slice(0, 10) : [],
+    research_type: "preliminary_screen",
+    review_state: "screen",
+    screen_verdict: str(r.screen_verdict, 400) || null,
     not_verified: Array.isArray(r.not_verified) ? (r.not_verified as unknown[]).map((x) => str(x, 400)).filter(Boolean).slice(0, 12) : [],
     problems,
   };

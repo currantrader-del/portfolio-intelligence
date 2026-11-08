@@ -7,6 +7,7 @@ export { classifyFiling };
  * SEC asks automated clients to identify themselves: set SEC_USER_AGENT to "App name contact@example".
  */
 const UA = process.env.SEC_USER_AGENT || "PortfolioIntelligence/1.0 (personal research app)";
+export const SEC_USER_AGENT = UA;
 const DAY = 86400;
 
 export type Filing = {
@@ -210,6 +211,18 @@ export async function getFilings(symbol: string, now = new Date()): Promise<Fili
   const { company, filings } = parseSubmissions(body);
   const lastEarnings = filings.find((f) => f.isEarnings) ?? null;
   return { cik: id.cik, company: company || id.title, filings, lastEarnings, nextEarningsEstimate: estimateNextEarnings(lastEarnings, now), source: src, fetchedAt: new Date().toISOString() };
+}
+
+/** A longer filing history than getFilings (for building a research reading list), newest first. */
+export async function getFilingHistory(symbol: string, limit = 300): Promise<{ cik: string; company: string; filings: Filing[]; source: string } | { error: string }> {
+  if (FIXTURE) { const f = fixtureFilings(symbol.toUpperCase()); return "error" in f ? f : { cik: f.cik, company: f.company, filings: f.filings, source: f.source }; }
+  const id = await lookupCik(symbol);
+  if (!id) return { error: `${symbol} was not found in SEC EDGAR.` };
+  const src = `https://data.sec.gov/submissions/CIK${id.cik}.json`;
+  const body = await secJson(src, 3600);
+  if (!body) return { error: "SEC EDGAR could not be reached." };
+  const { company, filings } = parseSubmissions(body, limit);
+  return { cik: id.cik, company: company || id.title, filings, source: src };
 }
 
 export type Fundamentals = { cik: string; company: string; metrics: Metric[]; missing: string[]; source: string; fetchedAt: string };

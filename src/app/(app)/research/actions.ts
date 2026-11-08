@@ -104,3 +104,26 @@ export async function checkLatestFiling(formData: FormData): Promise<ActionResul
   revalidatePath(`/research/${symbol}`);
   redirect(`/research/${symbol}?saved=filing`);
 }
+
+/**
+ * Makes an investigation the research in use, at the investor's request. The research it replaces
+ * stays on file unchanged (only its "current" flag moves); nothing else is edited.
+ */
+export async function adoptResearch(formData: FormData): Promise<ActionResult> {
+  const symbol = cleanSymbol(formData.get("symbol"));
+  const versionId = String(formData.get("versionId") ?? "");
+  const db = await createClient();
+  const { data: v } = await db.from("research_versions").select("id, company_id, conclusion, completeness, is_current").eq("id", versionId).maybeSingle();
+  if (!v) return fail("That research record was not found.");
+  const c = (v.conclusion ?? {}) as Record<string, unknown>;
+  if (v.is_current) return fail("This research is already the one in use.");
+  if (c.review_state !== "awaiting_approval") return fail("Only a finished investigation can be adopted.");
+  const { error: e1 } = await db.from("research_versions").update({ is_current: false }).eq("company_id", v.company_id).eq("is_current", true);
+  if (e1) return fail(`Could not retire the research in use: ${e1.message}`);
+  const { error: e2 } = await db.from("research_versions").update({ is_current: true, conclusion: { ...c, review_state: "adopted", adopted_at: new Date().toISOString() } }).eq("id", v.id);
+  if (e2) return fail(`Could not adopt it: ${e2.message}`);
+  revalidatePath("/research");
+  revalidatePath(`/research/${symbol}`);
+  revalidatePath("/");
+  redirect(`/research/${symbol}?saved=adopted`);
+}
