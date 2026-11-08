@@ -10,6 +10,8 @@ export type OwnedItem = {
   coverage: { label: string; tone: "gain" | "warn" | "neutral"; dot: "solid" | "hollow"; detail: string; key: string };
   action: string | null; confidence: string | null; researchAsOf: string | null; versions: number;
   price: number | null; zones: ZoneView[]; exposure: string | null;
+  /** False for a researched company you don't own: the low band reads as a starter zone. */
+  held?: boolean;
 };
 export type PipeItem = {
   symbol: string; name: string | null; stage: string; note: string | null;
@@ -122,7 +124,7 @@ function OwnedCard({ o, stage }: { o: OwnedItem; stage?: string | null }) {
         </span>
         <span className="t-xs shrink-0">{o.researchAsOf ? `Research ${o.researchAsOf}` : ""}</span>
       </div>
-      {o.coverage.key === "current" && o.zones.length > 0 && <ZoneBar zones={o.zones} price={o.price} />}
+      {o.coverage.key === "current" && o.zones.length > 0 && <ZoneBar zones={o.zones} price={o.price} held={o.held} />}
       {o.coverage.key === "refresh" && <span className="t-xs line-clamp-2">Not re-priced: {o.coverage.detail.split(". ")[0].replace(/^Price is/, "price is")}.</span>}
       {o.exposure && <span className="t-xs">{o.exposure}</span>}
     </Link>

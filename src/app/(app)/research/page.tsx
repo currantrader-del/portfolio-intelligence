@@ -48,7 +48,7 @@ export default async function ResearchPage({ searchParams }: { searchParams: Pro
     const card: OwnedItem | null = v ? {
       symbol: r.symbol, name: r.name ?? null, classification: v.parsed.classification ?? null, coverage: c,
       action: v.parsed.action ?? null, confidence: v.parsed.confidence ?? null, researchAsOf: md(v.research_as_of), versions: r.versions ?? 0,
-      price, zones: toZoneViews(v.parsed.zones ?? []),
+      price, zones: toZoneViews(v.parsed.zones ?? []), held: false,
       exposure: sug ? `Suggested move: ${STAGE_NAME[sug.stage]}. Open to accept.` : r.pipeline.note,
     } : null;
     return {

@@ -4,11 +4,22 @@
  */
 export type ZoneView = { low: number; high: number | null; label: string; action: string };
 
-const kind = (action: string) => (/add|buy|accumulate/i.test(action) ? "add" : /trim|sell|reduce/i.test(action) ? "trim" : "hold");
+/**
+ * Which colour a band gets, read from the research's own words. Negations come first: "No add",
+ * "Do not buy" and "No new money" are not buy zones, even though they contain "add" or "buy".
+ */
+export function zoneKind(action: string): "add" | "hold" | "trim" {
+  const a = action.toLowerCase();
+  if (/\b(trim\w*|sell|reduc\w*|take profits?)\b/.test(a) && !/\b(no|not|don't|never)\s+(trim|sell|reduce)/.test(a)) return "trim";
+  if (/^\s*(watch|hold|avoid|no add|no new|do not|don't)\b/.test(a) || /\b(no add|no new money|no position|avoid chasing)\b/.test(a)) return "hold";
+  if (/\b(add|buy|accumulate|starter|start a position|initiate)\b/.test(a)) return "add";
+  return "hold";
+}
+const kind = zoneKind;
 const FILL = { add: "#24332b", hold: "#2a2c31", trim: "#3a2a24" };
 const money = (n: number) => `$${n >= 100 ? Math.round(n) : n.toFixed(n >= 10 ? 0 : 2)}`;
 
-export function ZoneBar({ zones, price }: { zones: ZoneView[]; price: number | null }) {
+export function ZoneBar({ zones, price, held = true }: { zones: ZoneView[]; price: number | null; held?: boolean }) {
   const z = [...zones].sort((a, b) => a.low - b.low);
   if (!z.length) return null;
   // Equal-width segments; the marker sits proportionally inside the band that holds the price.
@@ -25,7 +36,7 @@ export function ZoneBar({ zones, price }: { zones: ZoneView[]; price: number | n
   }
   const first = z[0];
   const last = z[z.length - 1];
-  const left = kind(first.action) === "add" && first.high ? `Add research below ${money(first.high)}` : first.label;
+  const left = kind(first.action) === "add" && first.high ? `${held ? "Add research" : "Starter zone"} below ${money(first.high)}` : first.label;
   const right = kind(last.action) === "trim" && last.low ? `Trim review above ${money(last.low)}` : last.label;
   const label = `Research price bands: ${z.map((x) => `${x.label} ${x.action}`).join("; ")}${price !== null ? `. Today ${money(price)}` : ""}`;
   return (
