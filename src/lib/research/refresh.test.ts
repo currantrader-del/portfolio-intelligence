@@ -28,11 +28,11 @@ describe("decideRefresh", () => {
     const d = decideRefresh({ ...base, price: 45, filings: [f("10-K", "2026-08-27"), f("8-K", "2026-10-01", ["2.02"], "acc-1")], reviewedAccessions: ["acc-1"] });
     expect(d.level).toBe("current");
   });
-  it("requires a full reassessment after a very large drop, without treating it as a buy", () => {
+  it("a very large drop alone is re-priced for free, not sent to paid research", () => {
     const d = decideRefresh({ ...base, price: 23.95, filings: [] });
-    expect(d.level).toBe("full_reassessment");
-    expect(d.triggers[0]).toMatchObject({ rule: "R6 very large price move" });
-    expect(d.triggers[0].evidence).toMatch(/46% below the \$44.3 reference/);
+    expect(d.level).toBe("current");
+    expect(d.triggers).toEqual([]);
+    expect(d.priceMove).toMatch(/^Very large price move: 46% below the \$44.3 reference.*no AI cost/);
   });
   it("flags a price outside the bear-to-bull range", () => {
     expect(decideRefresh({ ...base, price: 12, filings: [] }).triggers.map((t) => t.rule)).toContain("R8 price outside scenarios");
@@ -44,6 +44,7 @@ describe("decideRefresh", () => {
   });
   it("on the real IREN filing list (as of 2026-11-06) finds no new report or financing after 2026-09-10", () => {
     const d = decideRefresh({ ...base, price: 23.95, filings: parseSubmissions(iren).filings });
-    expect(d.triggers.map((t) => t.rule)).toEqual(["R6 very large price move"]);
+    expect(d.triggers.map((t) => t.rule)).toEqual([]);
+    expect(d.priceMove).toMatch(/^Very large price move/);
   });
 });

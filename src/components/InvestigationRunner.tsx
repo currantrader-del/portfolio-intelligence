@@ -5,6 +5,8 @@ import { useRouter } from "next/navigation";
 import { Card, CardHead, Pill } from "@/components/ui";
 import { Spinner } from "@/components/forms";
 import { requestJSON } from "@/lib/client/request";
+import { Disclose } from "@/components/ui";
+import type { UpdatePlan } from "@/lib/research/updatePlan";
 
 type Run = {
   type: string; status: string; pauseReason: string | null; step: string | null; stepIndex: number; steps: number; startedAt: string; lastCheckpointAt: string; costUsd: number;
@@ -24,11 +26,12 @@ const mmss = (s: number) => `${Math.floor(s / 60)}:${String(s % 60).padStart(2, 
  * Starts and follows research investigations. Three kinds: a full investigation, a refresh for new
  * events, and the quick preliminary screen (separate card). The run continues in the background.
  */
-export function InvestigationRunner({ symbol, hasResearch, hasInvestigation }: { symbol: string; hasResearch: boolean; hasInvestigation: boolean }) {
+export function InvestigationRunner({ symbol, hasResearch, plan }: { symbol: string; hasResearch: boolean; hasInvestigation?: boolean; plan?: UpdatePlan | null }) {
   const router = useRouter();
   const [st, setSt] = useState<Status | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [starting, setStarting] = useState<string | null>(null);
+  const [confirmFull, setConfirmFull] = useState(false);
   const [now, setNow] = useState(() => Date.now());
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -71,6 +74,8 @@ export function InvestigationRunner({ symbol, hasResearch, hasInvestigation }: {
   const run = st && "run" in st ? st.run : null;
   const elapsed = st && "startedAt" in st ? Math.floor((now - new Date(st.startedAt).getTime()) / 1000) : 0;
   const busy = running || !!starting || st === null;
+  // An update needs a finished investigation to build on; without one only a full investigation makes sense.
+  const canUpdate = plan ? !!plan.foundation : hasResearch;
 
   return (
     <Card labelledBy="inv-h" className="!gap-3">
@@ -89,10 +94,11 @@ export function InvestigationRunner({ symbol, hasResearch, hasInvestigation }: {
             </>
           )}
         </div>
+      ) : plan ? (
+        <UpdateSummary plan={plan} />
       ) : (
         <div className="flex flex-col gap-1.5 t-sm">
-          <p><strong className="text-ink">Full investigation.</strong> Reads the annual and quarterly reports, earnings release, call transcript with Q&amp;A, presentation, financing filings and proxy in full; works through six phases, each saved as a checkpoint; checks numbers against the documents, computes the valuation, and ends with a skeptical review. Usually 20–45 minutes and a few dollars.</p>
-          <p><strong className="text-ink">Refresh for new events.</strong> Reads only what was filed or said since the research in use and updates the valuation and conclusion.</p>
+          <p><strong className="text-ink">Update research.</strong> Reads only what was filed or said since the investigation it builds on, and updates the evidence, model and conclusion. A price move alone needs no AI.</p>
           <p className="t-xs">Results are saved as a new dated record. Nothing replaces the research in use until you approve it.</p>
         </div>
       )}
@@ -104,15 +110,51 @@ export function InvestigationRunner({ symbol, hasResearch, hasInvestigation }: {
         {(st?.status === "stalled" || st?.status === "paused") && (
           <button type="button" className={`btn btn-primary ${starting === "resume" ? "is-pending" : ""}`} onClick={() => start("resume")} disabled={!!starting}>{starting === "resume" ? <><Spinner />Resuming…</> : "Resume"}</button>
         )}
-        <button type="button" className={`btn ${!hasInvestigation ? "btn-primary" : ""} ${starting === "full" ? "is-pending" : ""}`} onClick={() => start("full")} disabled={busy} aria-busy={starting === "full" || undefined}>
-          {starting === "full" ? <><Spinner />Starting…</> : running ? <><Spinner />Running…</> : st === null ? <><Spinner />Checking…</> : "Run full investigation"}
-        </button>
-        {hasResearch && (
-          <button type="button" className={`btn ${hasInvestigation ? "btn-primary" : ""} ${starting === "refresh" ? "is-pending" : ""}`} onClick={() => start("refresh")} disabled={busy}>
-            {starting === "refresh" ? <><Spinner />Starting…</> : "Refresh for new events"}
+        {canUpdate && (
+          <button type="button" className={`btn ${plan?.recommend !== "full" ? "btn-primary" : ""} ${starting === "refresh" ? "is-pending" : ""}`} onClick={() => start("refresh")} disabled={busy || plan?.recommend === "nothing_new"} aria-busy={starting === "refresh" || undefined}>
+            {starting === "refresh" ? <><Spinner />Starting…</> : running ? <><Spinner />Running…</> : st === null ? <><Spinner />Checking…</> : plan?.recommend === "nothing_new" ? "Up to date" : `Update research${plan ? ` · about ${range(plan.estimates.update)}` : ""}`}
           </button>
         )}
       </div>
+      {!running && (
+        <div className="rounded-[12px] border border-line px-3">
+          <Disclose summary={<span className="t-sm">Full re-investigation{plan?.recommend === "full" ? " · recommended" : " · not needed now"}</span>} open={plan?.recommend === "full" || !canUpdate}>
+            <div className="flex flex-col gap-2 t-sm pb-2">
+              <p>Reads the annual and quarterly reports, earnings release, call transcript with Q&amp;A, presentation, financing filings and proxy in full, works through six phases and ends with a skeptical review. Usually 20–45 minutes{plan ? `, about ${range(plan.estimates.full)} (${plan.estimates.full.basis})` : ", a few dollars"}.</p>
+              {plan?.recommend === "full" ? (
+                <ul className="list-disc pl-4">{plan.fullReasons.map((r, i) => <li key={i}>{r}</li>)}</ul>
+              ) : (
+                <p className="t-xs">Recommended only when the foundation is unreliable: no finished investigation, the price outside the bear-to-bull range, research over a year old, or a business that has changed. None applies now, so an update is the better use of money.</p>
+              )}
+              <label className="flex items-start gap-2 t-sm"><input type="checkbox" className="mt-1" checked={confirmFull} onChange={(e) => setConfirmFull(e.target.checked)} />
+                <span>I want a full re-investigation{plan ? ` (about ${range(plan.estimates.full)})` : ""}. It does not replace the research in use until I approve it.</span></label>
+              <button type="button" className={`btn self-start ${plan?.recommend === "full" ? "btn-primary" : ""} ${starting === "full" ? "is-pending" : ""}`} onClick={() => start("full")} disabled={busy || !confirmFull} aria-busy={starting === "full" || undefined}>
+                {starting === "full" ? <><Spinner />Starting…</> : "Run full investigation"}
+              </button>
+            </div>
+          </Disclose>
+        </div>
+      )}
     </Card>
+  );
+}
+
+const range = (c: { low: number; high: number }) => `$${c.low.toFixed(2)}–$${c.high.toFixed(2)}`;
+const pctx = (n: number | null) => (n === null ? "—" : `${n >= 0 ? "+" : ""}${(n * 100).toFixed(1)}% a year`);
+
+/** What is new since the research, what an update would cost, and the free re-pricing at today's price. */
+function UpdateSummary({ plan }: { plan: UpdatePlan }) {
+  const r = plan.reprice;
+  return (
+    <div className="flex flex-col gap-1.5 t-sm">
+      <p>{plan.summary}</p>
+      {plan.foundation && <p className="t-xs">Builds on: research of {plan.foundation.label}. The result is a new dated record; nothing replaces the research in use until you approve it.</p>}
+      {plan.newEvidence.length > 0 && (
+        <ul className="list-disc pl-4 t-xs">{plan.newEvidence.slice(0, 8).map((e, i) => <li key={i}>{e.filed}: {e.label}</li>)}</ul>
+      )}
+      {r && (
+        <p className="t-xs rounded-[10px] bg-surface-2 px-2 py-1.5">Re-priced for free: the saved weighted value ${r.weighted.toFixed(2)} at today&apos;s ${r.price.toFixed(2)} implies {pctx(r.annualizedNow)} (it was {pctx(r.annualizedThen)} at ${r.reference.toFixed(2)}).{r.outsideRange ? " The price is outside the research's scenarios." : ""}</p>
+      )}
+    </div>
   );
 }

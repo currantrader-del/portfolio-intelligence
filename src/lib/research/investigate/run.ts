@@ -17,6 +17,7 @@ import { attachText, buildInventory, fetchDocText } from "./documents";
 import { getFinancials } from "./financials";
 import { docStatus, finalGate } from "./gates";
 import { validateInvestigation } from "../validate";
+import { updateFoundation } from "../standing";
 import { runLoop } from "./loop";
 import { consistencyCheck, portfolioCheckFrom, stressTests } from "./challenge";
 import { INV_MODELS } from "./models";
@@ -147,9 +148,9 @@ async function stepInventory(db: SupabaseClient, s: RunState) {
   s.name = company.name;
   type V = { id: string; research_as_of: string; completeness: string; origin: string; is_current: boolean; conclusion: Record<string, unknown>; created_at: string; research_phases: { phase_number: number; title: string | null; body_markdown: string | null }[] };
   const versions = ((company.research_versions ?? []) as V[]).sort((a, b) => b.created_at.localeCompare(a.created_at));
-  const fullDone = versions.find((v) => v.conclusion?.research_type === "full_investigation" && v.conclusion?.review_state !== "running");
-  const base = s.type === "material_event_refresh" ? (versions.find((v) => v.is_current) ?? fullDone ?? versions[0] ?? null) : (versions.find((v) => v.is_current) ?? versions[0] ?? null);
-  if (s.type === "material_event_refresh" && !base) throw new Error("There is no earlier research to refresh; run a full investigation first");
+  // An update builds on the research you approved, or else the latest finished investigation; never on a quick screen.
+  const base = s.type === "material_event_refresh" ? (updateFoundation(versions)?.v ?? null) : (versions.find((v) => v.is_current) ?? versions[0] ?? null);
+  if (s.type === "material_event_refresh" && !base) throw new Error("There is no finished investigation to update; run a full investigation first");
   if (base) {
     const c = base.conclusion ?? {};
     const val = (c.valuation ?? {}) as Record<string, unknown>;

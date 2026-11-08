@@ -7,11 +7,12 @@
 import type { Filing } from "@/lib/market/sec";
 import { REPRICE_LIMIT, type ParsedConclusion } from "./valuation";
 
-export const REFRESH_RULES_VERSION = "refresh@1";
+export const REFRESH_RULES_VERSION = "refresh@2";
 
 export type RefreshLevel = "current" | "targeted_refresh" | "full_reassessment";
 export type Trigger = { rule: string; level: Exclude<RefreshLevel, "current">; evidence: string; scope: string[] };
-export type RefreshDecision = { level: RefreshLevel; triggers: Trigger[]; notChecked: string[]; rulesVersion: string };
+/** priceMove: a price change on its own is re-priced for free and never calls for paid research (refresh@2). */
+export type RefreshDecision = { level: RefreshLevel; triggers: Trigger[]; notChecked: string[]; rulesVersion: string; priceMove?: string | null };
 
 /** Big moves (in either direction) beyond this mean the scenario probabilities themselves are in question. */
 export const FULL_REASSESS_DRIFT = 0.35;
@@ -31,6 +32,7 @@ export function decideRefresh(args: {
   const t: Trigger[] = [];
   const notChecked: string[] = [];
   const reviewed = new Set(args.reviewedAccessions ?? []);
+  let priceMove: string | null = null;
 
   if (args.completeness !== "complete") t.push({ rule: "R1 incomplete research", level: "targeted_refresh", evidence: `Stored research is ${args.completeness}`, scope: ["missing phases"] });
 
@@ -53,12 +55,13 @@ export function decideRefresh(args: {
   else {
     const drift = args.price / c.referencePrice - 1;
     const pct = `${Math.round(Math.abs(drift) * 100)}% ${drift < 0 ? "below" : "above"} the $${c.referencePrice} reference${c.referenceDate ? ` of ${c.referenceDate}` : ""} (price $${args.price}${args.priceAsOf ? ` as of ${args.priceAsOf.slice(0, 10)}` : ""})`;
-    if (Math.abs(drift) > FULL_REASSESS_DRIFT) t.push({ rule: "R6 very large price move", level: "full_reassessment", evidence: pct, scope: ["scenario probabilities", "scenario values", "thesis", "price bands"] });
-    else if (Math.abs(drift) > REPRICE_LIMIT) t.push({ rule: "R7 large price move", level: "targeted_refresh", evidence: pct, scope: ["what drove the move", "scenario values"] });
+    // R6/R7 (refresh@2): a price move alone is re-priced from the saved scenarios at no AI cost. It is
+    // reported, not a trigger; only a price outside the scenarios (R8) questions the research itself.
+    if (Math.abs(drift) > REPRICE_LIMIT) priceMove = `${Math.abs(drift) > FULL_REASSESS_DRIFT ? "Very large" : "Large"} price move: ${pct}. Re-priced from the saved scenarios at no AI cost; paid research only if filings or events explain it.`;
     const values = c.scenarios.map((s) => s.value).filter((v) => v > 0);
     if (values.length && (args.price < Math.min(...values) || args.price > Math.max(...values))) t.push({ rule: "R8 price outside scenarios", level: "full_reassessment", evidence: `Price $${args.price} is outside the bear-to-bull range $${Math.min(...values)}–$${Math.max(...values)}`, scope: ["scenario set"] });
   }
 
   const level: RefreshLevel = t.some((x) => x.level === "full_reassessment") ? "full_reassessment" : t.length ? "targeted_refresh" : "current";
-  return { level, triggers: t, notChecked, rulesVersion: REFRESH_RULES_VERSION };
+  return { level, triggers: t, notChecked, rulesVersion: REFRESH_RULES_VERSION, priceMove };
 }

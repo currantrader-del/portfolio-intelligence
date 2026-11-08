@@ -33,6 +33,7 @@ export function FilingCheckCard({ symbol, run }: { symbol: string; run: StoredFi
               <ul className="flex flex-col gap-1 t-sm list-disc pl-5">{material.map((f) => <li key={f.key}>{f.text} <span className="t-xs">· {f.kind}</span></li>)}</ul>
             </div>
           )}
+          {c.refresh.priceMove && <p className="t-sm">{c.refresh.priceMove}</p>}
           {c.refresh.triggers.length > 0 && (
             <div className="flex flex-col gap-1">
               <span className="t-xs">Refresh rules that fired</span>

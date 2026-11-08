@@ -63,9 +63,10 @@ describe("buildFilingCheck on IREN's Q1 FY27 10-Q", () => {
   });
   it("concludes WAIT / REVIEW, citing the refresh rules that fired", () => {
     expect(c.status).toBe("WAIT / REVIEW");
-    expect(c.refresh.level).toBe("full_reassessment");
-    expect(c.refresh.triggers.map((t) => t.rule)).toEqual(expect.arrayContaining(["R3 new financial report", "R6 very large price move"]));
-    expect(c.statusReason).toMatch(/full reassessment/);
+    expect(c.refresh.level).toBe("targeted_refresh");
+    expect(c.refresh.triggers.map((t) => t.rule)).toEqual(expect.arrayContaining(["R3 new financial report"]));
+    expect(c.refresh.priceMove).toMatch(/price move/);
+    expect(c.statusReason).toMatch(/targeted refresh/);
   });
   it("cites every source it used", () => {
     expect(c.sources.map((s) => s.url)).toEqual([base.filingsUrl, doc.indexUrl, doc.instanceUrl]);

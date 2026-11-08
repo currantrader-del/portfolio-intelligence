@@ -133,3 +133,17 @@ export function researchStanding(versions: V[], now: Date = new Date()): Standin
   else decisions = "Decisions use the research in use.";
   return { inUse, authoritative, pending, history, decisions };
 }
+
+/**
+ * What an update builds on: the research you approved, or else the latest finished investigation (which,
+ * like anything built on it, still waits for your approval). A quick screen or imported note is never a
+ * foundation: the answer is null, and only a full investigation makes sense.
+ */
+export function updateFoundation<T extends V>(versions: T[], now: Date = new Date()): { v: T; authority: Authority } | null {
+  const sorted = [...versions].sort((a, b) => String(b.created_at ?? b.research_as_of).localeCompare(String(a.created_at ?? a.research_as_of)));
+  const isInv = (v: T) => { const t = conc(v).research_type; return t === "full_investigation" || t === "material_event_refresh"; };
+  const approved = sorted.find((v) => v.is_current && isAuthoritative(authorityOf(v, now)));
+  if (approved) return { v: approved, authority: authorityOf(approved, now) };
+  const inv = sorted.find((v) => isInv(v) && ["awaiting_approval", "approved_full", "approved_provisional"].includes(authorityOf(v, now)));
+  return inv ? { v: inv, authority: authorityOf(inv, now) } : null;
+}

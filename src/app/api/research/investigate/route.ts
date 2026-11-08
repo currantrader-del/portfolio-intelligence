@@ -8,6 +8,8 @@
 import { createClient } from "@/lib/supabase/server";
 import { dispatchJob } from "@/lib/intel/jobs";
 import { DAILY_CAP, spentToday } from "@/lib/intel/start";
+import { updateFoundation } from "@/lib/research/standing";
+import type { VersionRow } from "@/lib/research/records";
 import { isEtf } from "@/lib/portfolio/classify";
 import { investigationStatus, resumeIfStalled, startInvestigation } from "@/lib/research/investigate/run";
 
@@ -36,13 +38,13 @@ export async function POST(req: Request) {
   }
   if (st.status === "running") return Response.json({ error: "Research on this company is already running." }, { status: 409 });
   const type = body?.type === "refresh" ? "material_event_refresh" : "full_investigation";
-  const { data: company } = await db.from("companies").select("id, research_versions(id)").eq("symbol", symbol).maybeSingle();
+  const { data: company } = await db.from("companies").select("id, research_versions(id, research_as_of, created_at, completeness, origin, is_current, conclusion)").eq("symbol", symbol).maybeSingle();
   if (!company) {
     const at = new Date().toISOString();
     const { error } = await db.from("companies").insert({ symbol, name: null, watchlist_status: "watch", pipeline_stage: "idea", pipeline_note: null, stage_updated_at: at, stage_history: [{ stage: "idea", at, note: "Added for research" }] });
     if (error) return Response.json({ error: `Could not add ${symbol}: ${error.message}` }, { status: 500 });
   }
-  if (type === "material_event_refresh" && !(company?.research_versions ?? []).length) return Response.json({ error: "There is no earlier research to refresh. Run a full investigation first." }, { status: 400 });
+  if (type === "material_event_refresh" && !updateFoundation((company?.research_versions ?? []) as VersionRow[])) return Response.json({ error: "There is no finished investigation to update yet (a quick screen is not enough). Run a full investigation first." }, { status: 400 });
   const spent = await spentToday(db);
   if (spent.answers >= DAILY_CAP.answers || spent.total >= DAILY_CAP.total) return Response.json({ error: `Today's cost limit is reached ($${spent.total.toFixed(2)} spent). It resets at midnight UTC.` }, { status: 429 });
   try {
