@@ -10,13 +10,14 @@ import { isStage, screenCompany, STAGES } from "@/lib/research/screen";
 import { buildWorkspace } from "@/lib/workspace";
 import { runFilingCheck } from "@/lib/research/runFilingCheck";
 import { FILING_CHECK_VERSION } from "@/lib/research/filingCheck";
+import { fail, type ActionResult } from "@/lib/action-result";
 
 const cleanSymbol = (v: FormDataEntryValue | null) => String(v ?? "").trim().toUpperCase().replace(/[^A-Z0-9.\-]/g, "").slice(0, 10);
 
 /** Adds a ticker to the pipeline as an idea. Existing companies are left as they are. */
-export async function addToPipeline(formData: FormData) {
+export async function addToPipeline(formData: FormData): Promise<ActionResult> {
   const symbol = cleanSymbol(formData.get("symbol"));
-  if (!symbol) redirect("/research?error=symbol");
+  if (!symbol) return fail("Enter a ticker, for example MSFT.");
   const db = await createClient();
   const { data: existing } = await db.from("companies").select("symbol").eq("symbol", symbol).maybeSingle();
   if (!existing) {
@@ -36,17 +37,17 @@ export async function addToPipeline(formData: FormData) {
  * Moves a company to another stage and appends to its history. Passing needs a reason, and
  * "Ready for decision" needs complete research marked current.
  */
-export async function setStage(formData: FormData) {
+export async function setStage(formData: FormData): Promise<ActionResult> {
   const symbol = cleanSymbol(formData.get("symbol"));
   const stage = String(formData.get("stage") ?? "");
   const note = String(formData.get("note") ?? "").trim().slice(0, 500);
-  if (!isStage(stage)) throw new Error("Unknown stage");
-  if (stage === "passed" && !note) redirect(`/research/${symbol}?error=reason`);
+  if (!isStage(stage)) return fail("Choose a stage.");
+  if (stage === "passed" && !note) return fail("Add a short reason before passing on a company.");
   const db = await createClient();
   const { data: c } = await db.from("companies").select("id, stage_history, research_versions(completeness, is_current)").eq("symbol", symbol).single();
-  if (!c) throw new Error("Company not found");
+  if (!c) return fail(`${symbol} isn't in your list yet. Add it first.`);
   if (stage === "ready" && !(c.research_versions ?? []).some((v: { completeness: string; is_current: boolean }) => v.is_current && v.completeness === "complete")) {
-    redirect(`/research/${symbol}?error=ready`);
+    return fail("Ready for decision needs complete research marked current. Refresh or finish the research first.");
   }
   const at = new Date().toISOString();
   const label = STAGES.find((s) => s.key === stage)!.label;
@@ -59,13 +60,13 @@ export async function setStage(formData: FormData) {
 }
 
 /** Runs the deterministic screen and stores the dated result on the company. An idea moves to Screening. */
-export async function runScreen(formData: FormData) {
+export async function runScreen(formData: FormData): Promise<ActionResult> {
   const symbol = cleanSymbol(formData.get("symbol"));
   const [fundamentals, filings, quote] = await Promise.all([getFundamentals(symbol), getFilings(symbol), getQuote(symbol)]);
   const result = screenCompany({ symbol, fundamentals, filings: "error" in filings ? null : filings, price: quote?.price ?? null, priceAsOf: quote?.asOf ?? null });
   const db = await createClient();
   const { data: c } = await db.from("companies").select("id, name, pipeline_stage, stage_history").eq("symbol", symbol).single();
-  if (!c) throw new Error("Company not found");
+  if (!c) return fail(`${symbol} isn't in your list yet. Add it first.`);
   const update: Record<string, unknown> = { screen: result, screened_at: result.computedAt };
   if (!c.name && !("error" in fundamentals) && fundamentals.company) update.name = fundamentals.company;
   if (c.pipeline_stage === "idea") {
@@ -84,12 +85,12 @@ export async function runScreen(formData: FormData) {
  * Reads the newest 10-Q/10-K filed after the stored research from SEC EDGAR, compares it with that
  * research and stores the dated result (inputs, hash and output) in model_runs. Never writes research.
  */
-export async function checkLatestFiling(formData: FormData) {
+export async function checkLatestFiling(formData: FormData): Promise<ActionResult> {
   const symbol = cleanSymbol(formData.get("symbol"));
   const db = await createClient();
   const ws = await buildWorkspace(db);
   const record = ws.research.find((r) => r.symbol === symbol);
-  if (!record || !(record.current ?? record.latest)) redirect(`/research/${symbol}?error=nofiling`);
+  if (!record || !(record.current ?? record.latest)) return fail("There is no stored research to check a filing against.");
   const q = ws.quotes.get(symbol);
   const h = ws.portfolio.holdings.find((x) => x.symbol === symbol);
   const price = q?.price ?? h?.price ?? null;

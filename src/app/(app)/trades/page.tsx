@@ -1,3 +1,4 @@
+import { ActionForm, SubmitButton } from "@/components/forms";
 import Link from "next/link";
 import { createClient } from "@/lib/supabase/server";
 import { Card, CardHead, Disclose, Metric, Pill } from "@/components/ui";
@@ -50,13 +51,13 @@ function TradeRow({ t, r }: { t: Trade; r: Result }) {
             <p className="t-xs">You took this trade {shortDate(t.taken.at)}{t.taken.price ? ` at $${t.taken.price}` : ""}{t.taken.quantity ? `, ${t.taken.quantity} ${i.option ? "contracts" : "shares"}` : ""}{t.taken.note ? `. ${t.taken.note}` : ""}.</p>
           ) : r.status === "open" && (
             <Disclose summary={<span className="t-sm">I took this trade</span>}>
-              <form action={markTaken} className="flex flex-wrap items-end gap-2">
+              <ActionForm action={markTaken} success="Trade noted" className="flex flex-wrap items-end gap-2">
                 <input type="hidden" name="idea_id" value={t.id} />
-                <label className="flex flex-col t-xs">Price paid<input name="price" inputMode="decimal" className="min-h-10 w-28 rounded-[10px] bg-surface-2 border border-line px-2 text-[15px]" /></label>
-                <label className="flex flex-col t-xs">{i.option ? "Contracts" : "Shares"}<input name="quantity" inputMode="decimal" className="min-h-10 w-24 rounded-[10px] bg-surface-2 border border-line px-2 text-[15px]" /></label>
-                <label className="flex flex-col t-xs grow">Note<input name="note" maxLength={300} className="min-h-10 w-full rounded-[10px] bg-surface-2 border border-line px-2 text-[15px]" /></label>
-                <button className="btn btn-sm">Save</button>
-              </form>
+                <label className="flex flex-col t-xs">Price paid<input name="price" inputMode="decimal" className="min-h-11 w-28 rounded-[10px] bg-surface-2 border border-line px-2 text-[15px]" /></label>
+                <label className="flex flex-col t-xs">{i.option ? "Contracts" : "Shares"}<input name="quantity" inputMode="decimal" className="min-h-11 w-24 rounded-[10px] bg-surface-2 border border-line px-2 text-[15px]" /></label>
+                <label className="flex flex-col t-xs grow">Note<input name="note" maxLength={300} className="min-h-11 w-full rounded-[10px] bg-surface-2 border border-line px-2 text-[15px]" /></label>
+                <SubmitButton className="btn btn-sm">Save</SubmitButton>
+              </ActionForm>
             </Disclose>
           )}
         </div>

@@ -1,3 +1,4 @@
+import { ActionForm, SubmitButton } from "@/components/forms";
 import { getWorkspace } from "@/lib/workspace";
 import { isEtf } from "@/lib/portfolio/classify";
 import { coverage } from "@/lib/research/status";
@@ -61,11 +62,11 @@ export default async function ResearchPage({ searchParams }: { searchParams: Pro
         <div className="lg:col-span-4 lg:col-start-9 flex flex-col gap-3 lg:gap-4">
           <Card tight className="!gap-0 !py-0.5">
             <Disclose summary={<span className="text-ink font-semibold">+ Add an idea</span>}>
-              <form action={addToPipeline} className="flex flex-col gap-2.5">
+              <ActionForm action={addToPipeline} success="Idea added" className="flex flex-col gap-2.5">
                 <label className="field">Ticker<input name="symbol" required maxLength={10} placeholder="e.g. MSFT" className="input uppercase num" autoCapitalize="characters" /></label>
                 <label className="field">Why it is interesting (optional)<input name="note" maxLength={300} className="input" /></label>
-                <button className="btn btn-primary">Add idea</button>
-              </form>
+                <SubmitButton className="btn btn-primary" pendingText="Adding…">Add idea</SubmitButton>
+              </ActionForm>
             </Disclose>
           </Card>
           <p className="t-xs px-1">Owned positions come first. The screen uses SEC data to decide what is worth researching; it never makes a buy call. Every conclusion keeps its date and source.</p>

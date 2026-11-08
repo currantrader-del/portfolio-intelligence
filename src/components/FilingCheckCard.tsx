@@ -1,3 +1,4 @@
+import { ActionForm, SubmitButton } from "@/components/forms";
 import { checkLatestFiling } from "@/app/(app)/research/actions";
 import type { FilingCheck } from "@/lib/research/filingCheck";
 import { shortDate } from "@/lib/format";
@@ -75,10 +76,10 @@ export function FilingCheckCard({ symbol, run }: { symbol: string; run: StoredFi
           <p className="t-xs">This is a check of reported figures against your research, not a new valuation. Stored as run {run.id.slice(0, 8)}.</p>
         </>
       )}
-      <form action={checkLatestFiling}>
+      <ActionForm action={checkLatestFiling} success="Filing checked" className="flex flex-col gap-2">
         <input type="hidden" name="symbol" value={symbol} />
-        <button className="btn self-start">{c ? "Check again" : "Check latest SEC filing"}</button>
-      </form>
+        <SubmitButton className="btn self-start" pendingText="Reading the filing… (up to a minute)">{c ? "Check again" : "Check latest SEC filing"}</SubmitButton>
+      </ActionForm>
     </Card>
   );
 }

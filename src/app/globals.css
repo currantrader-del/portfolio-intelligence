@@ -83,6 +83,8 @@ a:hover { text-decoration-color: currentColor; }
 @media (max-width: 640px) {
   input, select, textarea { font-size: 16px; }
 }
+/* Taps: no double-tap-to-zoom wait on controls, and no accidental zoom from quick repeated taps. */
+a, button, summary, label, select, input, textarea, [role="button"] { touch-action: manipulation; }
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { animation-duration: 0.01ms !important; transition-duration: 0.01ms !important; }
 }
@@ -136,6 +138,13 @@ a:hover { text-decoration-color: currentColor; }
   .btn-primary { background: var(--ink); color: var(--ground); border-color: var(--ink); }
   .btn-primary:hover { background: #ffffff; }
   .btn-ghost { background: transparent; border-color: transparent; }
+  /* Pressed: every tap shows at once, before any network work starts. */
+  .btn { transition: background-color 120ms ease, border-color 120ms ease, transform 90ms ease, opacity 120ms ease; -webkit-user-select: none; user-select: none; }
+  .btn:not(:disabled):active { transform: scale(0.97); background: var(--line-strong); border-color: var(--muted); }
+  .btn-primary:not(:disabled):active { background: #cfd2d7; border-color: #cfd2d7; }
+  .btn-ghost:not(:disabled):active { background: var(--surface-2); }
+  /* Working: stays readable (not faded like a disabled button) and says what it is doing. */
+  .btn.is-pending, .btn[aria-busy="true"] { opacity: 0.85; cursor: progress; }
   .btn-sm { min-height: 36px; padding: 0 12px; font-size: 13px; border-radius: 10px; }
   .input { min-height: 44px; border-radius: var(--r-ctl); border: 1px solid var(--line-strong); background: var(--ground); color: var(--ink); padding: 0 12px; font: inherit; width: 100%; min-width: 0; }
   textarea.input { padding: 10px 12px; }
@@ -148,19 +157,28 @@ a:hover { text-decoration-color: currentColor; }
   .chips::-webkit-scrollbar { display: none; }
   .chip { min-height: 36px; padding: 0 14px; border-radius: 999px; border: 1px solid var(--line-strong); display: inline-flex; align-items: center; gap: 6px; font-size: 13px; color: var(--ink-2); white-space: nowrap; text-decoration: none; background: transparent; flex: none; cursor: pointer; }
   .chip[aria-current="page"], .chip[aria-pressed="true"] { background: var(--ink); color: var(--ground); border-color: var(--ink); }
+  .chip { transition: background-color 120ms ease, transform 90ms ease; }
+  .chip:active { background: var(--surface-2); transform: scale(0.97); }
+  .chip[aria-current="page"]:active { background: #cfd2d7; }
+  .seg > a, .seg > button { transition: background-color 120ms ease; }
+  .seg > a:active, .seg > button:active { background: var(--surface); color: var(--ink); }
 
   /* Lists */
   .list { display: flex; flex-direction: column; }
   .li { display: flex; align-items: center; gap: 12px; min-height: 56px; padding: 8px 0; border-top: 1px solid var(--line); text-decoration: none; color: inherit; min-width: 0; }
   .list > .li:first-child, .list > li:first-child > .li { border-top: 0; }
-  a.li:active { opacity: 0.75; }
+  a.li { transition: background-color 120ms ease; border-radius: 10px; }
+  a.li:active { background: var(--surface-2); }
   .tick { width: 36px; height: 36px; border-radius: 10px; background: var(--surface-2); display: flex; align-items: center; justify-content: center; font-size: 12px; font-weight: 600; color: var(--ink-2); flex: none; letter-spacing: 0; }
   .link-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; min-height: 44px; color: var(--ink-2); border-top: 1px solid var(--line); padding-top: 12px; text-decoration: none; }
+  .link-row:active { color: var(--ink); background: var(--surface-2); }
   .chev { width: 16px; height: 16px; color: var(--muted); flex: none; transition: transform 150ms ease; }
 
   /* Progressive disclosure on native <details>: works without JavaScript. */
   .disclose > summary { display: flex; align-items: center; justify-content: space-between; gap: 12px; min-height: 48px; color: var(--ink-2); cursor: pointer; list-style: none; }
   .disclose > summary::-webkit-details-marker { display: none; }
+  .disclose > summary { transition: background-color 120ms ease; border-radius: 10px; -webkit-user-select: none; user-select: none; }
+  .disclose > summary:active { background: var(--surface-2); }
   .disclose[open] > summary .chev { transform: rotate(180deg); }
   .disclose + .disclose { border-top: 1px solid var(--line); }
   .disclose-body { padding-bottom: 14px; display: flex; flex-direction: column; gap: 10px; }
@@ -177,6 +195,41 @@ a:hover { text-decoration-color: currentColor; }
   .tbl .n { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
   .tbl tbody tr:hover td { background: rgba(255, 255, 255, 0.015); }
 
+  /* Navigation items: pressed, and the tab being opened pulses until its page arrives. */
+  .tab-item, .nav-item { transition: color 120ms ease, background-color 120ms ease; }
+  .tab-item:active { color: var(--ink); background: rgba(255, 255, 255, 0.04); }
+  .nav-item:active { background: var(--surface-2); color: var(--ink); }
+  .tab-item.is-loading svg, .nav-item.is-loading svg { animation: pulse-soft 0.9s ease-in-out infinite; }
+
+  /* Phones and tablets: every tap target at least 44px tall (Apple's minimum). */
+  @media (pointer: coarse) {
+    .btn-sm { min-height: 44px; }
+    .chip { min-height: 44px; }
+    .seg > a, .seg > button { min-height: 44px; }
+    .disclose > summary { min-height: 48px; }
+  }
+
+  /* Spinner for buttons that are working. */
+  .spin { width: 15px; height: 15px; border-radius: 50%; border: 2px solid currentColor; border-right-color: transparent; display: inline-block; flex: none; animation: spin 0.7s linear infinite; }
+
+  /* Form result under a form: success or a plain-language failure. */
+  .form-note { display: flex; align-items: flex-start; gap: 8px; font-size: 13px; line-height: 1.4; border-radius: 12px; padding: 8px 12px; animation: fade 150ms ease; }
+  .form-note > svg { margin-top: 1px; }
+  .form-note-ok { background: var(--gain-soft); color: var(--gain); }
+  .form-note-error { background: var(--warn-bg); color: var(--warn-ink); }
+
+  /* Toast: confirms a finished action above the tab bar. */
+  .toast-wrap { position: fixed; z-index: 60; left: 0; right: 0; bottom: calc(var(--tabbar-h) + env(safe-area-inset-bottom) + 76px); display: flex; justify-content: center; pointer-events: none; padding: 0 16px; }
+  @media (min-width: 1024px) { .toast-wrap { bottom: 88px; } }
+  .toast { pointer-events: auto; display: flex; align-items: center; gap: 8px; max-width: 420px; min-height: 44px; padding: 10px 16px; border-radius: 999px; background: var(--ink); color: var(--ground); font-size: 14px; font-weight: 600; box-shadow: 0 10px 30px rgba(0, 0, 0, 0.55); animation: toast-in 180ms ease-out; }
+  .toast-error { background: var(--warn-bg); color: var(--warn-ink); border: 1px solid var(--warn-ink); border-radius: 16px; }
+
+  /* Top-of-screen progress bar while a page loads. */
+  .nav-progress { position: fixed; z-index: 70; left: 0; right: 0; top: env(safe-area-inset-top); height: 3px; pointer-events: none; opacity: 0; transition: opacity 200ms ease 60ms; }
+  .nav-progress > i { position: absolute; inset: 0; background: var(--accent); transform-origin: left; transform: scaleX(0); box-shadow: 0 0 8px var(--accent); }
+  .nav-progress.is-on { opacity: 1; transition: none; }
+  .nav-progress.is-on > i { animation: nav-load 8s cubic-bezier(0.1, 0.7, 0.2, 1) forwards; }
+
   /* Loading placeholders */
   .skel { background: linear-gradient(90deg, var(--surface-2) 0%, #22252a 50%, var(--surface-2) 100%); background-size: 200% 100%; animation: skel 1.4s ease-in-out infinite; border-radius: 8px; }
   @keyframes skel { from { background-position: 200% 0; } to { background-position: -200% 0; } }
@@ -186,6 +239,10 @@ a:hover { text-decoration-color: currentColor; }
 .loss, .text-loss { color: var(--loss); }
 .warn { color: var(--warn-ink); }
 
+@keyframes spin { to { transform: rotate(360deg); } }
+@keyframes pulse-soft { 0%, 100% { opacity: 1; } 50% { opacity: 0.35; } }
+@keyframes nav-load { 0% { transform: scaleX(0); } 10% { transform: scaleX(0.3); } 100% { transform: scaleX(0.92); } }
+@keyframes toast-in { from { transform: translateY(8px); opacity: 0; } to { transform: none; opacity: 1; } }
 @keyframes fade { from { opacity: 0; } to { opacity: 1; } }
 @keyframes rise { from { transform: translateY(24px); opacity: 0.6; } to { transform: none; opacity: 1; } }
 @keyframes slide { from { transform: translateX(24px); opacity: 0.6; } to { transform: none; opacity: 1; } }

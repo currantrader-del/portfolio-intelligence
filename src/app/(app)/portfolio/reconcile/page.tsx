@@ -1,3 +1,4 @@
+import { ActionForm, SubmitButton } from "@/components/forms";
 import Link from "next/link";
 import { getWorkspace } from "@/lib/workspace";
 import { createClient } from "@/lib/supabase/server";
@@ -6,7 +7,7 @@ import { shortDate, usd } from "@/lib/format";
 import { recordTransaction, saveSavings } from "../actions";
 
 const ROLE = { taxable_brokerage: "Taxable", retirement: "Retirement (Roth IRA)", cash: "Savings", protected_savings: "Savings" } as Record<string, string>;
-const input = "rounded-lg border border-line-strong bg-ground px-3 min-h-10";
+const input = "rounded-lg border border-line-strong bg-ground px-3 min-h-11";
 
 export default async function ReconcilePage({ searchParams }: { searchParams: Promise<{ saved?: string }> }) {
   const sp = await searchParams;
@@ -51,18 +52,18 @@ export default async function ReconcilePage({ searchParams }: { searchParams: Pr
           <div><dt className="text-muted">Protected reserve</dt><dd className="font-mono">{usd(c.protectedReserve)}</dd><dd className="text-xs text-muted">excluded from sizing{c.reserveShortfall > 0 && c.savings !== null ? ` · short ${usd(c.reserveShortfall)}` : ""}</dd></div>
           <div><dt className="text-muted">Deployable</dt><dd className="font-mono">{usd(c.deployable)}</dd><dd className="text-xs text-muted">brokerage + savings above reserve</dd></div>
         </dl>
-        <form action={saveSavings} className="flex flex-wrap gap-2 items-end">
+        <ActionForm action={saveSavings} success="Balance saved" className="flex flex-wrap gap-2 items-end">
           <label className="text-sm flex flex-col gap-1">Account name<input name="name" defaultValue="Savings" className={input} /></label>
           <label className="text-sm flex flex-col gap-1">Balance<input name="balance" required inputMode="decimal" placeholder="$" className={`${input} w-32 font-mono`} /></label>
           <label className="text-sm flex flex-col gap-1">As of<input name="as_of" type="date" required defaultValue={today} className={input} /></label>
-          <button className="min-h-10 px-4 rounded-lg bg-ink text-ground font-medium">Save balance</button>
-        </form>
+          <SubmitButton className="btn btn-primary">Save balance</SubmitButton>
+        </ActionForm>
         <p className="text-xs text-muted">The app does not carry over savings figures from old research chats; enter today&apos;s balance.</p>
       </section>
 
       <section aria-labelledby="tx-h" className="bg-surface border border-line rounded-2xl p-5 flex flex-col gap-3">
         <h2 id="tx-h" className="font-semibold">Record a trade or cash movement</h2>
-        <form action={recordTransaction} className="grid gap-2 grid-cols-2 sm:grid-cols-4">
+        <ActionForm action={recordTransaction} success="Recorded" className="grid gap-2 grid-cols-2 sm:grid-cols-4">
           <label className="text-sm flex flex-col gap-1 col-span-2">Account
             <select name="account_id" required className={input}>{brokers.map((a) => <option key={a.id} value={a.id}>{a.name}</option>)}</select>
           </label>
@@ -77,8 +78,8 @@ export default async function ReconcilePage({ searchParams }: { searchParams: Pr
           <label className="text-sm flex flex-col gap-1">Price<input name="price" inputMode="decimal" className={`${input} font-mono`} /></label>
           <label className="text-sm flex flex-col gap-1">Amount<input name="amount" inputMode="decimal" placeholder="cash moves" className={`${input} font-mono`} /></label>
           <label className="text-sm flex flex-col gap-1 col-span-2 sm:col-span-3">Note<input name="note" className={input} /></label>
-          <button className="min-h-10 px-4 rounded-lg bg-ink text-ground font-medium self-end">Record</button>
-        </form>
+          <SubmitButton className="btn btn-primary self-end" pendingText="Recording…">Record</SubmitButton>
+        </ActionForm>
         <p className="text-xs text-muted">Trades need symbol, shares and price; the cash effect is calculated. Recording here never places a trade.</p>
         {(txns ?? []).length > 0 && (
           <ul className="flex flex-col divide-y divide-line text-sm">

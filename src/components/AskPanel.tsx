@@ -4,9 +4,11 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { usePathname } from "next/navigation";
 import { Markdown } from "./Markdown";
 import { titleOf } from "./shell/nav";
+import { Spinner } from "./forms";
+import { requestJSON } from "@/lib/client/request";
 
 type Evidence = { name: string; input: unknown; ok: boolean; preview: string };
-type Msg = { role: "user" | "assistant"; content: string; model?: string; evidence?: Evidence[]; error?: boolean; meta?: string };
+type Msg = { role: "user" | "assistant"; content: string; model?: string; evidence?: Evidence[]; error?: boolean; meta?: string; retry?: string };
 
 const SUGGESTIONS: [RegExp, string[]][] = [
   [/^\/research\/[^/]+/, ["What would change the call?", "Is the research still current?", "What are the biggest risks?"]],
@@ -42,6 +44,10 @@ export function AskPanel() {
   const [input, setInput] = useState("");
   const [busy, setBusy] = useState<string | null>(null);
   const [deep, setDeep] = useState(false);
+  const [unread, setUnread] = useState(false); // an answer arrived while the panel was closed
+  const asking = useRef(false);
+  const openRef = useRef(open);
+  openRef.current = open;
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const fabRef = useRef<HTMLButtonElement>(null);
   const endRef = useRef<HTMLDivElement>(null);
@@ -59,6 +65,7 @@ export function AskPanel() {
   }, [msgs]);
 
   const close = useCallback(() => { setOpen(false); fabRef.current?.focus(); }, []);
+  useEffect(() => { if (open) setUnread(false); }, [open]);
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -90,45 +97,58 @@ export function AskPanel() {
     t.style.height = `${Math.min(140, t.scrollHeight)}px`;
   }, [input, open]);
 
-  async function ask(q: string) {
+  async function ask(q: string, history: Msg[] = msgs) {
     const question = q.trim();
-    if (!question || busy) return;
-    const next: Msg[] = [...msgs, { role: "user", content: question }];
+    if (!question || asking.current) return; // a second tap while one question is running does nothing
+    asking.current = true;
+    const next: Msg[] = [...history, { role: "user", content: question }];
     setMsgs(next);
     setInput("");
-    setBusy("Thinking");
+    setBusy("Sending");
+    const settle = (m: Msg) => { setMsgs([...next, m]); if (!openRef.current) setUnread(true); };
     try {
-      const res = await fetch("/api/ask", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ messages: next.filter((m) => !m.error).map(({ role, content }) => ({ role, content })), page: path, symbol, deep }),
+      const r = await requestJSON<{ requestId?: string }>("/api/ask", {
+        json: { messages: next.filter((m) => !m.error).map(({ role, content }) => ({ role, content })), page: path, symbol, deep },
       });
-      const j = await res.json().catch(() => ({}));
-      if (!res.ok || !j.requestId) {
-        setMsgs([...next, { role: "assistant", content: j.error ?? "The assistant is unavailable right now.", error: true }]);
+      const j = r.data;
+      if (!r.ok || !j.requestId) {
+        // Nothing started: put the question back in the box so it doesn't have to be typed again.
+        setInput((cur) => cur || question);
+        settle({ role: "assistant", content: r.ok ? "The assistant didn't start. Try again." : r.error, error: true, retry: question });
         return;
       }
+      setBusy("Thinking");
       // The answer is researched in the background (it can take a minute or two); poll for it.
       const t0 = Date.now();
       for (;;) {
         await new Promise((r) => setTimeout(r, 3000));
         const secs = Math.round((Date.now() - t0) / 1000);
         setBusy(`Researching · ${secs}s`);
-        const st = await fetch(`/api/ask?id=${encodeURIComponent(j.requestId)}`, { cache: "no-store" }).then((r) => r.json()).catch(() => null);
+        const st = await fetch(`/api/ask?id=${encodeURIComponent(j.requestId)}`, { cache: "no-store" }).then((x) => x.json()).catch(() => null);
         if (st?.status === "done") {
           const a = st.answer;
-          if (a.error) { setMsgs([...next, { role: "assistant", content: `Something went wrong answering that (${a.error}).`, error: true }]); break; }
+          if (a.error) { settle({ role: "assistant", content: `Something went wrong answering that (${a.error}).`, error: true, retry: question }); break; }
           const evidence: Evidence[] = (a.steps ?? []).map((x: { tool: string; input: unknown; ok: boolean; preview: string }) => ({ name: x.tool, input: x.input, ok: x.ok, preview: x.preview }));
-          setMsgs([...next, { role: "assistant", content: a.answer, model: String(a.model ?? ""), evidence, meta: `${Math.round(a.ms / 1000)}s · $${Number(a.costUsd).toFixed(2)}${a.searches ? ` · ${a.searches} web searches` : ""}` }]);
+          settle({ role: "assistant", content: a.answer, model: String(a.model ?? ""), evidence, meta: `${Math.round(a.ms / 1000)}s · $${Number(a.costUsd).toFixed(2)}${a.searches ? ` · ${a.searches} web searches` : ""}` });
           break;
         }
-        if (Date.now() - t0 > 10 * 60000) { setMsgs([...next, { role: "assistant", content: "This is taking longer than 10 minutes. The answer will be saved when it finishes.", error: true }]); break; }
+        if (Date.now() - t0 > 10 * 60000) { settle({ role: "assistant", content: "This is taking longer than 10 minutes. The answer will be saved when it finishes.", error: true }); break; }
       }
     } catch {
-      setMsgs([...next, { role: "assistant", content: "Network error. Try again.", error: true }]);
+      settle({ role: "assistant", content: "The connection dropped while waiting for the answer. Try again.", error: true, retry: question });
     } finally {
+      asking.current = false;
       setBusy(null);
     }
+  }
+
+  /** Ask the same question again, replacing the failed attempt. */
+  function retry(i: number) {
+    const q = msgs[i]?.retry;
+    if (!q) return;
+    const before = msgs.slice(0, i);
+    const history = before[before.length - 1]?.role === "user" ? before.slice(0, -1) : before;
+    void ask(q, history);
   }
 
   const suggestions = SUGGESTIONS.find(([re]) => re.test(path))?.[1] ?? SUGGESTIONS[SUGGESTIONS.length - 1][1];
@@ -138,9 +158,10 @@ export function AskPanel() {
     <>
       {!open && (
         <button ref={fabRef} type="button" onClick={() => setOpen(true)} aria-haspopup="dialog" aria-label={symbol ? `Ask about ${symbol}` : "Ask the assistant"}
-          className="fixed z-40 right-4 lg:right-6 bottom-[calc(var(--tabbar-h)+env(safe-area-inset-bottom)+14px)] lg:bottom-6 h-12 px-[18px] rounded-full bg-ink text-ground font-semibold inline-flex items-center gap-2 shadow-[0_8px_24px_rgba(0,0,0,.5)] hover:bg-white active:scale-[0.98] transition-transform">
-          <svg viewBox="0 0 20 20" width="18" height="18" fill="none" stroke="currentColor" strokeWidth="1.7" aria-hidden="true"><path d="M4 15l-1 3 3.5-1.5A7 7 0 1 0 4 15z" /></svg>
-          {symbol ? `Ask about ${symbol}` : "Ask"}
+          className="fixed z-40 right-4 lg:right-6 bottom-[calc(var(--tabbar-h)+env(safe-area-inset-bottom)+14px)] lg:bottom-6 h-12 px-[18px] rounded-full bg-ink text-ground font-semibold inline-flex items-center gap-2 shadow-[0_8px_24px_rgba(0,0,0,.5)] hover:bg-white active:scale-[0.95] active:bg-[#cfd2d7] transition-transform">
+          {busy ? <Spinner /> : <svg viewBox="0 0 20 20" width="18" height="18" fill="none" stroke="currentColor" strokeWidth="1.7" aria-hidden="true"><path d="M4 15l-1 3 3.5-1.5A7 7 0 1 0 4 15z" /></svg>}
+          {busy ? "Answering…" : unread ? "Answer ready" : symbol ? `Ask about ${symbol}` : "Ask"}
+          {unread && !busy && <span className="w-2 h-2 rounded-full bg-[var(--accent)]" aria-hidden="true" />}
           <span className="hidden lg:inline text-xs font-medium opacity-60">⌘J</span>
         </button>
       )}
@@ -155,8 +176,8 @@ export function AskPanel() {
                 <div className="t-xs">Knows this page · conversation kept while you browse</div>
               </div>
               <div className="flex items-center">
-                {msgs.length > 0 && <button type="button" onClick={() => setMsgs([])} className="btn btn-ghost btn-sm">New chat</button>}
-                <button type="button" onClick={close} className="btn btn-ghost btn-sm min-h-10 w-10 px-0" aria-label="Close assistant">
+                {msgs.length > 0 && !busy && <button type="button" onClick={() => setMsgs([])} className="btn btn-ghost btn-sm">New chat</button>}
+                <button type="button" onClick={close} className="btn btn-ghost btn-sm min-h-11 w-11 px-0" aria-label="Close assistant">
                   <svg viewBox="0 0 16 16" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="1.6" aria-hidden="true"><path d="M4 4l8 8M12 4l-8 8" /></svg>
                 </button>
               </div>
@@ -173,6 +194,9 @@ export function AskPanel() {
                 ) : (
                   <div key={i} className="flex flex-col gap-2.5">
                     <div className={`text-[15px] leading-relaxed ${m.error ? "text-warn-ink" : ""}`}><Markdown text={m.content} /></div>
+                    {m.error && m.retry && i === msgs.length - 1 && !busy && (
+                      <button type="button" onClick={() => retry(i)} className="btn btn-sm self-start">Try again</button>
+                    )}
                     {!m.error && (
                       <div className="flex flex-wrap gap-1.5">
                         <span className="src"><i>{m.model?.includes("opus") ? "Deep review" : "Standard"}</i>{m.meta ?? "AI judgment"}</span>
@@ -181,7 +205,7 @@ export function AskPanel() {
                     )}
                     {!!m.evidence?.length && (
                       <details className="disclose">
-                        <summary className="!min-h-9 text-[13px]"><span>Show evidence ({m.evidence.length} tool result{m.evidence.length > 1 ? "s" : ""})</span><svg className="chev" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.6" aria-hidden="true"><path d="M4 6l4 4 4-4" /></svg></summary>
+                        <summary className="!min-h-11 text-[13px]"><span>Show evidence ({m.evidence.length} tool result{m.evidence.length > 1 ? "s" : ""})</span><svg className="chev" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.6" aria-hidden="true"><path d="M4 6l4 4 4-4" /></svg></summary>
                         <ol className="disclose-body text-xs">
                           {m.evidence.map((e, j) => (
                             <li key={j} className="card card-tight bg-surface-2 gap-1">
@@ -204,7 +228,7 @@ export function AskPanel() {
               )}
               {!busy && (
                 <div className="flex flex-wrap gap-2">
-                  {suggestions.map((s) => <button key={s} type="button" onClick={() => ask(s)} className="chip text-left h-auto min-h-9 py-1.5 whitespace-normal">{s}</button>)}
+                  {suggestions.map((s) => <button key={s} type="button" onClick={() => ask(s)} className="chip text-left h-auto min-h-11 py-1.5 whitespace-normal">{s}</button>)}
                 </div>
               )}
               <div ref={endRef} />
@@ -217,11 +241,11 @@ export function AskPanel() {
                   onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); ask(input); } }}
                   placeholder={symbol ? `Ask about ${symbol} or your portfolio` : "Ask about your portfolio"}
                   className="input flex-1 resize-none rounded-[14px] py-[11px] leading-snug" />
-                <button type="submit" disabled={!!busy || !input.trim()} aria-label="Send" className="btn btn-primary w-11 px-0 shrink-0">
-                  <svg viewBox="0 0 16 16" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="1.8" aria-hidden="true"><path d="M8 13V3M4 7l4-4 4 4" /></svg>
+                <button type="submit" disabled={!!busy || !input.trim()} aria-label={busy ? "Answering" : "Send"} aria-busy={!!busy || undefined} className={`btn btn-primary w-11 px-0 shrink-0 ${busy ? "is-pending" : ""}`}>
+                  {busy ? <Spinner /> : <svg viewBox="0 0 16 16" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="1.8" aria-hidden="true"><path d="M8 13V3M4 7l4-4 4 4" /></svg>}
                 </button>
               </div>
-              <label className="t-xs inline-flex items-center gap-2 min-h-8">
+              <label className="t-xs inline-flex items-center gap-2 min-h-11">
                 <input type="checkbox" checked={deep} onChange={(e) => setDeep(e.target.checked)} className="w-[18px] h-[18px] accent-[var(--accent)]" /> Think harder (slower, uses the larger model)
               </label>
             </form>

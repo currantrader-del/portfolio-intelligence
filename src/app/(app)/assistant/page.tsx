@@ -1,3 +1,4 @@
+import Form from "next/form";
 import { createClient } from "@/lib/supabase/server";
 import { Card, CardHead, Disclose, Pill } from "@/components/ui";
 import { AnswerView } from "@/components/AnswerView";
@@ -48,14 +49,14 @@ export default async function QuestionsPage({ searchParams }: { searchParams: Pr
       </div>
 
       {stocks.length > 1 && (
-        <form className="flex flex-wrap items-end gap-2" action="/assistant">
+        <Form className="flex flex-wrap items-end gap-2" action="/assistant">
           <label className="field">Stock for the earnings question
             <select name="ticker" defaultValue={ticker} className="input">
               {stocks.map((s) => <option key={s} value={s}>{s}</option>)}
             </select>
           </label>
           <button className="btn btn-sm">Use this stock</button>
-        </form>
+        </Form>
       )}
 
       {QUICK_QUESTIONS.map((t, i) => <QuickQuestion key={`${i}-${fill(t)}`} slot={i} initial={fill(t)} last={lastFor(i)} />)}

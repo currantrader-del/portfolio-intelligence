@@ -2,6 +2,8 @@
 
 import { useEffect, useRef, useState } from "react";
 import { AnswerView } from "@/components/AnswerView";
+import { Spinner } from "@/components/forms";
+import { requestJSON } from "@/lib/client/request";
 
 export type StoredAnswer = { question: string; answer: string; at: string; ms: number; costUsd: number; searches: number } | null;
 
@@ -16,11 +18,11 @@ export function QuickQuestion({ slot, initial, last }: { slot: number; initial: 
 
   async function ask() {
     const question = q.trim();
-    if (!question) return;
+    if (!question || busy) return;
     setBusy(true); setError(null);
-    const res = await fetch("/api/ask", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ messages: [{ role: "user", content: question }], page: "/assistant", slot }) });
-    const j = (await res.json().catch(() => ({}))) as { requestId?: string; error?: string };
-    if (!res.ok || !j.requestId) { setBusy(false); setError(j.error ?? `HTTP ${res.status}`); return; }
+    const r = await requestJSON<{ requestId?: string }>("/api/ask", { json: { messages: [{ role: "user", content: question }], page: "/assistant", slot } });
+    const j = r.data;
+    if (!r.ok || !j.requestId) { setBusy(false); setError(r.ok ? "The question didn't start. Try again." : r.error); return; }
     const started = Date.now();
     const poll = async () => {
       const r = await fetch(`/api/ask?id=${j.requestId}`, { cache: "no-store" }).then((x) => x.json()).catch(() => null) as { status?: string; answer?: { answer?: string; error?: string; ms?: number; costUsd?: number; searches?: number } } | null;
@@ -43,11 +45,11 @@ export function QuickQuestion({ slot, initial, last }: { slot: number; initial: 
         <textarea id={`quick-q-${slot}`} className="input min-h-[92px] py-2 leading-snug resize-y" value={q} onChange={(e) => setQ(e.target.value)} maxLength={1000} rows={3} />
       </label>
       <div className="flex flex-wrap items-center gap-2">
-        <button type="button" className="btn btn-sm btn-primary" onClick={ask} disabled={busy || !q.trim()}>{busy ? "Thinking… (1–4 min)" : ans ? "Ask again" : "Ask"}</button>
+        <button type="button" className={`btn btn-sm btn-primary ${busy ? "is-pending" : ""}`} onClick={ask} disabled={busy || !q.trim()} aria-busy={busy || undefined}>{busy ? <><Spinner />Thinking… (1–4 min)</> : ans ? "Ask again" : "Ask"}</button>
         {q !== initial && !busy && <button type="button" className="btn btn-sm" onClick={() => setQ(initial)}>Reset</button>}
         {ans && !busy && <span className="t-xs">Last answer {new Date(ans.at).toLocaleString("en-US", { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" })} · {Math.round(ans.ms / 1000)}s · ${ans.costUsd.toFixed(2)}</span>}
       </div>
-      {error && <p role="alert" className="t-sm warn">{error}</p>}
+      {error && <p role="alert" className="form-note form-note-error">{error}</p>}
       {ans && (
         <div className="flex flex-col gap-1 border-t border-line pt-3">
           {ans.question !== q && <span className="t-xs">Answer to: “{ans.question}”</span>}

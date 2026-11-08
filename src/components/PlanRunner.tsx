@@ -2,6 +2,8 @@
 
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
+import { Spinner } from "@/components/forms";
+import { requestJSON } from "@/lib/client/request";
 
 /** Rebuild button for the portfolio plan; refreshes the page until a running rebuild finishes. */
 export function PlanRunner({ running, hasPlan }: { running: boolean; hasPlan: boolean }) {
@@ -17,18 +19,18 @@ export function PlanRunner({ running, hasPlan }: { running: boolean; hasPlan: bo
   useEffect(() => { if (running) setBusy(false); }, [running]);
 
   async function start() {
+    if (active) return;
     setBusy(true); setError(null);
-    const res = await fetch("/api/plan", { method: "POST" });
-    const j = (await res.json().catch(() => ({}))) as { error?: string };
-    if (!res.ok) { setError(j.error ?? `HTTP ${res.status}`); setBusy(false); return; }
+    const r = await requestJSON("/api/plan", { method: "POST" });
+    if (!r.ok) { setError(r.error); setBusy(false); return; }
     router.refresh();
   }
   return (
     <div className="flex flex-wrap items-center gap-2">
-      <button type="button" className={`btn btn-sm ${hasPlan ? "" : "btn-primary"}`} onClick={start} disabled={active}>
-        {active ? "Building the plan… (1–3 min)" : hasPlan ? "Rebuild now" : "Build my plan"}
+      <button type="button" className={`btn btn-sm ${hasPlan ? "" : "btn-primary"} ${active ? "is-pending" : ""}`} onClick={start} disabled={active} aria-busy={active || undefined}>
+        {busy && !running ? <><Spinner />Starting…</> : active ? <><Spinner />Building the plan… (1–3 min)</> : hasPlan ? "Rebuild now" : "Build my plan"}
       </button>
-      {error && <span role="alert" className="t-sm warn">{error}</span>}
+      {error && <span role="alert" className="form-note form-note-error basis-full">{error}</span>}
     </div>
   );
 }

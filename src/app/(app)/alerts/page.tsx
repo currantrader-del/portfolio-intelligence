@@ -1,3 +1,4 @@
+import { ActionForm, SubmitButton } from "@/components/forms";
 import { createClient } from "@/lib/supabase/server";
 import { Card, CardHead, Disclose, Pill } from "@/components/ui";
 import { watchRuns, watchSettings } from "@/lib/watch/job";
@@ -36,7 +37,7 @@ export default async function AlertsPage({ searchParams }: { searchParams: Promi
       <Card labelledBy="al-set" className="!gap-3">
         <CardHead id="al-set" title="Your phone" right={<Pill small tone={s.enabled ? "gain" : "neutral"}>{s.enabled ? "On" : s.topic ? "Paused" : "Off"}</Pill>} />
         {!s.topic ? (
-          <form action={setEnabled}><input type="hidden" name="on" value="1" /><button className="btn btn-primary">Turn on phone alerts</button></form>
+          <ActionForm action={setEnabled} success={null}><input type="hidden" name="on" value="1" /><SubmitButton className="btn btn-primary" pendingText="Turning on…">Turn on phone alerts</SubmitButton></ActionForm>
         ) : (
           <>
             <ol className="list-decimal pl-5 flex flex-col gap-1.5 t-sm text-ink">
@@ -47,11 +48,11 @@ export default async function AlertsPage({ searchParams }: { searchParams: Promi
               <li>Send a test below. If it arrives, you are done.</li>
             </ol>
             <div className="flex flex-wrap gap-2">
-              <form action={test}><button className="btn btn-sm btn-primary">Send a test</button></form>
-              <form action={checkNow}><button className="btn btn-sm">Check now</button></form>
-              <form action={setEnabled}><input type="hidden" name="on" value={s.enabled ? "0" : "1"} /><button className="btn btn-sm">{s.enabled ? "Pause alerts" : "Resume alerts"}</button></form>
+              <ActionForm action={test} success={null}><SubmitButton className="btn btn-sm btn-primary" pendingText="Sending…">Send a test</SubmitButton></ActionForm>
+              <ActionForm action={checkNow} success={null}><SubmitButton className="btn btn-sm" pendingText="Checking…">Check now</SubmitButton></ActionForm>
+              <ActionForm action={setEnabled} success={null}><input type="hidden" name="on" value={s.enabled ? "0" : "1"} /><SubmitButton className="btn btn-sm" pendingText={s.enabled ? "Pausing…" : "Resuming…"}>{s.enabled ? "Pause alerts" : "Resume alerts"}</SubmitButton></ActionForm>
             </div>
-            <form action={resetTopic} className="t-xs">Keep the topic private: anyone who knows it can read these notifications. If it leaks, <button className="underline">make a new topic</button>.</form>
+            <ActionForm action={resetTopic} success={null} className="t-xs">Keep the topic private: anyone who knows it can read these notifications. If it leaks, <SubmitButton className="underline min-h-11 px-1 -mx-1" pendingText="making a new topic…">make a new topic</SubmitButton>.</ActionForm>
           </>
         )}
         {last && <p className="t-xs">Last check {time(last.at)}{last.trigger === "manual" ? " (by you)" : ""}{last.error ? ` · could not send: ${last.error}` : ""}</p>}

@@ -1,3 +1,4 @@
+import { ActionForm, SubmitButton } from "@/components/forms";
 import { Suspense } from "react";
 import Link from "next/link";
 import { ResearchSummary } from "@/components/ResearchSummary";
@@ -67,11 +68,11 @@ export default async function CompanyPage({ params, searchParams }: { params: Pr
         {!etf && <ResearchButton symbol={symbol} hasResearch={false} needsResearch />}
         <Card flush>
           <Disclose summary={<span className="t-sm">Add to your list without researching</span>}>
-            <form action={addToPipeline} className="flex flex-col gap-2">
+            <ActionForm action={addToPipeline} success="Added to your pipeline" className="flex flex-col gap-2">
               <input type="hidden" name="symbol" value={symbol} />
               <label className="field">Why it is interesting (optional)<input name="note" maxLength={300} className="input" /></label>
-              <button className="btn btn-sm self-start">Add to pipeline</button>
-            </form>
+              <SubmitButton className="btn btn-sm self-start" pendingText="Adding…">Add to pipeline</SubmitButton>
+            </ActionForm>
           </Disclose>
         </Card>
         {!etf && <Suspense fallback={<FeedSkeleton title="Reported financials" />}><FundamentalsCard symbol={symbol} /></Suspense>}

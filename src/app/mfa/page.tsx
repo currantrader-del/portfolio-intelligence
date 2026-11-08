@@ -11,6 +11,7 @@ export default function MfaPage() {
   const [mode, setMode] = useState<Mode>({ kind: "loading" });
   const [code, setCode] = useState("");
   const [error, setError] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
 
   useEffect(() => {
     const supabase = createClient();
@@ -26,10 +27,17 @@ export default function MfaPage() {
 
   async function onSubmit(e: React.FormEvent) {
     e.preventDefault();
-    if (mode.kind === "loading") return;
+    if (mode.kind === "loading" || busy) return;
     setError(null);
-    const { error } = await createClient().auth.mfa.challengeAndVerify({ factorId: mode.factorId, code: code.trim() });
-    if (error) return setError("That code didn't work. Try the newest one.");
+    setBusy(true);
+    let failed: string | null = null;
+    try {
+      const { error } = await createClient().auth.mfa.challengeAndVerify({ factorId: mode.factorId, code: code.trim() });
+      if (error) failed = "That code didn't work. Try the newest one.";
+    } catch {
+      failed = "Couldn't reach the sign-in service. Check your connection and try again.";
+    }
+    if (failed) { setBusy(false); return setError(failed); }
     router.replace("/");
     router.refresh();
   }
@@ -46,7 +54,7 @@ export default function MfaPage() {
             className="min-h-11 px-3 rounded-lg border border-line-strong bg-surface font-mono text-lg tracking-widest" />
         </label>
         {error && <p role="alert" className="text-sm text-alert-ink">{error}</p>}
-        <button disabled={mode.kind === "loading"} className="min-h-11 rounded-lg bg-ink text-ground font-medium disabled:opacity-60">Verify</button>
+        <button disabled={mode.kind === "loading" || busy} aria-busy={busy || undefined} className={`btn btn-primary ${busy ? "is-pending" : ""}`}>{busy ? <><span className="spin" aria-hidden="true" />Verifying…</> : "Verify"}</button>
       </form>
     </main>
   );

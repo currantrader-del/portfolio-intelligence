@@ -45,7 +45,7 @@ export function ResearchBrowser({ owned, pipeline, initialStage }: { owned: Owne
       <label className="flex items-center gap-2 min-h-11 rounded-[12px] bg-surface-2 px-3 text-muted focus-within:ring-1 focus-within:ring-line-strong">
         <svg viewBox="0 0 20 20" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="1.7" aria-hidden="true"><circle cx="9" cy="9" r="5.5" /><path d="M13 13l4 4" /></svg>
         <span className="sr-only">Search companies</span>
-        <input type="search" value={q} onChange={(e) => setQ(e.target.value)} placeholder={`Search ${total} companies or a ticker`} className="flex-1 min-w-0 bg-transparent outline-none text-ink placeholder:text-muted" autoComplete="off" spellCheck={false} />
+        <input type="search" value={q} onChange={(e) => setQ(e.target.value)} placeholder={`Search ${total} companies or a ticker`} className="flex-1 min-w-0 min-h-11 bg-transparent outline-none text-ink placeholder:text-muted" autoComplete="off" spellCheck={false} />
       </label>
       {!needle && (
         <div className="chips" role="group" aria-label="Filter by stage">
