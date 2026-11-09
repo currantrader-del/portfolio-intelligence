@@ -32,7 +32,7 @@ export async function investorContext(ws: Workspace, db: SupabaseClient): Promis
   lines.push(`Accounts: ${p.accounts.map((a) => `${a.name} (${a.role ?? "role not set"}; statement ${a.asOf}, ${a.ageDays} days old${a.tradesAfter ? `, ${a.tradesAfter} trades recorded since` : ""})`).join("; ")}.`);
   lines.push("Holdings (symbol: weight, value, today, bucket, unrealized):");
   for (const h of [...p.holdings].sort((a, b) => b.weight - a.weight)) lines.push(`- ${h.symbol}: ${pct(h.weight)}, ${usd(h.value)}, today ${pct(h.dayPct, 2)}, ${h.bucket}${h.unrealized != null ? `, unrealized ${usd(h.unrealized)}` : ""}`);
-  lines.push(`Buckets vs policy: ${p.buckets.map((b) => `${b.bucket} ${pct(b.weight)}${b.normal ? ` (normal ${pct(b.normal.low, 0)}-${pct(b.normal.high, 0)})` : ""}${b.hardMax != null ? ` max ${pct(b.hardMax, 0)}` : ""}${b.status !== "within" && b.status !== "no_limit" ? ` [${b.status}]` : ""}`).join("; ")}.`);
+  lines.push(`Buckets vs policy: ${p.buckets.map((b) => `${b.bucket} ${pct(b.weight)}${b.normal ? ` (normal ${pct(b.normal.low, 0)}-${pct(b.normal.high, 0)})` : ""}${b.hardMax != null ? ` max ${pct(b.hardMax, 0)}` : ""}${b.status === "below" ? " [below guide; not a target]" : b.status !== "within" && b.status !== "no_limit" ? ` [${b.status}]` : ""}`).join("; ")}.`);
   const exp = p.exposures.filter((e) => e.total > 0.01).slice(0, 12);
   lines.push(`Single-company exposure incl. ETF look-through: ${exp.map((e) => `${e.symbol} ${pct(e.total)}${e.max != null ? ` (max ${pct(e.max, 0)}, ${ws.policy?.companies[e.symbol]?.status ?? "no limit"})` : ""}`).join("; ")}.`);
 

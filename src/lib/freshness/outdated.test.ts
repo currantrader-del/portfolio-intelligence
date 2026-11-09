@@ -73,6 +73,15 @@ describe("superseded assumptions in an older plan", () => {
     expect(v.outdated).toBe(true);
     expect(v.headline).toBe("Outdated: it contradicts your current policy.");
   });
+  it("does not confuse unapproved research with an undecided limit (2026-11-09 plan)", () => {
+    const per = [
+      { symbol: "GOOGL", text: "Hold, no add. Research is NOT approved, so it is context only. With look-through it is 7.0% against the approved 10% ceiling." },
+      { symbol: "IREN", text: "Conditional trim. Approved (provisionally) research. The weight is 3.6% against a 3.5% research max and a 7% approved ceiling." },
+    ];
+    expect(supersededMentions("Hold everything and buy nothing now. GOOGL: the research is not approved.", facts, per)).toEqual([]);
+    // Low cash named as a blocker is still caught.
+    expect(supersededMentions("Three things block new money: there is no approved MU limit, deployable cash is below 5%, and more.", facts).join(" ")).toMatch(/deployable-cash range as a target/);
+  });
   it("says nothing about a plan written under today's policy", () => {
     expect(supersededMentions("Hold everything. VOO is the default for new money; the 5–15% cash range is only a guide.", facts)).toEqual([]);
   });

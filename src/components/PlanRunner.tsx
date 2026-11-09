@@ -1,28 +1,43 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Spinner } from "@/components/forms";
 import { requestPaidJSON } from "@/lib/client/request";
 
-/** Rebuild button for the portfolio plan; refreshes the page until a running rebuild finishes. */
-export function PlanRunner({ running, hasPlan }: { running: boolean; hasPlan: boolean }) {
+/** How long the button waits for a started rebuild to appear before giving up on the spinner. */
+const GIVE_UP_MS = 5 * 60_000;
+
+/**
+ * Rebuild button for the portfolio plan; refreshes the page until a running rebuild finishes.
+ * It keeps refreshing after a start until the server reports the rebuild running or a newer plan
+ * (latestAt changes), so a fast rebuild that finishes between refreshes can never leave it stuck.
+ */
+export function PlanRunner({ running, hasPlan, latestAt = null }: { running: boolean; hasPlan: boolean; latestAt?: string | null }) {
   const router = useRouter();
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const startedFrom = useRef<{ at: string | null; when: number } | null>(null);
   const active = running || busy;
   useEffect(() => {
-    if (!running) return;
-    const t = setInterval(() => router.refresh(), 6000);
+    if (!active) return;
+    const t = setInterval(() => {
+      if (busy && startedFrom.current && Date.now() - startedFrom.current.when > GIVE_UP_MS) { setBusy(false); startedFrom.current = null; return; }
+      router.refresh();
+    }, 4000);
     return () => clearInterval(t);
-  }, [running, router]);
-  useEffect(() => { if (running) setBusy(false); }, [running]);
+  }, [active, busy, router]);
+  useEffect(() => {
+    if (running) { setBusy(false); startedFrom.current = null; return; }
+    if (busy && startedFrom.current && latestAt !== startedFrom.current.at) { setBusy(false); startedFrom.current = null; }
+  }, [running, latestAt, busy]);
 
   async function start() {
     if (active) return;
     setBusy(true); setError(null);
+    startedFrom.current = { at: latestAt, when: Date.now() };
     const r = await requestPaidJSON("/api/plan", { json: {} });
-    if (!r.ok) { setError(r.error); setBusy(false); return; }
+    if (!r.ok) { setError(r.error); setBusy(false); startedFrom.current = null; return; }
     router.refresh();
   }
   return (
