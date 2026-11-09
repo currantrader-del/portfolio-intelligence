@@ -10,6 +10,7 @@ import { toResearchRecord, type FilingCheckInfo, type ResearchRecord, type Versi
 import { evaluateAlerts, type Alert } from "@/lib/alerts/rules";
 import { computeExposure, type ExposureReport } from "@/lib/exposure/engine";
 import { checkLimits, type LimitCheck } from "@/lib/exposure/limits";
+import { preferenceFromRow, type CapitalPreference } from "@/lib/decision/currentPortfolio";
 
 export type Workspace = {
   now: Date;
@@ -26,6 +27,8 @@ export type Workspace = {
   yields: Yields;
   /** Transfers between your accounts you recorded as planned and have not cancelled. */
   transfers: PlannedTransfer[];
+  /** Your standing limit for moving savings to the brokerage when an opportunity justifies it (null when not set). */
+  capitalPreference: CapitalPreference | null;
   /** Sector, industry, country and theme exposure with ETF look-through, and the exposure limits checked against it. */
   exposure: ExposureReport;
   exposureLimits: LimitCheck[];
@@ -146,8 +149,14 @@ export async function loadTransfers(db: SupabaseClient): Promise<PlannedTransfer
   })).filter((t) => t.amount > 0 && t.fromAccountId && t.toAccountId);
 }
 
+/** The newest standing capital preference (model_runs kind "capital_preference"). */
+export async function loadCapitalPreference(db: SupabaseClient): Promise<CapitalPreference | null> {
+  const { data } = await db.from("model_runs").select("outputs, computed_at").eq("kind", "capital_preference").order("computed_at", { ascending: false }).limit(1).maybeSingle();
+  return preferenceFromRow(data);
+}
+
 export async function buildWorkspace(db: SupabaseClient, now = new Date()): Promise<Workspace> {
-  const [{ data: auth }, snapshots, research, policy, ledger, yields, transfers] = await Promise.all([db.auth.getClaims(), loadSnapshots(db), loadResearch(db), loadPolicy(db), loadLedger(db), loadYields(db).catch(() => ({ y2: null, y10: null })), loadTransfers(db).catch(() => [])]);
+  const [{ data: auth }, snapshots, research, policy, ledger, yields, transfers, capitalPreference] = await Promise.all([db.auth.getClaims(), loadSnapshots(db), loadResearch(db), loadPolicy(db), loadLedger(db), loadYields(db).catch(() => ({ y2: null, y10: null })), loadTransfers(db).catch(() => []), loadCapitalPreference(db).catch(() => null)]);
   const symbols = [...new Set([...snapshots.flatMap((s) => s.positions.map((p) => p.symbol.toUpperCase())), ...ledger.filter((t) => t.symbol).map((t) => t.symbol!.toUpperCase())])];
   const quotes = await getQuotes([...symbols, ...BENCHMARKS.map((b) => b.symbol)]);
   const roles: Record<string, string | null> = Object.fromEntries(Object.values(policy?.companies ?? {}).map((c) => [c.symbol, c.role]));
@@ -157,7 +166,7 @@ export async function buildWorkspace(db: SupabaseClient, now = new Date()): Prom
   const exposure = computeExposure(portfolio.holdings.map((h) => ({ symbol: h.symbol, value: h.value })), portfolio.cash, now);
   const exposureLimits = checkLimits(exposure, policy?.audit?.subjects.flatMap((s) => [...(s.approvedRow ? [s.approvedRow] : []), ...s.candidates]) ?? []);
   const alerts = [...evaluateAlerts({ portfolio, research, marketDayPct: benchmarks[0].dayPct, now, freshnessDays: AGE_REMINDER_DAYS, policy }), ...exposureAlerts(exposureLimits)];
-  return { now, marketOpen: isMarketOpen(now), quotes, benchmarks, portfolio, research, policy, alerts, userId: auth?.claims?.sub ?? null, ledger, yields, transfers, exposure, exposureLimits };
+  return { now, marketOpen: isMarketOpen(now), quotes, benchmarks, portfolio, research, policy, alerts, userId: auth?.claims?.sub ?? null, ledger, yields, transfers, capitalPreference, exposure, exposureLimits };
 }
 
 /** Alerts for APPROVED exposure limits only: a proposal is not policy yet, so it never raises an alert. */
