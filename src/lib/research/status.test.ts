@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { toResearchRecord } from "./records";
-import { coverage, suggestStage } from "./status";
+import { coverage, researchDepth, suggestStage } from "./status";
 
 // Synthetic data only.
 const now = new Date("2026-11-06T16:00:00Z");
@@ -55,5 +55,21 @@ describe("suggested stage", () => {
   it("never second-guesses holdings or a pass", () => {
     expect(suggestStage({ ...base, held: true })).toBeNull();
     expect(suggestStage({ ...base, stage: "passed" })).toBeNull();
+  });
+});
+
+describe("research depth of an approved full investigation", () => {
+  const inv = { research_as_of: "2026-11-08", completeness: "complete", origin: "claude_full", conclusion: { research_type: "full_investigation", review_state: "adopted" } };
+  it("is not labelled preliminary just because Claude wrote it", () => {
+    const d = researchDepth(inv, null);
+    expect(d.automated).toBe(false);
+    expect(d.level).toBe("company_research");
+    expect(d.label).toBe("Full investigation");
+  });
+  it("keeps the one-minute automated research preliminary", () => {
+    expect(researchDepth({ ...inv, conclusion: { research_type: "preliminary_screen" } }, null).level).toBe("preliminary");
+  });
+  it("keeps an incomplete investigation preliminary", () => {
+    expect(researchDepth({ ...inv, completeness: "partial" }, null).level).toBe("preliminary");
   });
 });
