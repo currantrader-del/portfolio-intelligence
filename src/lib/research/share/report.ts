@@ -31,9 +31,22 @@ export type Block =
   | { t: "kv"; rows: [string, string][] }
   | { t: "table"; head: string[]; rows: string[][]; widths?: number[]; app?: boolean }
   | { t: "h"; text: string }
-  | { t: "box"; title: string; items: string[]; tone: "warn" | "info"; app?: boolean };
+  | { t: "box"; title: string; items: string[]; tone: "warn" | "info"; app?: boolean }
+  /** Labeled records (findings, questions, challenges): a bold title line, a grey meta line, then labeled lines. */
+  | { t: "entries"; items: Entry[] }
+  | { t: "chart"; chart: Chart };
 
-export type Section = { id: string; title: string; blocks: Block[] };
+export type Entry = { title: string; meta?: string; tone?: "muted" | "warn"; lines: [string, string][] };
+
+/** Charts drawn from the saved numbers. Every figure is one the research or the app already computed. */
+export type Chart =
+  | { kind: "scenarios"; price: number | null; weighted: number | null; rows: { name: string; probability: number; value: number; annualized: number | null }[] }
+  | { kind: "zones"; price: number | null; zones: Zone[] }
+  | { kind: "tornado"; base: number; rows: { label: string; delta: number; weighted: number }[] };
+
+export type Zone = { label: string; lo: number | null; hi: number | null; tone: "good" | "wait" | "bad"; action: string };
+
+export type Section = { id: string; title: string; blocks: Block[]; appendix?: boolean };
 
 export type ShareChoice = "latest" | "approved";
 
@@ -47,6 +60,19 @@ export type ShareReport = {
   notices: string[];
   sections: Section[];
   redactions: { why: string; count: number }[];
+  /** The one-page summary on the cover. */
+  summary?: {
+    stance: string | null;
+    headline: string | null;
+    price: number | null;
+    priceDate: string;
+    weighted: number | null;
+    annualized: number | null;
+    years: number | null;
+    horizon: string | null;
+    confidence: string;
+    charts: Chart[];
+  };
 };
 
 type Ev = {
@@ -80,7 +106,92 @@ const KIND_LABEL: Record<string, string> = { sourced: "Sourced from a finding", 
 const usd = (n: number | null | undefined, d = 2) => (n === null || n === undefined || !Number.isFinite(n) ? "n/a" : `$${n.toLocaleString("en-US", { maximumFractionDigits: d, minimumFractionDigits: d })}`);
 const pct = (n: number | null | undefined) => (n === null || n === undefined || !Number.isFinite(n) ? "n/a" : `${(n * 100).toFixed(1)}%`);
 const signedPct = (n: number | null | undefined) => (n === null || n === undefined || !Number.isFinite(n) ? "n/a" : `${n >= 0 ? "+" : ""}${(n * 100).toFixed(1)}%`);
-const big = (n: number) => (Math.abs(n) >= 1e9 ? `$${(n / 1e9).toFixed(2)}B` : Math.abs(n) >= 1e6 ? `$${(n / 1e6).toFixed(1)}M` : Math.abs(n) >= 1e5 ? usd(n, 0) : n.toLocaleString("en-US", { maximumFractionDigits: 4 }));
+/** $41.8B, $250M, $690.00: money at a readable scale, with the sign before the dollar sign. */
+export const money = (n: number | null | undefined) => {
+  if (n === null || n === undefined || !Number.isFinite(n)) return "n/a";
+  const a = Math.abs(n), sign = n < 0 ? "-" : "";
+  if (a >= 1e12) return `${sign}$${(a / 1e12).toFixed(2)}T`;
+  if (a >= 1e9) return `${sign}$${(a / 1e9).toFixed(a >= 1e11 ? 0 : 1)}B`;
+  if (a >= 1e6) return `${sign}$${(a / 1e6).toFixed(a >= 1e8 ? 0 : 1)}M`;
+  return `${sign}${usd(a, a >= 1e4 ? 0 : 2)}`;
+};
+
+/** A valuation input in its own unit: margins as %, multiples as x, share counts without a dollar sign. */
+export function fmtInput(input: string, v: number): string {
+  if (!Number.isFinite(v)) return "n/a";
+  if (/margin|growth|rate|pct|yield/.test(input)) return Math.abs(v) <= 1.5 ? `${+(v * 100).toFixed(1)}%` : `${v}%`;
+  if (/multiple/.test(input)) return `${+v.toFixed(2)}x`;
+  if (/shares/.test(input)) return v >= 1e9 ? `${(v / 1e9).toFixed(2)}B shares` : v >= 1e6 ? `${(v / 1e6).toFixed(0)}M shares` : `${v.toLocaleString("en-US")} shares`;
+  if (/net_debt/.test(input) && v < 0) return `${money(v)} (net cash)`;
+  if (/eps|per_share|price/.test(input)) return usd(v);
+  return Math.abs(v) >= 1e5 ? money(v) : v.toLocaleString("en-US", { maximumFractionDigits: 4 });
+}
+
+/** A finding's value and unit as one readable figure: "134 USD billions" becomes "$134B". */
+export function fmtValue(value: string | null | undefined, unit: string | null | undefined): string {
+  const v = String(value ?? "").trim(), u = String(unit ?? "").trim();
+  if (!v) return "";
+  const n = Number(v.replace(/,/g, ""));
+  const scale = u.match(/^USD\s*(thousand|million|billion|trillion)s?$/i) ?? u.match(/^(thousand|million|billion|trillion)s?\s*(?:of\s*)?USD$/i);
+  const mult: Record<string, number> = { thousand: 1e3, million: 1e6, billion: 1e9, trillion: 1e12 };
+  if (scale && Number.isFinite(n)) return money(n * mult[scale[1].toLowerCase()]);
+  if (/^(USD|\$)$/i.test(u) && Number.isFinite(n)) return money(n);
+  if (/^USD per share$/i.test(u) && Number.isFinite(n)) return `${usd(n)} per share`;
+  if (u.startsWith("%")) return `${v.replace(/%$/, "")}%${u.slice(1).trim() ? ` ${u.slice(1).trim()}` : ""}`;
+  if (!u || v.toLowerCase().includes(u.toLowerCase())) return v;
+  return `${v} ${u}`;
+}
+
+/** A stress test's recorded changes (saved as JSON, sometimes cut short) in words. */
+export function describeChanges(note: string): string {
+  const t = (note ?? "").trim();
+  if (!/^[[{]/.test(t)) return t;
+  const parts: string[] = [];
+  for (const m of t.matchAll(/"probabilities":\{"bear":([\d.]+),"base":([\d.]+),"bull":([\d.]+)\}/g)) parts.push(`probabilities ${[m[1], m[2], m[3]].map((x) => Math.round(Number(x) * 100)).join("/")} (bear/base/bull)`);
+  for (const m of t.matchAll(/"scenario":"(\w+)","input":"(\w+)","set":(-?[\d.e+]+)/g)) parts.push(`${m[1]} ${m[2].replace(/_/g, " ")} ${fmtInput(m[2], Number(m[3]))}`);
+  if (!parts.length) return "";
+  return `Changed: ${parts.join("; ")}${t.endsWith("]") ? "" : "; and more"}`;
+}
+
+/**
+ * Phase bodies end with generated lists (key points, documents, findings, questions). The key points
+ * lead the phase; the documents, findings and questions are in the appendix, so they are not repeated.
+ */
+export function splitPhaseBody(md: string): { body: string; keyPoints: string[] } {
+  const out: string[] = [];
+  const keyPoints: string[] = [];
+  let mode: "body" | "key" | "skip" = "body";
+  for (const line of md.replace(/\r/g, "").split("\n")) {
+    const h = line.trim().match(/^\*\*(Key points|Documents for this phase|Findings|Questions)\*\*$/);
+    if (h) { mode = h[1] === "Key points" ? "key" : "skip"; continue; }
+    if (mode !== "body") {
+      const li = line.match(/^\s*[-*]\s+(.*)$/);
+      if (li) { if (mode === "key") keyPoints.push(li[1]); continue; }
+      if (!line.trim() || /^\s{2,}\S/.test(line)) continue;
+      mode = "body";
+    }
+    out.push(line);
+  }
+  return { body: out.join("\n").replace(/\n{3,}/g, "\n\n").trim(), keyPoints };
+}
+
+/** Price zones such as "< $520", "$520-$600" or "Above $600" as ranges, or null when any zone can't be read. */
+export function parseZones(zones: { label: string; action: string }[]): Zone[] | null {
+  const out: Zone[] = [];
+  for (const z of zones) {
+    const nums = [...z.label.matchAll(/(\d[\d,]*(?:\.\d+)?)/g)].map((m) => Number(m[1].replace(/,/g, "")));
+    let lo: number | null = null, hi: number | null = null;
+    if (nums.length === 2) [lo, hi] = [Math.min(nums[0], nums[1]), Math.max(nums[0], nums[1])];
+    else if (nums.length === 1 && /^\s*(<|≤|below|under|less)/i.test(z.label)) hi = nums[0];
+    else if (nums.length === 1 && /^\s*(>|≥|above|over|more)/i.test(z.label)) lo = nums[0];
+    else return null;
+    const a = z.action.toLowerCase();
+    const tone = /\b(sell|exit|trim|reduce|no new money|avoid|do not add)\b/.test(a) ? "bad" : /\b(buy|starter|add|accumulate|eligible)\b/.test(a) ? "good" : "wait";
+    out.push({ label: z.label, lo, hi, tone, action: z.action });
+  }
+  return out.length >= 2 ? out.sort((a, b) => (a.lo ?? -Infinity) - (b.lo ?? -Infinity)) : null;
+}
+
 const day = (iso: string | null | undefined) => {
   if (!iso) return "n/a";
   const d = new Date(iso.length === 10 ? `${iso}T12:00:00Z` : iso);
@@ -197,13 +308,13 @@ export function buildShareReport(input: {
   const sections: Section[] = [];
 
   // ---- 1. About ------------------------------------------------------------------------------
-  sections.push({
-    id: "about", title: "About this report", blocks: [
+  const about: Section = {
+    id: "about", title: "About this report", appendix: true, blocks: [
       { t: "p", app: true, text: `This is the complete saved ${type.toLowerCase()} of ${name ?? symbol} (${symbol}) from Portfolio Intelligence, exported on ${day((input.now ?? new Date()).toISOString())}. It reproduces the saved research, calculations, skeptical review, reviewer corrections and source inventory. Nothing was re-run, re-estimated or newly analysed for this export.` },
       { t: "p", app: true, text: "The owner's private financial information has been removed: holdings, share counts, cost basis, gains and losses, cash and savings balances, account names, personal limits and policies, and trade amounts based on their holdings. Where wording was removed, a marker in square brackets shows it. Recommendations that referred to the owner's own position are shown as general research implications under Investment strategy, without changing the thesis or valuation." },
       { t: "p", app: true, tone: "muted", text: "This is research shared for discussion, not personalized investment advice. Figures are as of the research date and may be out of date. Third-party documents are cited and linked rather than reproduced; quotations are limited to short excerpts." },
     ],
-  });
+  };
 
   // ---- 2. Research status ----------------------------------------------------------------------
   const status: Block[] = [{ t: "kv", rows: facts }];
@@ -216,7 +327,7 @@ export function buildShareReport(input: {
   if (openDedup.length) status.push({ t: "box", tone: "warn", title: completion && !completion.complete ? `Open items: ${openDedup.length} could not be closed` : `Open items attached to the approval: ${openDedup.length}`, items: openDedup });
   const notVerified = L(c.not_verified);
   if (notVerified.length) status.push({ t: "box", tone: "warn", title: "Not verified", items: notVerified });
-  sections.push({ id: "status", title: "Research status", blocks: status });
+  const statusSec: Section = { id: "status", title: "Research status", appendix: true, blocks: status };
 
   // ---- 3. Conclusion ---------------------------------------------------------------------------
   const concl: Block[] = [];
@@ -258,21 +369,20 @@ export function buildShareReport(input: {
   // ---- 4. Strategy (general) -------------------------------------------------------------------
   const strat: Block[] = [];
   const zones = (sm?.price_framework ?? (c.price_framework as InvestmentSummary["price_framework"] | undefined) ?? []).filter((z) => z && (z.price_zone || z.action));
-  if (zones.length) strat.push({ t: "h", text: "Price framework: when the research would act or wait" }, { t: "table", head: ["Price zone", "What the research says"], rows: zones.map((z) => [T(z.price_zone), T(z.action) || MARK_SENTENCE]), widths: [22, 78] });
-  if (val?.result) {
-    const sc = (n: string) => val.result.scenarios.find((s) => s.name === n);
-    const price = val.result.price ?? refPrice;
-    const rows: [string, string][] = [];
-    for (const n of ["bear", "base", "bull"]) {
-      const s = sc(n);
-      if (s) rows.push([`${n[0].toUpperCase()}${n.slice(1)} case (${pct(s.probability)})`, `${usd(s.value_per_share)} per share${price ? `, ${signedPct(s.value_per_share / price - 1)} from ${usd(price)}` : ""}`]);
-    }
-    rows.push(["Probability-weighted", `${usd(val.result.weighted_value)}, ${pct(val.result.annualized_return)} a year`]);
-    rows.push(["Investment horizon", `${day(val.result.horizon_date)}${val.result.years ? ` (${val.result.years.toFixed(1)} years)` : ""}`]);
-    strat.push({ t: "h", text: "Return profile and horizon (from the saved valuation)" }, { t: "kv", rows });
+  const price0 = val?.result.price ?? refPrice;
+  const scenariosChart: Chart | null = val?.result?.scenarios.length
+    ? { kind: "scenarios", price: price0, weighted: val.result.weighted_value, rows: val.result.scenarios.map((s) => ({ name: s.name, probability: s.probability, value: s.value_per_share, annualized: val.result.scenario_annualized.find((x) => x.name === s.name)?.annualized ?? null })) }
+    : null;
+  const zoneText = zones.map((z) => ({ label: T(z.price_zone), action: T(z.action) || MARK_SENTENCE }));
+  const parsedZones = parseZones(zoneText);
+  const zonesChart: Chart | null = parsedZones ? { kind: "zones", price: price0, zones: parsedZones } : null;
+  if (zones.length) {
+    strat.push({ t: "h", text: "Price framework: when the research would act or wait" });
+    if (zonesChart) strat.push({ t: "chart", chart: zonesChart });
+    strat.push({ t: "table", head: ["Price zone", "What the research says"], rows: zoneText.map((z) => [z.label, z.action]), widths: [22, 78] });
   }
-  const wcs = L(sm?.would_change ?? c.would_change);
-  if (wcs.length) strat.push({ t: "h", text: "Catalysts, add / trim / exit conditions and thesis invalidation (from the research)" }, { t: "list", items: wcs });
+  if (val?.result) strat.push({ t: "p", app: true, tone: "muted", text: `Probability-weighted value ${usd(val.result.weighted_value)} by ${day(val.result.horizon_date)}${val.result.years ? ` (${val.result.years.toFixed(1)} years)` : ""}, ${pct(val.result.annualized_return)} a year from ${usd(price0)}. The scenarios are charted under Valuation.` });
+  if (L(sm?.would_change ?? c.would_change).length) strat.push({ t: "p", app: true, tone: "muted", text: "Catalysts, add, trim and exit conditions and what would invalidate the thesis are listed under “What would change the conclusion” in the Investment conclusion." });
   const bear = val?.result.scenarios.find((s) => s.name === "bear");
   const bearMove = bear && (val?.result.price ?? refPrice) ? bear.value_per_share / (val!.result.price ?? refPrice!) - 1 : null;
   strat.push(
@@ -296,23 +406,34 @@ export function buildShareReport(input: {
   if (val?.result) {
     const vb: Block[] = [
       { t: "p", text: `Computed by the app from the investigation's inputs. Horizon ${day(val.result.horizon_date)}${val.result.years ? ` (${val.result.years.toFixed(2)} years)` : ""}; revenue basis: ${T(val.revenue_basis) || "n/a"}; price used ${usd(val.result.price)}. Probability-weighted value ${usd(val.result.weighted_value)}; total return ${signedPct(val.result.total_return)}; ${pct(val.result.annualized_return)} a year.` },
-      { t: "table", head: ["Scenario", "Probability", "Method", "Value per share", "Annualized"], rows: val.result.scenarios.map((s) => [s.name, pct(s.probability), s.method.replace("_", "/").toUpperCase(), `${usd(s.value_per_share)}${s.floored ? " (floor)" : ""}`, pct(val.result.scenario_annualized.find((x) => x.name === s.name)?.annualized)]), widths: [16, 16, 18, 26, 24] },
+      ...(scenariosChart ? [{ t: "chart", chart: scenariosChart } as Block] : []),
+      { t: "table", head: ["Scenario", "Probability", "Method", "Value per share", "Versus price", "Annualized"], rows: val.result.scenarios.map((s) => [`${s.name[0].toUpperCase()}${s.name.slice(1)}`, pct(s.probability), s.method.replace("_", "/").toUpperCase(), `${usd(s.value_per_share)}${s.floored ? " (floor)" : ""}`, price0 ? signedPct(s.value_per_share / price0 - 1) : "n/a", pct(val.result.scenario_annualized.find((x) => x.name === s.name)?.annualized)]), widths: [14, 14, 16, 20, 18, 18] },
     ];
     const rows = inputRows(val.specs, review);
+    const stepValue = (label: string, v: number) => (/per share/i.test(label) || Math.abs(v) < 1e5 ? usd(v) : money(v));
     for (const s of val.result.scenarios) {
       const spec = val.specs.find((x) => x.name === s.name);
-      vb.push({ t: "h", text: `${s.name[0].toUpperCase()}${s.name.slice(1)} case: calculation` });
-      vb.push({ t: "table", head: ["Step", "Formula", "Result"], rows: s.steps.map((st) => [T(st.label), T(st.formula), Math.abs(st.value) > 1e5 ? usd(st.value, 0) : st.value.toFixed(2)]), widths: [30, 50, 20] });
+      vb.push({ t: "h", text: `${s.name[0].toUpperCase()}${s.name.slice(1)} case: ${usd(s.value_per_share)} per share, ${pct(s.probability)} probability` });
+      if (spec?.rationale) vb.push({ t: "p", text: T(spec.rationale) });
       const ir = rows.filter((r) => r.scenario === s.name);
-      if (ir.length) vb.push({ t: "table", head: ["Input", "Value", "Basis", "Source or reasoning"], rows: ir.map((r) => [r.input.replace(/_/g, " "), big(r.value), `${KIND_LABEL[r.kind] ?? r.kind}${r.material ? "; MATERIAL, not fully reconciled" : ""}`, T(r.source) + (r.material ? ` Reviewer: ${T(r.material)}` : "")]), widths: [16, 14, 20, 50] });
-      if (spec?.rationale) vb.push({ t: "p", text: `Rationale: ${T(spec.rationale)}` });
+      if (ir.length) vb.push({ t: "table", head: ["Input", "Value", "Basis and source"], rows: ir.map((r) => [r.input.replace(/_/g, " ").replace(/^ebitda/, "EBITDA"), fmtInput(r.input, r.value), `${KIND_LABEL[r.kind] ?? r.kind}${r.material ? "; MATERIAL, not fully reconciled" : ""}. ${T(r.source).replace(/^estimate:\s*/i, "")}${r.material ? ` Reviewer: ${T(r.material)}` : ""}`]), widths: [18, 20, 62] });
+      vb.push({ t: "table", head: ["Step", "Formula", "Result"], rows: s.steps.map((st) => [T(st.label), T(st.formula).replace(/\$-/g, "-$"), stepValue(st.label, st.value)]), widths: [28, 50, 22] });
     }
     if (val.result.comparisons.length) vb.push({ t: "h", text: "Versus reported results" }, { t: "list", items: val.result.comparisons.map((x) => `${x.scenario}: ${T(x.text)}`) });
     if (val.result.errors.length) vb.push({ t: "p", tone: "warn", text: `Calculation errors recorded: ${val.result.errors.map(T).join("; ")}` });
     const stress = ev.stress ?? [];
-    if (stress.length) vb.push({ t: "h", text: "Sensitivities computed by the app" }, { t: "table", head: ["Test", "Weighted value", "Annualized", "Note"], rows: stress.map((x) => [T(x.label), usd(x.weighted_value), pct(x.annualized_return), T(x.note)]), widths: [34, 16, 14, 36] });
     const vs = input.validation?.sensitivity ?? [];
-    if (vs.length) vb.push({ t: "h", text: "What moves the value (one change at a time, app validation)" }, { t: "table", head: ["Change", "Weighted value", "Change per share", "Annualized"], rows: vs.map((s) => [T(s.label), usd(s.weighted), `${s.delta >= 0 ? "+" : ""}${s.delta.toFixed(2)}`, pct(s.annualized)]), widths: [46, 18, 18, 18] });
+    if (vs.length) {
+      vb.push({ t: "h", text: "What moves the value (one change at a time, app validation)" });
+      if (val.result.weighted_value !== null) vb.push({ t: "chart", chart: { kind: "tornado", base: val.result.weighted_value, rows: vs.map((s) => ({ label: T(s.label), delta: s.delta, weighted: s.weighted })) } });
+      vb.push({ t: "table", head: ["Change", "Weighted value", "Change per share", "Annualized"], rows: vs.map((s) => [T(s.label), usd(s.weighted), `${s.delta >= 0 ? "+" : "-"}${usd(Math.abs(s.delta))}`, pct(s.annualized)]), widths: [46, 18, 18, 18] });
+    }
+    if (stress.length) {
+      const sk = stress.filter((x) => x.label.startsWith("Skeptic:"));
+      vb.push({ t: "h", text: "Stress tests run during the investigation and the skeptical review" });
+      if (sk.length) vb.push({ t: "p", tone: "muted", text: "Tests marked “Skeptic” were run while the reviewer was challenging the draft valuation, so some start from inputs that were later corrected. The corrected result is the valuation above." });
+      vb.push({ t: "table", head: ["Test", "Weighted value", "Annualized"], rows: stress.map((x) => { const d = describeChanges(T(x.note)); return [`${T(x.label)}${d && d !== T(x.label) ? `\n*${d}*` : ""}`, usd(x.weighted_value), pct(x.annualized_return)]; }), widths: [68, 16, 16] });
+    }
     for (const b of input.validation?.bridges ?? []) vb.push({ t: "h", text: T(b.title) }, { t: "table", head: ["Step", "Change per share"], rows: b.steps.map((s) => [T(s.label.trim()), `${s.delta >= 0 ? "+" : ""}${s.delta.toFixed(2)}`]), widths: [75, 25] }, { t: "p", tone: "muted", text: T(b.note) });
     sections.push({ id: "valuation", title: "Valuation: method, assumptions, calculations, scenarios and sensitivities", blocks: vb });
   }
@@ -323,7 +444,10 @@ export function buildShareReport(input: {
     const blocks: Block[] = [];
     const meta = [st ? `Status: ${st.replace(/_/g, " ")}` : "", p.details?.at ? `saved ${day(String(p.details.at))}` : "", p.details?.carried_from ? "carried forward from earlier research" : ""].filter(Boolean).join(" · ");
     if (meta) blocks.push({ t: "p", tone: st === "incomplete" ? "warn" : "muted", text: meta });
-    blocks.push({ t: "md", text: R.markdown(p.body_markdown ?? "") || "No text was saved for this phase." });
+    const { body, keyPoints } = splitPhaseBody(p.body_markdown ?? "");
+    const kp = keyPoints.map((k) => R.text(k)).filter((k) => k.trim() && k !== MARK_SENTENCE);
+    if (kp.length) blocks.push({ t: "box", tone: "info", title: "In short", items: kp });
+    blocks.push({ t: "md", text: R.markdown(body) || "No text was saved for this phase." });
     sections.push({ id: `phase-${p.phase_number}`, title: `Phase ${p.phase_number}: ${p.title ?? ""}`, blocks });
   }
 
@@ -335,16 +459,20 @@ export function buildShareReport(input: {
     const rc = L(ev.review.required_changes);
     if (rc.length) sk.push({ t: "h", text: "Changes the reviewer required" }, { t: "list", items: rc });
   }
-  for (const o of ev.objections ?? []) {
-    sk.push({ t: "h", text: `${o.id} [${o.severity}${o.area ? `, ${o.area.replace(/_/g, " ")}` : ""}]` });
-    const items = [
-      `Challenge: ${T(o.objection) || MARK_SENTENCE}`,
-      o.claim ? `Claim challenged: ${T(o.claim)}` : "",
-      o.test ? `Test (${(o.test_kind ?? "").replace("_", " ")}): ${T(o.test)}${o.test_result ? ` Result: ${T(o.test_result)}` : ""}` : "",
-      o.evidence_to_check ? `Evidence to check: ${T(o.evidence_to_check)}` : "",
-      o.outcome ? `Answer (${o.outcome.replace("_", " ")}): ${T(o.response)}` : "Not answered.",
-    ].filter(Boolean);
-    sk.push({ t: "list", items });
+  const objections = ev.objections ?? [];
+  if (objections.length) {
+    sk.push({ t: "h", text: `The reviewer's challenges (${objections.length})` });
+    sk.push({ t: "entries", items: objections.map((o): Entry => ({
+      title: `${o.id}  ${T(o.objection) || MARK_SENTENCE}`,
+      meta: [o.severity, o.area?.replace(/_/g, " "), o.outcome ? `answer: ${o.outcome.replace(/_/g, " ")}` : "not answered"].filter(Boolean).join(" · "),
+      lines: ([
+        o.claim ? ["Claim challenged", T(o.claim)] : null,
+        o.test ? [`Test${o.test_kind ? ` (${o.test_kind.replace(/_/g, " ")})` : ""}`, T(o.test)] : null,
+        o.test_result ? ["Result", T(o.test_result)] : null,
+        o.evidence_to_check ? ["Evidence to check", T(o.evidence_to_check)] : null,
+        o.outcome ? ["Answer", T(o.response)] : null,
+      ] as ([string, string] | null)[]).filter((x): x is [string, string] => !!x && !!x[1].trim()),
+    })) });
   }
   if (!sk.length) sk.push({ t: "p", tone: "warn", text: "No skeptical review was recorded." });
   sections.push({ id: "skeptic", title: "Skeptical review", blocks: sk });
@@ -356,26 +484,43 @@ export function buildShareReport(input: {
   if (findings.length) {
     evb.push({ t: "p", text: `${findings.length} findings recorded; ${keyF.length} key findings, of which ${keyF.filter((f) => f.check?.status === "verified" || f.check?.status === "xbrl").length} are verified against primary sources. Withdrawn findings are kept for the audit trail.` });
     const ordered = [...keyF, ...findings.filter((f) => !f.key && !f.withdrawn), ...findings.filter((f) => f.withdrawn)];
-    evb.push({ t: "table", head: ["ID", "Claim and value", "Source", "Check", "Treatment"], widths: [7, 43, 14, 18, 18], rows: ordered.map((f) => [
-      `${f.id}${f.key ? " (key)" : ""}`,
-      `${T(f.claim) || MARK_SENTENCE}${f.value ? `: ${T(`${f.value} ${f.unit ?? ""}`)}` : ""}${f.period ? ` (${T(f.period)})` : ""}${f.quote && f.source === "primary" ? `. Quote: “${T(f.quote.slice(0, 200))}${f.quote.length > 200 ? "…" : ""}”` : ""}${f.claim_original ? `. Corrected by reviewer (${T(f.claim_correction)}); originally: “${T(f.claim_original)}”` : ""}`,
-      `${f.source}${f.doc_id ? `, ${f.doc_id}` : ""}`,
-      CHECK_LABEL[f.check?.status ?? ""] ?? f.check?.status ?? "",
-      f.withdrawn ? `Withdrawn: ${T(f.withdrawn.reason)}${f.withdrawn.replaced_by ? ` (see ${f.withdrawn.replaced_by})` : ""}` : f.classification ? `${CLASS_LABEL[f.classification.cls] ?? f.classification.cls}: ${T(f.classification.explanation)} Effect: ${T(f.classification.impact)}` : "",
-    ]) });
+    evb.push({ t: "entries", items: ordered.map((f): Entry => {
+      const value = T(fmtValue(f.value, f.unit));
+      const claim = T(f.claim) || MARK_SENTENCE;
+      return {
+        title: `${f.id}  ${claim}${value && !claim.includes(value) ? ` (${value}${f.period ? `, ${T(f.period)}` : ""})` : ""}`,
+        meta: [f.key ? "key finding" : "", f.withdrawn ? "WITHDRAWN" : "", `${f.source}${f.doc_id ? ` ${f.doc_id}` : ""}`, CHECK_LABEL[f.check?.status ?? ""] ?? f.check?.status ?? ""].filter(Boolean).join(" · "),
+        tone: f.withdrawn ? "muted" : undefined,
+        lines: ([
+          f.quote && f.source === "primary" ? ["Quote", `“${T(f.quote.slice(0, 220))}${f.quote.length > 220 ? "…" : ""}”`] : null,
+          f.claim_original ? ["Reviewer", `Corrected (${T(f.claim_correction)}); originally “${T(f.claim_original)}”`] : null,
+          f.withdrawn ? ["Withdrawn", `${T(f.withdrawn.reason)}${f.withdrawn.replaced_by ? ` (see ${f.withdrawn.replaced_by})` : ""}`] : null,
+          !f.withdrawn && f.classification ? [CLASS_LABEL[f.classification.cls] ?? f.classification.cls, `${T(f.classification.explanation)}${f.classification.impact ? ` Effect: ${T(f.classification.impact)}` : ""}`] : null,
+        ] as ([string, string] | null)[]).filter((x): x is [string, string] => !!x && !!x[1].trim()),
+      };
+    }) });
   }
   const qs = ev.questions ?? [];
   if (qs.length) {
     evb.push({ t: "h", text: `Research questions: ${qs.filter((q) => q.status === "resolved").length} resolved, ${qs.filter((q) => q.status !== "resolved").length} not` });
-    evb.push({ t: "table", head: ["ID", "Question", "Status and answer"], widths: [8, 40, 52], rows: qs.map((q) => [`${q.id} (${q.materiality})`, T(q.question), `${q.status}${q.answer ? `: ${T(q.answer)}` : ""}${q.why_unresolvable ? ` Why not answerable: ${T(q.why_unresolvable)}` : ""}${q.could_change_conclusion ? " Could change the conclusion." : ""}${q.impact ? ` Impact: ${T(q.impact)}` : ""}`]) });
+    evb.push({ t: "entries", items: qs.map((q): Entry => ({
+      title: `${q.id}  ${T(q.question)}`,
+      meta: [`${q.materiality} materiality`, q.status.replace(/_/g, " "), q.could_change_conclusion ? "could change the conclusion" : ""].filter(Boolean).join(" · "),
+      tone: q.status === "resolved" ? undefined : "warn",
+      lines: ([
+        q.answer ? ["Answer", T(q.answer)] : null,
+        q.why_unresolvable ? ["Why not answerable", T(q.why_unresolvable)] : null,
+        q.impact ? ["Impact", T(q.impact)] : null,
+      ] as ([string, string] | null)[]).filter((x): x is [string, string] => !!x && !!x[1].trim()),
+    })) });
   }
   const cf = ev.conflicts ?? [];
-  if (cf.length) evb.push({ t: "h", text: "Conflicting evidence" }, { t: "table", head: ["ID", "Conflict", "Status and resolution"], widths: [8, 46, 46], rows: cf.map((x) => [x.id, T(x.description), `${x.status}: ${T(x.resolution)}`]) });
+  if (cf.length) evb.push({ t: "h", text: "Conflicting evidence" }, { t: "entries", items: cf.map((x): Entry => ({ title: `${x.id}  ${T(x.description)}`, meta: x.status.replace(/_/g, " "), lines: x.resolution ? [["Resolution", T(x.resolution)]] : [] })) });
   if (ev.consistency) {
     const rows = ev.consistency.checks.map((x) => [x.ok ? "OK" : "Problem", T(x.label), T(x.detail)]).filter((r) => r[1] !== MARK_SENTENCE || r[2] !== MARK_SENTENCE);
     if (rows.length) evb.push({ t: "h", text: "Conclusion checked against the numbers (app)" }, { t: "table", head: ["Result", "Check", "Detail"], widths: [12, 34, 54], rows });
   }
-  if (evb.length) sections.push({ id: "evidence", title: "Evidence: findings, questions and conflicts", blocks: evb });
+  if (evb.length) sections.push({ id: "evidence", title: "Evidence: findings, questions and conflicts", appendix: true, blocks: evb });
 
   // ---- 9. Validation ----------------------------------------------------------------------------
   if (input.validation) {
@@ -386,7 +531,7 @@ export function buildShareReport(input: {
     ];
     const notes = L(vr.notes);
     if (notes.length) blocks.push({ t: "h", text: "Reviewer notes" }, { t: "list", items: notes });
-    sections.push({ id: "validation", title: "App validation and reviewer notes", blocks });
+    sections.push({ id: "validation", title: "App validation and reviewer notes", appendix: true, blocks });
   }
 
   // ---- 10. Sources --------------------------------------------------------------------------------
@@ -409,11 +554,11 @@ export function buildShareReport(input: {
   }
   if (snippets.length) sb.push({ t: "h", text: "Other sources (search results and web pages, not counted as reviewed documents)" }, { t: "list", items: snippets.map((s) => `${T(s.title)}${s.document_date ? ` (${day(s.document_date)})` : ""}${s.url ? `: ${s.url}` : ""}`) });
   if (!sb.length) sb.push({ t: "p", tone: "warn", text: "No source inventory was saved with this investigation." });
-  sections.push({ id: "sources", title: "Sources and document inventory", blocks: sb });
+  sections.push({ id: "sources", title: "Sources and document inventory", appendix: true, blocks: sb }, statusSec, about);
 
   // ---- Redaction summary and final leak check -----------------------------------------------------
   const redactions = [...R.log.entries()].map(([why, count]) => ({ why, count })).sort((a, b) => b.count - a.count);
-  sections.push({ id: "redactions", title: "What was removed for privacy", blocks: [
+  sections.push({ id: "redactions", title: "What was removed for privacy", appendix: true, blocks: [
     { t: "p", app: true, text: redactions.length ? `${redactions.reduce((a, b) => a + b.count, 0)} passages were removed or trimmed because they described the owner's own finances. Counts by reason:` : "No private passages were found in this investigation." },
     ...(redactions.length ? [{ t: "table", app: true, head: ["Reason", "Passages"], rows: redactions.map((r) => [r.why, String(r.count)]), widths: [80, 20] } as Block] : []),
   ] });
@@ -424,6 +569,18 @@ export function buildShareReport(input: {
     subtitle: `${type} · ${day(v.research_as_of)} · ${approvalText(v)}`,
     generatedAt: (input.now ?? new Date()).toISOString(),
     facts, notices, sections, redactions,
+    summary: {
+      stance: stanceOf(sm?.action) ?? stanceOf(original?.action),
+      headline: sm?.headline ? T(sm.headline) : null,
+      price: price0,
+      priceDate: day(refDate),
+      weighted: val?.result.weighted_value ?? null,
+      annualized: val?.result.annualized_return ?? null,
+      years: val?.result.years ?? null,
+      horizon: val?.result.horizon_date ? day(val.result.horizon_date) : null,
+      confidence: String(sm?.confidence ?? c.confidence ?? "n/a"),
+      charts: ([scenariosChart, zonesChart] as (Chart | null)[]).filter((x): x is Chart => !!x),
+    },
   };
   const leaks = findLeaks(R, reportTexts(report, true));
   if (leaks.length) throw new ShareLeakError(leaks);
@@ -446,7 +603,16 @@ export function reportTexts(r: ShareReport, researchOnly = false): string[] {
       else if (b.t === "kv") out.push(...b.rows.flat());
       else if (b.t === "table") out.push(...b.head, ...b.rows.flat());
       else if (b.t === "box") out.push(b.title, ...b.items);
+      else if (b.t === "entries") for (const e of b.items) out.push(e.title, e.meta ?? "", ...e.lines.flat());
+      else if (b.t === "chart") out.push(...chartTexts(b.chart));
     }
   }
+  if (r.summary) out.push(r.summary.stance ?? "", r.summary.headline ?? "", ...r.summary.charts.flatMap(chartTexts));
   return out;
+}
+
+function chartTexts(c: Chart): string[] {
+  if (c.kind === "zones") return c.zones.flatMap((z) => [z.label, z.action]);
+  if (c.kind === "tornado") return c.rows.map((r) => r.label);
+  return [];
 }
