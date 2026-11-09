@@ -6,6 +6,7 @@ import { AUTHORITY_LABEL } from "@/lib/research/standing";
 import { ALTERNATIVES } from "@/lib/policy/evidence";
 import { RETIRED_WHY } from "@/lib/policy/rules";
 import { AGE_REMINDER_DAYS } from "@/lib/policy/limits";
+import { currentDecisionFor } from "@/lib/decision/currentPortfolio";
 import { loadDecisionFilings } from "@/lib/alerts/events";
 import type Anthropic from "@anthropic-ai/sdk";
 import type { SupabaseClient } from "@supabase/supabase-js";
@@ -71,6 +72,12 @@ export const TOOLS: Anthropic.Beta.BetaTool[] = [
     name: "simulate_new_capital",
     description: "Runs the deterministic new-capital engine for an amount in dollars. Compares researched holdings, diversified ETFs (VOO, VXUS, AVUV), researched new positions, keeping cash and trims, including each option's effect on total-portfolio exposure (NVIDIA look-through, technology, semiconductors, AI infrastructure, US share, emerging markets). Returns status ready (verified money, verified holdings and balances, no unresolved material development: the split can be executed) or conditional (the recommendation and split stand, but only as what to do once the open conditions are met; never present it as an order). Planned money that has not been deposited is always conditional; cash already held is capped at what is deployable after the protected reserve. Each stock carries the research conclusion as written and today's recommendation: when price, valuation, results, filings or financing changed since the research, it says reassess first. Few-year stock cases vs 10-15-year index forecasts are approximate context, not pass/fail.",
     input_schema: { type: "object", properties: { amount: { type: "number", description: "Dollars" }, source: { type: "string", enum: ["planned", "deposited", "existing"], description: "planned = new money not yet deposited (default when unsure); deposited = new money the user says has arrived; existing = cash already held" }, holdings_confirmed: { type: "boolean", description: "Only true if the user said in this conversation that they checked today that their holdings and balances match their broker accounts" } }, required: ["amount", "source"], additionalProperties: false },
+    strict: true,
+  },
+  {
+    name: "get_current_decision",
+    description: "The app's Current Portfolio decision, the same one the Decisions page shows: the best action now given the recorded holdings, approved research, today's prices, limits, brokerage cash and the savings the investor authorised under their standing transfer limit (min(limit, savings - reserve), net of planned transfers; never buying power). Gives the headline, the amount and funding, the alternatives and what to confirm. Use this, not your own sizing, whenever the question is what to do now with the money the investor has.",
+    input_schema: { type: "object", properties: {}, required: [], additionalProperties: false },
     strict: true,
   },
   {
@@ -264,6 +271,10 @@ export async function runTool(name: string, input: Record<string, unknown>, ws: 
       const source = parseSource(input.source);
       const filings = await loadDecisionFilings(ws);
       return { layer: "model_output", ...newCapital({ amount, source, transfers: ws.transfers, holdingsConfirmed: input.holdings_confirmed === true, portfolio: p, research: ws.research, policy: ws.policy, now: ws.now, quotes: ws.quotes, filings, yields: ws.yields, rules: ruleRowsOf(ws.policy) }) };
+    }
+    case "get_current_decision": {
+      const d = currentDecisionFor(ws, await loadDecisionFilings(ws));
+      return { layer: "model_output", headline: d.headline, why: d.why, status: d.status, allocations: d.allocations, funding: d.funding, money: d.money, alternatives: d.alternatives, confirm: d.confirm, gates: d.result.gates, exposure_reasons: d.result.exposure.reasons };
     }
     case "get_policy": {
       const a = ws.policy?.audit;

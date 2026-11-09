@@ -149,6 +149,9 @@ export function newCapital(args: {
   consider?: string[];
   /** Transfers between your accounts that you recorded as planned (savings to brokerage, for example). */
   transfers?: PlannedTransfer[];
+  /** Savings you could move under your standing transfer limit (already net of the reserve and planned transfers).
+   *  Only used with source "existing": it can fund the purchase only if you choose to transfer it. */
+  authorizedSavings?: number;
 }): NewCapitalResult {
   const { portfolio, research, policy, now } = args;
   const source: MoneySource = !args.source || args.source === "new" ? "planned" : args.source;
@@ -166,7 +169,8 @@ export function newCapital(args: {
   const elsewhere = (cd.accounts ?? []).filter((a) => !a.canBuyChosen && a.use !== "savings" && a.cash >= 0.5);
   const elsewhereNote = elsewhere.length ? ` Cash in ${elsewhere.map((a) => `${a.name} (${fmt$(a.cash)})`).join(" and ")} stays in ${elsewhere.length > 1 ? "those accounts" : "that account"} and is not counted.` : "";
   const reserveNote = `The ${fmt$(cd.protectedReserve)} savings reserve is never used.`;
-  const deployable = spendable + plannedIn;
+  const authorized = source === "existing" ? Math.max(0, Math.round((args.authorizedSavings ?? 0) * 100) / 100) : 0;
+  const deployable = spendable + plannedIn + authorized;
   const amount = source === "existing" ? Math.min(requested, Math.floor(deployable * 100) / 100) : requested;
   // "Already deposited" is checked against the investing account's own cash. Once recorded it is already part
   // of that cash, so it must not be added to the portfolio a second time.
@@ -181,7 +185,9 @@ export function newCapital(args: {
         ? { requested, used: amount, verified: true, detail: `You said ${fmt$(requested)} of new money arrived in ${invName}, and its recorded cash (${fmt$(recordedCash)}) covers it` }
         : { requested, used: amount, verified: false, detail: `You said ${fmt$(requested)} of new money arrived, but ${invName} shows only ${fmt$(recordedCash)} of cash. Record the deposit (or add a current statement) so the money can be checked.${elsewhereNote}` }
       : fromTransfer > 0
-        ? { requested, used: amount, verified: false, detail: `${fmt$(amount)}: ${fmt$(spendable)} already in ${invName} plus ${fmt$(fromTransfer)} from the transfer you planned, which has not arrived yet. ${reserveNote}${elsewhereNote}` }
+        ? { requested, used: amount, verified: false, detail: authorized < 0.01
+          ? `${fmt$(amount)}: ${fmt$(spendable)} already in ${invName} plus ${fmt$(fromTransfer)} from the transfer you planned, which has not arrived yet. ${reserveNote}${elsewhereNote}`
+          : `${fmt$(amount)}: ${fmt$(spendable)} already in ${invName} plus ${fmt$(fromTransfer)} from savings${Math.min(fromTransfer, plannedIn) >= 0.01 ? `, ${fmt$(Math.min(fromTransfer, plannedIn))} of it through the transfer you planned, which has not arrived yet` : ""}${fromTransfer - plannedIn >= 0.01 ? `${plannedIn >= 0.01 ? ", and" : ","} ${fmt$(fromTransfer - plannedIn)} only if you choose to transfer it under your standing limit` : ""}. ${reserveNote}${elsewhereNote}` }
         : { requested, used: amount, verified: amount >= 1, detail: (amount < requested
           ? `You asked about ${fmt$(requested)}, but ${invName} holds ${fmt$(spendable)} of cash that can buy a stock or ETF, so this is sized on ${fmt$(amount)}.${savingsHint}`
           : `${fmt$(amount)} of cash already in ${invName}.`) + ` ${reserveNote}${elsewhereNote}` };
@@ -465,7 +471,7 @@ export function newCapital(args: {
     allocations.push({ symbol: etf.symbol, amount: Math.round(remaining * 100) / 100 });
     rationale.push(`${eligible.length ? "The rest" : "No stock qualifies for new money on current evidence, so the money"} to ${etf.symbol}, because ${whyOf.get(etf.symbol) ?? "it is the chosen diversified option"}. Holding cash is equally valid for money you may need within a few years.`);
   }
-  rationale.push(`Account: bought in ${invName}${fromTransfer > 0 ? `, after the planned ${fmt$(fromTransfer)} transfer arrives` : ""}. Acorns and the Roth are managed separately and never pay for this; selling in a taxable account can realize gains.`);
+  rationale.push(`Account: bought in ${invName}${fromTransfer > 0 ? (authorized < 0.01 ? `, after the planned ${fmt$(fromTransfer)} transfer arrives` : `, after ${fmt$(fromTransfer)} arrives from savings`) : ""}. Acorns and the Roth are managed separately and never pay for this; selling in a taxable account can realize gains.`);
   wouldChange.push(`${etf?.symbol ?? "The ETF"}: a concentration (NVIDIA, semiconductors, AI infrastructure, technology) reaching its level, which would favour a less concentrated fund, or needing the money within a few years, which favours cash.`);
 
   // ---- Execution readiness ----

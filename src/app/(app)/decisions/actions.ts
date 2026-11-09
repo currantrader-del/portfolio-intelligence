@@ -9,6 +9,7 @@ import { buildWorkspace } from "@/lib/workspace";
 import { CODE_VERSION, dbStatus, newCapital, parseSource, ruleRowsOf } from "@/lib/decision/newCapital";
 import { reviewPosition, REVIEW_CODE_VERSION } from "@/lib/decision/review";
 import { loadDecisionFilings } from "@/lib/alerts/events";
+import { currentDecisionFor } from "@/lib/decision/currentPortfolio";
 
 const ACTIONS = ["followed", "partially_followed", "declined", "deferred", "dismissed"] as const;
 type UserAction = (typeof ACTIONS)[number];
@@ -37,7 +38,8 @@ async function saveRun(db: Awaited<ReturnType<typeof createClient>>, kind: strin
 
 /** Re-runs the calculation on the server (never trusts numbers from the form) and records what the person chose. */
 export async function recordNewCapital(formData: FormData): Promise<ActionResult> {
-  const amount = Number(formData.get("amount"));
+  const mode = formData.get("mode") === "current" ? "current" : "what_if";
+  const amount = mode === "current" ? 1 : Number(formData.get("amount"));
   const source = parseSource(formData.get("source"));
   const holdingsConfirmed = formData.get("confirmed") === "1";
   const action = String(formData.get("user_action")) as UserAction;
@@ -48,11 +50,14 @@ export async function recordNewCapital(formData: FormData): Promise<ActionResult
   const db = await createClient();
   const ws = await buildWorkspace(db);
   const filings = await loadDecisionFilings(ws);
-  const result = newCapital({ amount, source, holdingsConfirmed, transfers: ws.transfers, portfolio: ws.portfolio, research: ws.research, policy: ws.policy, now: ws.now, quotes: ws.quotes, filings, yields: ws.yields, rules: ruleRowsOf(ws.policy) });
+  // Current Portfolio mode: the amount and funding come from your accounts and standing limit, never from the form.
+  const current = mode === "current" ? currentDecisionFor(ws, filings, holdingsConfirmed) : null;
+  const result = current ? current.result : newCapital({ amount, source, holdingsConfirmed, transfers: ws.transfers, portfolio: ws.portfolio, research: ws.research, policy: ws.policy, now: ws.now, quotes: ws.quotes, filings, yields: ws.yields, rules: ruleRowsOf(ws.policy) });
   const symbols = result.options.map((o) => o.symbol).filter((s) => s !== "CASH");
   // Everything the result depended on, with timestamps and sources, so the decision can be audited later.
   const inputs = {
-    amount, source, holdings_confirmed_by_you: holdingsConfirmed, at: ws.now.toISOString(),
+    mode, amount: current ? result.amount : amount, source: current ? "current_portfolio" : source, holdings_confirmed_by_you: holdingsConfirmed, at: ws.now.toISOString(),
+    capital_preference: ws.capitalPreference, transferable_savings: current?.money.transferable ?? null,
     holdings: ws.portfolio.holdings.map((h) => ({ s: h.symbol, q: h.quantity, p: h.price, src: h.priceSource, price_as_of: h.priceAsOf, holdings_as_of: h.holdingsAsOf })),
     accounts: ws.portfolio.accounts.map((a) => ({ name: a.name, as_of: a.asOf, source: a.sourceKind, trades_after: a.tradesAfter })),
     cash: ws.portfolio.cashDetail, data_quality: ws.portfolio.quality.status,
@@ -68,7 +73,8 @@ export async function recordNewCapital(formData: FormData): Promise<ActionResult
     kind: "new_capital",
     symbol: null,
     status: dbStatus(result.status),
-    recommendation: { action: `New cash ${"$" + amount.toLocaleString()}: ${result.recommendation.headline}`, status: result.status, funds: result.funds, exposure: result.exposure, summary: result.recommendation.rationale.join(" "), allocations: result.recommendation.allocations, illustrative: result.recommendation.illustrative, confidence: result.recommendation.confidence, would_change: result.recommendation.wouldChange, gates: result.gates, to_verify: result.toVerify, assumptions: result.assumptions, prices_at_decision: snapshotPrices(ws, symbols) },
+    recommendation: { action: current ? `Current portfolio: ${current.headline}` : `New cash ${"$" + amount.toLocaleString()}: ${result.recommendation.headline}`, mode, status: result.status,
+      ...(current ? { headline: current.headline, why: current.why, funding: current.funding, alternatives_summary: current.alternatives.map((a) => ({ title: a.title, status: a.status })), confirm: current.confirm } : {}), funds: result.funds, exposure: result.exposure, summary: result.recommendation.rationale.join(" "), allocations: current ? current.allocations : result.recommendation.allocations, illustrative: result.recommendation.illustrative, confidence: result.recommendation.confidence, would_change: result.recommendation.wouldChange, gates: result.gates, to_verify: result.toVerify, assumptions: result.assumptions, prices_at_decision: snapshotPrices(ws, symbols) },
     alternatives: result.options.map((o) => ({ symbol: o.symbol, kind: o.kind, label: o.label, expected_return: o.expectedReturn, eligible: o.eligible, notes: o.notes })),
     execution: execution ? { description: execution, recorded_at: new Date().toISOString() } : null,
     model_run_id: runId,
@@ -143,4 +149,20 @@ export async function cancelTransfer(formData: FormData): Promise<ActionResult> 
   await saveRun(db, "planned_transfer_cancel", "transfer@1", { transfer_id: id }, {});
   revalidatePath("/decisions");
   return;
+}
+
+/**
+ * Saves your standing capital preference: the most you would move from savings to the brokerage if an opportunity
+ * justifies it. A maximum for evaluating opportunities only; it creates no deposit or transfer and is never buying
+ * power. A new row each time; earlier ones stay as history.
+ */
+export async function saveCapitalPreference(formData: FormData): Promise<ActionResult> {
+  const clear = formData.get("clear") === "1";
+  const raw = String(formData.get("max_transfer") ?? "").replace(/[$,\s]/g, "");
+  const max = Math.round(Number(raw));
+  if (!clear && !(raw !== "" && max >= 0 && max <= 1_000_000)) return fail("Enter the most you would move from savings, for example 10000.");
+  const db = await createClient();
+  await saveRun(db, "capital_preference", "capital-preference@1", { max_transfer: clear ? null : max, at: new Date().toISOString() },
+    clear ? { cleared: true } : { max_transfer: max, note: "Maximum I am willing to transfer from savings to the brokerage if a sufficiently attractive opportunity is identified. Not buying power; not an instruction to invest." });
+  revalidatePath("/", "layout");
 }

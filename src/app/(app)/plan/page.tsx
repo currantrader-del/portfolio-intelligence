@@ -8,7 +8,8 @@ import { OutdatedNotice } from "@/components/OutdatedNotice";
 import { loadContextEvents } from "@/lib/freshness/contextEvents";
 import { outdatedVerdict } from "@/lib/freshness/outdated";
 import { getWorkspace } from "@/lib/workspace";
-import { HOLDINGS_FRESH_DAYS, newCapital, ruleRowsOf } from "@/lib/decision/newCapital";
+import { HOLDINGS_FRESH_DAYS } from "@/lib/decision/newCapital";
+import { currentDecisionFor } from "@/lib/decision/currentPortfolio";
 import { loadDecisionFilings } from "@/lib/alerts/events";
 
 export const dynamic = "force-dynamic";
@@ -44,7 +45,7 @@ export default async function PlanPage() {
   // The current view, computed now from today's facts without any AI call.
   const cd = ws.portfolio.cashDetail;
   const filings = await loadDecisionFilings(ws).catch(() => new Map());
-  const nc = newCapital({ amount: Math.max(1, cd.spendableNow), source: "existing", transfers: ws.transfers, portfolio: ws.portfolio, research: ws.research, policy: ws.policy, now: ws.now, quotes: ws.quotes, filings, yields: ws.yields, rules: ruleRowsOf(ws.policy) });
+  const best = currentDecisionFor(ws, filings);
   const brokers = ws.portfolio.accounts.filter((a) => a.role !== "cash" && a.role !== "protected_savings");
   const unverified = brokers.filter((a) => a.ageDays > HOLDINGS_FRESH_DAYS || a.tradesAfter > 0);
   const reserveRule = audit?.subjects.find((x) => x.subject === "protected_reserve");
@@ -54,7 +55,7 @@ export default async function PlanPage() {
       <div className="flex flex-col gap-1">
         <span className="cap">Portfolio plan</span>
         <h1 className="h1">Your plan</h1>
-        <p className="t-sm">Built from your research, holdings, cash, policy and the latest market briefing. It rebuilds every Monday morning or when you tap Rebuild (about $0.10). A policy, holdings or research change never rebuilds it automatically; it is marked outdated instead. Older plans are kept as history. It proposes; you decide, and it never trades.</p>
+        <p className="t-sm">Your longer-term allocation, risk and roadmap. What to do with money right now, and how much, is on <Link href="/decisions">Decisions</Link>; this page does not size today&apos;s cash. Built from your research, holdings, cash, policy and the latest market briefing. It rebuilds every Monday morning or when you tap Rebuild (about $0.10). A policy, holdings or research change never rebuilds it automatically; it is marked outdated instead. Older plans are kept as history. It proposes; you decide, and it never trades.</p>
       </div>
 
       <Card className="!gap-2">
@@ -68,9 +69,9 @@ export default async function PlanPage() {
         <CardHead id="pl-now" title="Where things stand today" right={<Pill small>Computed now · no AI</Pill>} />
         <ul className="flex flex-col gap-1.5 t-sm">
           <li><span className="text-ink font-semibold">Protected reserve:</span> {money(cd.protectedReserve)} in savings, {reserveRule?.authority === "you" ? "approved by you" : "app default, not approved"}. A firm restriction: never invested and never counted as buying power.</li>
-          <li><span className="text-ink font-semibold">Cash you could invest:</span> {money(cd.spendableNow)} in your brokerage account{cd.deployableSavings >= 1 ? `, plus ${money(cd.deployableSavings)} of savings above the reserve` : ""}. {unverified.length ? "Estimated, not confirmed" : "Verified by recent statements"}. Investing it, or leaving it in cash, are both valid.</li>
+          <li><span className="text-ink font-semibold">Cash you could invest:</span> {money(cd.spendableNow)} in your brokerage account{best.money.transferable.amount >= 1 ? `, plus up to ${money(best.money.transferable.amount)} from savings under your standing transfer limit (only for an opportunity that justifies it)` : ""}. {unverified.length ? "Estimated, not confirmed" : "Verified by recent statements"}. Investing it, or leaving it in cash, are both valid.</li>
           <li><span className="text-ink font-semibold">Holdings:</span> {unverified.length ? `estimated. ${unverified.map((a) => `${a.name} is known from a ${a.asOf.slice(0, 10)} statement${a.tradesAfter ? ` plus recorded trades` : ""}`).join("; ")}. Check them before acting on a dollar amount.` : "verified by statements within a week."}</li>
-          <li><span className="text-ink font-semibold">New money today:</span> {nc.lean.replace(/^Lean: /, "")} <Link href="/decisions" className="t-sm">Details</Link></li>
+          <li><span className="text-ink font-semibold">Best action now:</span> {best.headline}. <Link href="/decisions" className="t-sm">Decisions</Link></li>
           {audit && <li><span className="text-ink font-semibold">Policy:</span> {audit.subjects.filter((x) => x.authority === "you").length} rules approved by you{audit.imported.length ? `; ${audit.imported.length} imported ${audit.imported.length === 1 ? "guideline" : "guidelines"} awaiting your review (they act as ceilings, not targets)` : ""}{audit.conflicts.length ? `; ${audit.conflicts.length} open limit ${audit.conflicts.length > 1 ? "conflicts" : "conflict"}` : "; no open limit conflicts"}. <Link href="/policy" className="t-sm">Policy</Link></li>}
         </ul>
         <p className="t-xs">Allocation ranges are guidelines and ceilings, never targets to fill. Being below a range, or below 5% cash, is not a reason to buy, sell or wait.</p>
@@ -90,7 +91,8 @@ export default async function PlanPage() {
 
           {(plan.opportunities?.length ?? 0) > 0 && (
             <Card labelledBy="pl-opp" className="!gap-0" flush>
-              <div className="px-4 pt-4 pb-2 lg:px-5"><CardHead id="pl-opp" title="Opportunities" right={<span className="t-xs">Ready for decision, vs VOO</span>} /></div>
+              <div className="px-4 pt-4 pb-2 lg:px-5"><CardHead id="pl-opp" title="Opportunities" right={<span className="t-xs">Roadmap ideas, vs VOO</span>} /></div>
+              <p className="t-xs px-4 pb-2 lg:px-5">The plan&apos;s view when it was built. Today&apos;s amounts come from <Link href="/decisions">Decisions</Link>, which re-checks research, prices and cash now.</p>
               <ul className="flex flex-col">
                 {plan.opportunities.map((o) => (
                   <li key={o.symbol} className="border-t border-line">
@@ -100,7 +102,7 @@ export default async function PlanPage() {
                           <span className="text-ink font-semibold">{o.symbol}</span>
                           <Pill small tone={o.verdict === "Buy now" ? "gain" : o.verdict === "Wait for price" ? "warn" : "neutral"}>{o.verdict}</Pill>
                         </span>
-                        <span className="t-sm num shrink-0">{o.verdict === "Buy now" && o.amountUsd ? money(o.amountUsd) : o.buyBelow ? `below $${o.buyBelow}` : ""}</span>
+                        <span className="t-sm num shrink-0">{o.buyBelow ? `below $${o.buyBelow}` : ""}</span>
                       </span>
                     }>
                       <div className="flex flex-col gap-1.5 t-sm">
@@ -147,6 +149,7 @@ export default async function PlanPage() {
             <CardHead id="pl-cash" title="Cash" right={plan.cash.deployable !== null ? <span className="t-sm num">{money(plan.cash.deployable)} deployable</span> : null} />
             <p className="t-sm"><span className="text-ink font-semibold">Now: </span>{plan.cash.now || "—"}</p>
             <p className="t-sm"><span className="text-ink font-semibold">Wait for: </span>{plan.cash.waitFor || "—"}</p>
+            <p className="t-xs">The plan&apos;s cash view when it was built. For today: {best.headline}. <Link href="/decisions">Decisions</Link></p>
           </Card>
 
           {plan.stale.length > 0 && (
