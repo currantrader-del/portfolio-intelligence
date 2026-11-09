@@ -79,8 +79,8 @@ export async function runInvestigationStep(db: SupabaseClient, requestId: string
   const t0 = Date.now();
   try {
     const spent = await spentToday(db);
-    if (spent.answers >= DAILY_CAP.answers || spent.total >= DAILY_CAP.total) {
-      s.status = "paused"; s.pauseReason = `Today's cost limit is reached ($${spent.total.toFixed(2)} spent). Resume after midnight UTC.`;
+    if ((spent.answers >= DAILY_CAP.answers || spent.total >= DAILY_CAP.total) && !(await dailyCapOverridden(db, requestId))) {
+      s.status = "paused"; s.pauseReason = `Today's cost limit is reached ($${spent.total.toFixed(2)} spent). Resume after midnight UTC, or use "Finish today anyway".`;
       note(s, step, s.pauseReason);
     } else if (s.usage.costUsd >= RUN_CEILING_USD && step !== "finalize") {
       note(s, step, `The run reached its $${RUN_CEILING_USD} safety ceiling; finishing with what was done.`);
@@ -570,7 +570,15 @@ async function statusForRequest(db: SupabaseClient, req: { id: string; computed_
  * Returns true when a restart was sent.
  */
 export const AUTO_RESTARTS = 3;
-export async function resumeIfStalled(db: SupabaseClient, requestId: string, dispatch: () => Promise<unknown>, manual = false) {
+export const CAP_OVERRIDE_NOTE = "daily limit overridden by you";
+/** You chose to finish this run today despite the daily cost limit (one run, one UTC day; the run's own ceiling still applies). */
+export async function dailyCapOverridden(db: SupabaseClient, requestId: string, now = new Date()) {
+  const { count } = await db.from("model_runs").select("id", { count: "exact", head: true }).eq("kind", "investigation_heartbeat").eq("inputs->>request_id", requestId).eq("outputs->>note", CAP_OVERRIDE_NOTE).gte("computed_at", `${now.toISOString().slice(0, 10)}T00:00:00Z`);
+  return (count ?? 0) > 0;
+}
+
+export async function resumeIfStalled(db: SupabaseClient, requestId: string, dispatch: () => Promise<unknown>, manual = false, overrideDailyCap = false) {
+  if (manual && overrideDailyCap) await save(db, "investigation_heartbeat", INVESTIGATION_VERSION, { request_id: requestId, seq: null }, { step: null, note: CAP_OVERRIDE_NOTE });
   if (!manual) {
     // Automatic restarts are capped: a step that keeps dying would otherwise be retried (and paid for) forever.
     const { count } = await db.from("model_runs").select("id", { count: "exact", head: true }).eq("kind", "investigation_heartbeat").eq("inputs->>request_id", requestId).eq("outputs->>note", "restarted after a stall");

@@ -59,17 +59,18 @@ export function InvestigationRunner({ symbol, hasResearch, plan }: { symbol: str
     return () => clearInterval(t);
   }, [st?.status]);
 
-  async function start(kind: "full" | "refresh" | "resume", confirm = false) {
+  async function start(kind: "full" | "refresh" | "resume" | "override", confirm = false) {
+    if (kind === "override" && !window.confirm("Finish this investigation today, past the daily cost limit? It continues from its last checkpoint; the run's own safety ceiling still applies.")) return;
     if (starting) return;
     setError(null);
     setNeedsConfirm(null);
     setStarting(kind);
     // The full investigation is only reachable after ticking its box, which the server requires (confirmFull).
     // Going over the monthly budget is a separate "Start anyway" (confirm).
-    const r = await requestJSON<{ needsConfirm?: boolean }>("/api/research/investigate", { json: kind === "resume" ? { symbol, resume: true } : { symbol, type: kind, confirm, confirmFull: kind === "full" && confirmFull } });
+    const r = await requestJSON<{ needsConfirm?: boolean }>("/api/research/investigate", { json: kind === "resume" || kind === "override" ? { symbol, resume: true, override: kind === "override" } : { symbol, type: kind, confirm, confirmFull: kind === "full" && confirmFull } });
     setStarting(null);
     if (!r.ok) {
-      if (r.data?.needsConfirm && kind !== "resume") { setNeedsConfirm(kind); setError(r.error); return; }
+      if (r.data?.needsConfirm && (kind === "full" || kind === "refresh")) { setNeedsConfirm(kind); setError(r.error); return; }
       setError(`Did not start. ${r.error}`); return;
     }
     if (timer.current) clearTimeout(timer.current);
@@ -82,6 +83,8 @@ export function InvestigationRunner({ symbol, hasResearch, plan }: { symbol: str
   const elapsed = st && "startedAt" in st ? Math.floor((now - new Date(st.startedAt).getTime()) / 1000) : 0;
   const busy = running || !!starting || st === null;
   // An update needs a finished investigation to build on; without one only a full investigation makes sense.
+  // A paused or stopped run is finished with Resume, never replaced by a new paid run.
+  const unfinished = st?.status === "paused" || st?.status === "stalled";
   const canUpdate = plan ? !!plan.foundation : hasResearch;
 
   return (
@@ -101,6 +104,8 @@ export function InvestigationRunner({ symbol, hasResearch, plan }: { symbol: str
             </>
           )}
         </div>
+      ) : unfinished ? (
+        <p className="t-sm">An investigation is already under way. Resume finishes it from its last checkpoint; the phases already done are not paid for again.</p>
       ) : plan ? (
         <UpdateSummary plan={plan} />
       ) : (
@@ -118,13 +123,16 @@ export function InvestigationRunner({ symbol, hasResearch, plan }: { symbol: str
         {(st?.status === "stalled" || st?.status === "paused") && (
           <button type="button" className={`btn btn-primary ${starting === "resume" ? "is-pending" : ""}`} onClick={() => start("resume")} disabled={!!starting}>{starting === "resume" ? <><Spinner />Resuming…</> : "Resume"}</button>
         )}
-        {canUpdate && (
+        {st?.status === "paused" && /cost limit/i.test(run?.pauseReason ?? "") && (
+          <button type="button" className={`btn ${starting === "override" ? "is-pending" : ""}`} onClick={() => start("override")} disabled={!!starting}>{starting === "override" ? <><Spinner />Resuming…</> : "Finish today anyway"}</button>
+        )}
+        {canUpdate && !unfinished && (
           <button type="button" className={`btn ${plan?.recommend !== "full" ? "btn-primary" : ""} ${starting === "refresh" ? "is-pending" : ""}`} onClick={() => start("refresh")} disabled={busy || plan?.recommend === "nothing_new"} aria-busy={starting === "refresh" || undefined}>
             {starting === "refresh" ? <><Spinner />Starting…</> : running ? <><Spinner />Running…</> : st === null ? <><Spinner />Checking…</> : plan?.recommend === "nothing_new" ? "Up to date" : `Update research${plan ? ` · about ${range(plan.estimates.update)}` : ""}`}
           </button>
         )}
       </div>
-      {!running && (
+      {!running && !unfinished && (
         <div className="rounded-[12px] border border-line px-3">
           <Disclose summary={<span className="t-sm">Full re-investigation{plan?.recommend === "full" ? " · recommended" : " · not needed now"}</span>} open={plan?.recommend === "full" || !canUpdate}>
             <div className="flex flex-col gap-2 t-sm pb-2">

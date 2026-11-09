@@ -29,7 +29,7 @@ export async function POST(req: Request) {
   const { data: sess } = await db.auth.getSession();
   const token = sess.session?.access_token;
   if (!auth.user || !token) return Response.json({ error: "Sign in first." }, { status: 401 });
-  const body = (await req.json().catch(() => null)) as { symbol?: string; type?: string; resume?: boolean; confirm?: boolean; confirmFull?: boolean } | null;
+  const body = (await req.json().catch(() => null)) as { symbol?: string; type?: string; resume?: boolean; override?: boolean; confirm?: boolean; confirmFull?: boolean } | null;
   const symbol = clean(body?.symbol);
   if (!symbol) return Response.json({ error: "No company given." }, { status: 400 });
   if (isEtf(symbol)) return Response.json({ error: "Broad ETFs don't need company research." }, { status: 400 });
@@ -37,10 +37,13 @@ export async function POST(req: Request) {
   const origin = new URL(req.url).origin;
   if (body?.resume) {
     if (st.status !== "stalled" && st.status !== "paused") return Response.json({ error: st.status === "running" ? "The research is still running." : "There is nothing to resume." }, { status: 409 });
-    await resumeIfStalled(db, st.requestId!, () => dispatchJob(origin, { job: "investigate", requestId: st.requestId!, token }), true);
+    // "Finish today anyway": only for a run already under way, and only past the daily limit (never the run's own ceiling).
+    await resumeIfStalled(db, st.requestId!, () => dispatchJob(origin, { job: "investigate", requestId: st.requestId!, token }), true, body.override === true);
     return Response.json({ requestId: st.requestId });
   }
   if (st.status === "running") return Response.json({ error: "Research on this company is already running." }, { status: 409 });
+  // A paused or stopped run is finished with Resume; starting another would pay again for the phases already done.
+  if (st.status === "paused" || st.status === "stalled") return Response.json({ error: "An investigation of this company is already under way. Use Resume to finish it from its last checkpoint." }, { status: 409 });
   const type = body?.type === "refresh" ? "material_event_refresh" : "full_investigation";
   const { data: company } = await db.from("companies").select("id, research_versions(id, research_as_of, created_at, completeness, origin, is_current, conclusion)").eq("symbol", symbol).maybeSingle();
   if (!company) {
