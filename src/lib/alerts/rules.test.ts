@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { buildPortfolio } from "@/lib/portfolio/engine";
 import { toResearchRecord } from "@/lib/research/records";
-import { evaluateAlerts } from "./rules";
+import { evaluateAlerts, moveCaveat } from "./rules";
 
 // Synthetic data only.
 const now = new Date("2026-11-05T16:00:00Z");
@@ -24,6 +24,12 @@ const research = [toResearchRecord("AAA", null, "held", [{
 }])];
 
 describe("alerts", () => {
+  it("words the big-move caveat for the move's direction", () => {
+    expect(moveCaveat(-0.07)).toMatch(/^A drop is not a buy signal/);
+    expect(moveCaveat(0.087)).toMatch(/^A jump is not a reason to buy or sell/);
+    expect(moveCaveat(0.087)).not.toMatch(/drop/);
+  });
+
   it("merges a big move, a band change and a limit breach on one company into one review", () => {
     const a = evaluateAlerts({ portfolio, research, marketDayPct: -0.008, now });
     expect(a[0].severity).toBe("high");

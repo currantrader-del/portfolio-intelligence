@@ -3,7 +3,7 @@
  * Pure. The checks themselves are the app's existing alert rules (src/lib/alerts) plus price bands
  * for researched ideas; this decides what is new since the last notification and formats it.
  */
-import type { Alert, Severity } from "@/lib/alerts/rules";
+import { moveCaveat, type Alert, type Severity } from "@/lib/alerts/rules";
 import type { ResearchRecord } from "@/lib/research/records";
 import { zoneFor } from "@/lib/research/valuation";
 import type { Quote } from "@/lib/market/quotes";
@@ -30,7 +30,7 @@ export function ideaAlerts(research: ResearchRecord[], held: Set<string>, quotes
     }
     const day = q.prevClose ? q.price / q.prevClose - 1 : null;
     if (day !== null && Math.abs(day) >= 0.07) {
-      out.push({ id: `idea-move:${r.symbol}`, severity: "medium", symbol: r.symbol, kind: "big_move", title: `${r.symbol} ${day > 0 ? "+" : ""}${(day * 100).toFixed(1)}% today`, detail: "A company you researched moved sharply. A drop is not a buy signal by itself.", href: `/research/${r.symbol}` });
+      out.push({ id: `idea-move:${r.symbol}`, severity: "medium", symbol: r.symbol, kind: "big_move", title: `${r.symbol} ${day > 0 ? "+" : ""}${(day * 100).toFixed(1)}% today`, detail: `A company you researched moved sharply. ${moveCaveat(day)}`, href: `/research/${r.symbol}` });
     }
   }
   return out;

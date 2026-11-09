@@ -26,6 +26,13 @@ export type Alert = {
 const RANK: Record<Severity, number> = { high: 0, medium: 1, low: 2 };
 const STOCK_BUCKETS = new Set(["Quality/growth individual stocks", "Asymmetric/high-risk growth sleeve"]);
 
+/** The caveat under a big move, worded for its direction: neither a drop nor a jump is a signal by itself. */
+export function moveCaveat(dayPct: number): string {
+  return dayPct < 0
+    ? "A drop is not a buy signal by itself; check filings and news first."
+    : "A jump is not a reason to buy or sell by itself; check filings and news first.";
+}
+
 export function evaluateAlerts(args: {
   portfolio: PortfolioView;
   research: ResearchRecord[];
@@ -52,7 +59,7 @@ export function evaluateAlerts(args: {
         symbol: h.symbol,
         kind: "big_move",
         title: `${h.symbol} ${signed(h.dayPct)} today`,
-        detail: rel !== null ? `${signed(rel)} versus the S&P 500${withMarket ? ", so mostly a market move" : ""}. A drop is not a buy signal by itself; check filings and news first.` : "A drop is not a buy signal by itself; check filings and news first.",
+        detail: rel !== null ? `${signed(rel)} versus the S&P 500${withMarket ? ", so mostly a market move" : ""}. ${moveCaveat(h.dayPct)}` : moveCaveat(h.dayPct),
         href: `/decisions/review/${h.symbol}`,
       });
     }
