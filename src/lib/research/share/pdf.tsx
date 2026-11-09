@@ -87,13 +87,34 @@ function List({ items, ordered }: { items: string[]; ordered?: boolean }) {
   return <View style={{ marginBottom: 6 }}>{items.map((it, i) => <View key={i} style={s.li}><Text style={s.bullet}>{ordered ? `${i + 1}.` : "•"}</Text><Rich text={it} style={s.liText} /></View>)}</View>;
 }
 
+/**
+ * Tables with short cells render as rows. Rows with long cells render as stacked label/value blocks,
+ * because a flex row taller than a page breaks the PDF layout engine.
+ */
 function Table({ head, rows, widths }: { head: string[]; rows: string[][]; widths?: number[] }) {
   const w = widths ?? head.map(() => 100 / head.length);
+  const long = rows.some((r) => r.some((c) => c.length > 280) || r.join("").length > 600);
+  if (long) {
+    return (
+      <View style={{ marginBottom: 8 }}>
+        {rows.map((r, k) => (
+          <View key={k} style={{ borderTopWidth: 0.5, borderTopColor: C.line, paddingVertical: 4 }}>
+            {r.map((c, i) => c.trim() ? (
+              <View key={i} style={{ flexDirection: "row", marginBottom: 1 }}>
+                <Text style={{ width: 70, fontSize: 8, color: C.muted }}>{pdfSafe(head[i] ?? "")}</Text>
+                <View style={{ flex: 1 }}>{c.split("\n").map((line, j) => <Rich key={j} text={line} style={{ fontSize: 8.5 }} />)}</View>
+              </View>
+            ) : null)}
+          </View>
+        ))}
+      </View>
+    );
+  }
   return (
     <View style={s.table}>
-      <View style={s.tr} fixed={false}>{head.map((h, i) => <Text key={i} style={[s.th, { width: `${w[i]}%` }]}>{pdfSafe(h)}</Text>)}</View>
+      <View style={s.tr}>{head.map((h, i) => <Text key={i} style={[s.th, { width: `${w[i]}%` }]}>{pdfSafe(h)}</Text>)}</View>
       {rows.map((r, k) => (
-        <View key={k} style={s.tr}>
+        <View key={k} style={s.tr} wrap={false}>
           {r.map((c, i) => <View key={i} style={{ width: `${w[i] ?? 10}%` }}>{c.split("\n").map((line, j) => <Rich key={j} text={line} style={s.td} />)}</View>)}
         </View>
       ))}
@@ -162,29 +183,50 @@ function BlockView({ b }: { b: Block }) {
   }
 }
 
+/** Sections that share a page with the one before them; every other section starts a new page. */
+const SAME_PAGE = new Set(["status", "conclusion", "valuation", "validation", "sources", "redactions"]);
+
 export function ShareDocument({ r }: { r: ShareReport }) {
   const gen = new Date(r.generatedAt).toLocaleDateString("en-US", { year: "numeric", month: "short", day: "numeric", timeZone: "UTC" });
+  const num = new Map(r.sections.map((sec, i) => [sec.id, i + 1]));
+  // One <Page> per group keeps layout time linear in the length of the research.
+  const groups: ShareReport["sections"][] = [];
+  for (const sec of r.sections) {
+    if (groups.length && SAME_PAGE.has(sec.id)) groups[groups.length - 1].push(sec);
+    else groups.push([sec]);
+  }
+  const chrome = (
+    <>
+      <View style={s.header} fixed><Text>{pdfSafe(r.title)} · company research</Text><Text>Personal portfolio details removed</Text></View>
+      <View style={s.footer} fixed>
+        <Text>Exported {gen} from saved research. Not personalized investment advice.</Text>
+        <Text>{pdfSafe(r.symbol)}</Text>
+      </View>
+    </>
+  );
   return (
     <Document title={pdfSafe(`${r.title} research`)} author="Portfolio Intelligence" subject={pdfSafe(r.subtitle)} creator="Portfolio Intelligence" producer="Portfolio Intelligence">
-      <Page size="LETTER" style={s.page} wrap>
-        <View style={s.header} fixed><Text>{pdfSafe(r.title)} · company research</Text><Text>Personal portfolio details removed</Text></View>
-        <View style={s.footer} fixed>
-          <Text>Exported {gen} from saved research. Not personalized investment advice.</Text>
-          <Text render={({ pageNumber, totalPages }) => `${pageNumber} / ${totalPages}`} />
-        </View>
-        <Text style={s.kicker}>Company research · full investigation</Text>
-        <Text style={s.title}>{pdfSafe(r.title)}</Text>
-        <Text style={s.subtitle}>{pdfSafe(r.subtitle)}</Text>
-        {r.notices.length > 0 && <View style={s.notice}>{r.notices.map((n, i) => <Text key={i} style={{ marginBottom: 2 }}>{pdfSafe(n)}</Text>)}</View>}
-        <Text style={s.h2}>Contents</Text>
-        <View style={{ marginBottom: 12 }}>{r.sections.map((sec, i) => <View key={sec.id} style={s.toc}><Link src={`#${sec.id}`} style={{ color: C.ink, textDecoration: "none" }}>{pdfSafe(`${i + 1}. ${sec.title}`)}</Link></View>)}</View>
-        {r.sections.map((sec, i) => (
-          <View key={sec.id} id={sec.id}>
-            <Text style={s.h1}>{pdfSafe(`${i + 1}. ${sec.title}`)}</Text>
-            {sec.blocks.map((b, j) => <BlockView key={j} b={b} />)}
-          </View>
-        ))}
-      </Page>
+      {groups.map((g, gi) => (
+        <Page key={gi} size="LETTER" style={s.page} wrap>
+          {chrome}
+          {gi === 0 && (
+            <>
+              <Text style={s.kicker}>Company research · full investigation</Text>
+              <Text style={s.title}>{pdfSafe(r.title)}</Text>
+              <Text style={s.subtitle}>{pdfSafe(r.subtitle)}</Text>
+              {r.notices.length > 0 && <View style={s.notice}>{r.notices.map((n, i) => <Text key={i} style={{ marginBottom: 2 }}>{pdfSafe(n)}</Text>)}</View>}
+              <Text style={s.h2}>Contents</Text>
+              <View style={{ marginBottom: 12 }}>{r.sections.map((sec, i) => <View key={sec.id} style={s.toc}><Link src={`#${sec.id}`} style={{ color: C.ink, textDecoration: "none" }}>{pdfSafe(`${i + 1}. ${sec.title}`)}</Link></View>)}</View>
+            </>
+          )}
+          {g.map((sec) => (
+            <View key={sec.id} id={sec.id}>
+              <Text style={s.h1}>{pdfSafe(`${num.get(sec.id)}. ${sec.title}`)}</Text>
+              {sec.blocks.map((b, j) => <BlockView key={j} b={b} />)}
+            </View>
+          ))}
+        </Page>
+      ))}
     </Document>
   );
 }
