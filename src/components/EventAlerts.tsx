@@ -1,24 +1,19 @@
-import Link from "next/link";
 import { loadEventAlerts } from "@/lib/alerts/events";
-import { Tag } from "@/components/Tag";
+import { buildItems, loadReviewState } from "@/lib/alerts/review";
+import { createClient } from "@/lib/supabase/server";
+import { FilingReviewList } from "@/components/FilingReview";
 
-const TONE = { high: "alert", medium: "warn", low: "neutral" } as const;
-
-/** Filing-driven events for held stocks. Streams in so Today renders even if SEC is slow. */
+/** Filing-driven events for held stocks, as review items. Streams in so the page renders even if SEC is slow. */
 export async function EventAlerts({ symbols, now }: { symbols: string[]; now: Date }) {
   const { alerts } = await loadEventAlerts(symbols, now);
   if (!alerts.length) return null;
-  const order = { high: 0, medium: 1, low: 2 };
+  const db = await createClient();
+  const items = buildItems(alerts, await loadReviewState(db, alerts));
   return (
     <section aria-labelledby="ev-h" className="flex flex-col gap-2">
       <h2 id="ev-h" className="text-lg font-semibold">Company events</h2>
-      {alerts.sort((a, b) => order[a.severity] - order[b.severity]).map((a) => (
-        <Link key={a.id} href={a.href} className="bg-surface border border-line rounded-2xl p-4 no-underline text-ink hover:border-line-strong flex flex-col gap-1">
-          <div className="flex items-center justify-between gap-3"><span className="font-semibold">{a.title}</span><Tag tone={TONE[a.severity]}>{a.timing === "upcoming" ? "EXPECTED (EST.)" : "FILED · TO REVIEW"}</Tag></div>
-          <span className="text-sm text-ink-2">{a.detail}</span>
-        </Link>
-      ))}
-      <p className="text-xs text-muted">From SEC filings. Expected dates are estimates. Filed documents are classified by form and item only; terms not reviewed.</p>
+      <FilingReviewList items={items} back="/brief" />
+      <p className="text-xs text-muted">From SEC filings. Filed documents are classified by form and item; offering documents by their cover page. An item clears when your research has read it in full or you mark it reviewed.</p>
     </section>
   );
 }

@@ -2,6 +2,9 @@ import Link from "next/link";
 import { EVENT_WINDOW, loadEventAlerts } from "@/lib/alerts/events";
 import type { Alert } from "@/lib/alerts/rules";
 import { Card, CardHead, Dot, Skel } from "@/components/ui";
+import { buildItems, loadReviewState } from "@/lib/alerts/review";
+import { createClient } from "@/lib/supabase/server";
+import { FilingReviewList } from "@/components/FilingReview";
 
 const ORDER = { high: 0, medium: 1, low: 2 };
 const COLOR = { high: "var(--loss)", medium: "var(--warn-ink)", low: "var(--muted)" };
@@ -14,7 +17,8 @@ export async function EventsCard({ symbols, now }: { symbols: string[]; now: Dat
   const { alerts } = await loadEventAlerts(symbols, now);
   const sort = (xs: Alert[]) => [...xs].sort((a, b) => ORDER[a.severity] - ORDER[b.severity]);
   const upcoming = sort(alerts.filter((a) => a.timing === "upcoming")).slice(0, 4);
-  const recent = sort(alerts.filter((a) => a.timing !== "upcoming")).slice(0, 5);
+  const filed = alerts.filter((a) => a.timing !== "upcoming");
+  const recent = filed.length ? buildItems(filed, await loadReviewState(await createClient(), filed)).slice(0, 8) : [];
   return (
     <Card tight labelledBy="ev-h">
       <CardHead id="ev-h" title={<span className="text-[15px]">Coming up</span>} right={<span className="src"><i>SEC</i>filings</span>} />
@@ -22,11 +26,11 @@ export async function EventsCard({ symbols, now }: { symbols: string[]; now: Dat
       {recent.length > 0 && (
         <>
           <div className="divider" />
-          <span className="t-sm text-ink font-semibold" id="ev-r">Filed recently, to review</span>
-          <Rows rows={recent} />
+          <span className="t-sm text-ink font-semibold" id="ev-r">Filed recently</span>
+          <FilingReviewList items={recent} back="/" />
         </>
       )}
-      <p className="t-xs">Expected dates are estimates from past filing dates. Filed documents are classified by form and item only; their terms are not reviewed until you or the research does.</p>
+      <p className="t-xs">Expected dates are estimates from past filing dates. Filed documents are classified by form and item only; an item clears when your research has read it in full or you mark it reviewed.</p>
     </Card>
   );
 }
