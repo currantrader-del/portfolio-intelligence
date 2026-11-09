@@ -37,8 +37,6 @@ export default async function RiskPage({ searchParams }: { searchParams: Promise
   const recorded = daily.filter((d) => d.investable > 0);
   const conflicts = new Set(ws.policy?.audit?.conflicts.map((x) => x.subject) ?? []);
   const exps = [...p.exposures].sort((a, b) => b.total - a.total);
-  // Same dollars, larger denominator: savings above the reserve hold no stocks.
-  const share = p.investableCapital ? p.total / p.investableCapital : 1;
   const top = exps[0];
   const others = exps.slice(1, 7);
   const name = (sym: string) => ws.research.find((r) => r.symbol === sym)?.name ?? null;
@@ -96,7 +94,7 @@ export default async function RiskPage({ searchParams }: { searchParams: Promise
                 </details>
               ))}
             </div>
-            <span className="t-xs">Effect on your invested portfolio of {usd(p.total)} (savings outside the brokerage are not included). Cash and the protected reserve are never shocked. Based on past behaviour; real moves can be larger.</span>
+            <span className="t-xs">Effect on investable capital of {usd(p.total)}. Cash and the protected reserve are never shocked. Based on past behaviour; real moves can be larger.</span>
           </Card>
         </div>
 
@@ -105,22 +103,22 @@ export default async function RiskPage({ searchParams }: { searchParams: Promise
 
           {/* Allocation / exposure */}
           <Card labelledBy="ox-h">
-            <CardHead id="ox-h" title="Other exposures" right={<span className="t-xs">of invested · of all investable</span>} />
+            <CardHead id="ox-h" title="Other exposures" right={<span className="t-xs">of investable</span>} />
             {others.map((e) => {
               const c = conflicts.has(e.symbol);
               return (
                 <div key={e.symbol} className="flex flex-col gap-1.5">
                   <div className="flex items-center justify-between gap-3">
                     <Link href={`/research/${e.symbol}`} className="t-sm text-ink no-underline">{e.symbol}</Link>
-                    <span className="t-xs num"><span className="text-ink">{pctStr(e.total)}</span> · {pctStr(e.total * share)} · limit {pctStr(e.max, 0)}{c && <span className="warn"> conflict</span>}</span>
+                    <span className="t-xs num"><span className="text-ink">{pctStr(e.total)}</span> · limit {pctStr(e.max, 0)}{c && <span className="warn"> conflict</span>}</span>
                   </div>
                   <Bar thin value={e.total} max={e.max} label={`${e.symbol} ${pctStr(e.total)} of ${pctStr(e.max, 0)}`} />
                 </div>
               );
             })}
             <div className="divider" />
-            <div className="flex items-center justify-between gap-3"><span className="t-sm">Top 5 companies</span><span className="t-sm num text-ink font-semibold">{pctStr(risk.concentration.topFive, 0)} of invested · {pctStr(risk.concentration.topFive * share, 0)} of all investable</span></div>
-            <span className="t-xs">Two denominators: your invested portfolio ({usd(p.total)}, which every limit applies to) and total investable capital ({usd(p.investableCapital)}, adding savings above the reserve). Each company is counted once: direct plus its share inside your ETFs. Top 5 includes your share of companies inside ETFs (approximate). Across holdings, the mix is like about {risk.concentration.effectiveN.toFixed(0)} equal positions, counting each ETF as one. Conflicted limits use the stricter source until you choose.</span>
+            <div className="flex items-center justify-between gap-3"><span className="t-sm">Top 5 companies</span><span className="t-sm num text-ink font-semibold">{pctStr(risk.concentration.topFive, 0)} of capital</span></div>
+            <span className="t-xs">Top 5 includes your share of companies inside ETFs (approximate). Across holdings, the mix is like about {risk.concentration.effectiveN.toFixed(0)} equal positions, counting each ETF as one. Conflicted limits use the stricter source until you choose.</span>
           </Card>
 
           <Card flush>

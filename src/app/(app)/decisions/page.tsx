@@ -6,18 +6,16 @@ import { Card, PageHeader, Pill, Seg } from "@/components/ui";
 import { AlertList } from "@/components/cards/Alerts";
 import { NewCapitalView, parseAmount } from "@/components/decisions/NewCapitalView";
 import { parseSource } from "@/lib/decision/newCapital";
-import { CurrentPortfolioView } from "@/components/decisions/CurrentPortfolioView";
 
 const ACTION_LABEL: Record<string, string> = {
   followed: "Followed", partially_followed: "Partly followed", declined: "Did something else", deferred: "Deferred", dismissed: "Dismissed",
 };
 const KIND_LABEL = (k: string) => (k === "historical" ? "Imported history" : k === "new_capital" ? "New cash" : k === "alert_review" ? "Position review" : k.replace("_", " "));
-type Tab = "current" | "whatif" | "reviews" | "past";
+type Tab = "new" | "reviews" | "past";
 
 export default async function DecisionsPage({ searchParams }: { searchParams: Promise<{ saved?: string; tab?: string; amount?: string; source?: string; confirmed?: string }> }) {
   const sp = await searchParams;
-  // Current portfolio is the default. "new" (the old New cash tab) and an amount in the URL open What-if.
-  const tab: Tab = sp.tab === "reviews" || sp.tab === "past" || sp.tab === "whatif" ? sp.tab : sp.tab === "new" || sp.amount || sp.source ? "whatif" : sp.saved ? "past" : "current";
+  const tab: Tab = sp.tab === "reviews" || sp.tab === "past" || sp.tab === "new" ? sp.tab : sp.saved ? "past" : "new";
   const ws = await getWorkspace();
   const reviews = ws.alerts.filter((a) => a.kind === "review" || a.kind === "over_limit" || a.kind === "price_zone" || a.kind === "big_move");
 
@@ -26,15 +24,12 @@ export default async function DecisionsPage({ searchParams }: { searchParams: Pr
       <PageHeader title="Decisions" actionsDesktopOnly actions={<Link href="/decisions?tab=past" className="btn">History</Link>} />
       <div className="lg:max-w-md">
         <Seg label="Decision type" current={tab} items={[
-          { key: "current", label: "Current portfolio", href: "/decisions" },
-          { key: "whatif", label: "What-if", href: "/decisions?tab=whatif" },
+          { key: "new", label: "New cash", href: "/decisions" },
           { key: "reviews", label: <>Reviews{reviews.length ? <span className="num opacity-70 ml-1">{reviews.length}</span> : null}</>, href: "/decisions?tab=reviews" },
           { key: "past", label: "Past", href: "/decisions?tab=past" },
         ]} />
       </div>
-      {tab === "current" && <CurrentPortfolioView ws={ws} confirmed={sp.confirmed === "1"} />}
-      {tab === "whatif" && <p className="t-sm lg:max-w-3xl">What-if: try a deposit or transfer that has not happened yet. Nothing here is your current position; the Current portfolio tab is.</p>}
-      {tab === "whatif" && <NewCapitalView ws={ws} amount={parseAmount(sp.amount)} source={parseSource(sp.source)} confirmed={sp.confirmed === "1"} action="/decisions" />}
+      {tab === "new" && <NewCapitalView ws={ws} amount={parseAmount(sp.amount)} source={parseSource(sp.source)} confirmed={sp.confirmed === "1"} action="/decisions" />}
       {tab === "reviews" && (
         <Card className="!gap-1 !pb-1.5 lg:max-w-3xl">
           {reviews.length ? <AlertList alerts={reviews} wrap /> : <p className="t-sm py-2">No position needs a review right now. Reviews appear when a holding moves sharply, crosses a research price band or goes over its limit.</p>}

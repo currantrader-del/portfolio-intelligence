@@ -6,13 +6,8 @@
  * The result is an ESTIMATE of today's portfolio unless every account was synced from the broker today:
  * trades not in the ledger are invisible to it.
  *
- * Two views, two denominators:
- *  - Invested portfolio (`total`): holdings in the brokerage, Acorns and retirement accounts plus the cash inside
- *    them. Every holding weight, bucket weight, company exposure and allocation limit uses this. Savings outside
- *    the brokerage never change it.
- *  - Total investable capital (`investableCapital`): the invested portfolio plus savings above the protected
- *    reserve. Used for capital planning, liquidity and "share of everything I could invest" views.
- * The protected reserve is tracked but excluded from both (policy rule).
+ * Percentages use investable capital as the denominator: invested + brokerage cash + savings above the
+ * protected reserve. The protected reserve is tracked but excluded from every percentage (policy rule).
  */
 import type { Quote } from "@/lib/market/quotes";
 import { companyLimit, type Policy, type Range } from "@/lib/policy/limits";
@@ -205,11 +200,9 @@ export type CompanyExposure = {
 };
 
 export type PortfolioView = {
-  total: number; // invested portfolio (holdings + cash inside investment accounts): the denominator for every weight and limit
-  /** Invested portfolio plus savings above the protected reserve: for capital planning and liquidity, never a limit denominator. */
-  investableCapital: number;
-  netWorthTracked: number; // investable capital + protected reserve
-  cash: number; // cash inside investment accounts (savings excluded; see cashDetail)
+  total: number; // investable capital: the denominator for every weight
+  netWorthTracked: number; // investable + protected reserve
+  cash: number; // deployable cash (brokerage + savings above the reserve)
   cashDetail: CashView;
   quality: DataQuality;
   sinceStatementDollar: number | null; // estimated price change on statement holdings since each statement
@@ -315,8 +308,7 @@ export function buildPortfolio(
     deployableSavings: round2(deployableSavings),
     deployable: round2(brokerageCash + deployableSavings),
   };
-  // Savings stay outside the invested portfolio: entering a savings balance never changes a holding's weight.
-  const cash = brokerageCash;
+  const cash = brokerageCash + deployableSavings;
   if (savings === null) missing.push("Savings balance not entered, so deployable savings and the protected reserve are not counted");
 
   const rows = [...bySymbol.entries()].map(([symbol, h]) => {
@@ -425,8 +417,7 @@ export function buildPortfolio(
     : { status: "estimated", headline: "Estimated, based on last statement holdings", reasons, missing, reconciliation };
   return {
     total: round2(total),
-    investableCapital: round2(total + deployableSavings),
-    netWorthTracked: round2(total + deployableSavings + Math.min(reserve, savings ?? 0)),
+    netWorthTracked: round2(total + Math.min(reserve, savings ?? 0)),
     cash: round2(cash),
     cashDetail,
     quality,

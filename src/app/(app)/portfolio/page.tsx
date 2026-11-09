@@ -59,7 +59,7 @@ export default async function PortfolioPage({ searchParams }: { searchParams: Pr
       <div className="grid grid-cols-1 gap-3 lg:gap-4 lg:grid-cols-12">
         {/* Portfolio Summary */}
         <Card className="lg:col-span-4" labelledBy="cap-h">
-          <CardHead id="cap-h" cap={p.quality.reconciliation.complete ? "Invested portfolio" : "Invested portfolio · incomplete"} right={<DataLabel kind={verified ? "verified" : "estimated"} />} />
+          <CardHead id="cap-h" cap={p.quality.reconciliation.complete ? "Investable capital" : "Investable capital · incomplete"} right={<DataLabel kind={verified ? "verified" : "estimated"} />} />
           <div className="flex flex-col gap-1.5">
             <span className="t-big">{usd(p.total)}</span>
             <span className="t-sm num">
@@ -70,8 +70,6 @@ export default async function PortfolioPage({ searchParams }: { searchParams: Pr
           <div className="grid grid-cols-2 gap-2">
             <Metric size="sm" label="Since statements" value={p.sinceStatementDollar === null ? "—" : `${p.sinceStatementDollar >= 0 ? "+" : ""}${usd(p.sinceStatementDollar)}`} note="price change, est." tone={p.sinceStatementDollar === null ? null : p.sinceStatementDollar >= 0 ? "gain" : "loss"} />
             <Metric size="sm" label="Protected reserve" value={usd(c.protectedReserve)} note="excluded from sizing" />
-            <Metric size="sm" label="Total investable capital" value={usd(p.investableCapital)} note={`+ ${usd(c.deployableSavings)} savings above reserve`} />
-            <Metric size="sm" label="Weights and limits use" value="Invested" note="savings never change them" />
           </div>
           <DataQualityNote p={p} />
         </Card>
@@ -103,7 +101,7 @@ export default async function PortfolioPage({ searchParams }: { searchParams: Pr
 
         {/* Allocation */}
         <Card className="lg:col-span-4" labelledBy="al-h">
-          <CardHead id="al-h" title="Allocation" right={<Link href="/policy" className="t-xs no-underline hover:text-ink">% of invested portfolio · vs policy</Link>} />
+          <CardHead id="al-h" title="Allocation" right={<Link href="/policy" className="t-xs no-underline hover:text-ink">vs policy</Link>} />
           <div className="flex h-2.5 rounded-full overflow-hidden gap-0.5" role="img" aria-label={buckets.map((b) => `${b.bucket} ${pctStr(b.weight, 0)}`).join(", ")}>
             {buckets.filter((b) => b.weight > 0).map((b, i) => <span key={b.bucket} style={{ width: `${b.weight * 100}%`, background: b.status === "over_max" ? "var(--warn-ink)" : SWATCH[i % SWATCH.length] }} />)}
           </div>
@@ -182,7 +180,7 @@ export default async function PortfolioPage({ searchParams }: { searchParams: Pr
               </tbody>
             </table>
           </div>
-          <p className="t-xs py-2">Prices are delayed quotes where available, otherwise the statement price. Contribution is in points of the invested portfolio; day change uses each quote&apos;s previous close.</p>
+          <p className="t-xs py-2">Prices are delayed quotes where available, otherwise the statement price. Contribution is in points of investable capital; day change uses each quote&apos;s previous close.</p>
         </Card>
 
         {/* Allocation / Exposure */}
@@ -197,7 +195,7 @@ export default async function PortfolioPage({ searchParams }: { searchParams: Pr
                   <div className="flex items-center justify-between gap-2">
                     <Link href={`/research/${e.symbol}`} className="t-sm text-ink font-semibold no-underline">{e.symbol}</Link>
                     <span className="t-xs num">
-                      <span className="text-ink">{pctStr(e.total)}</span> of invested · {pctStr(p.investableCapital ? (e.total * p.total) / p.investableCapital : e.total)} of all investable · limit {pctStr(e.max, 0)} (of invested)
+                      <span className="text-ink">{pctStr(e.total)}</span> · limit {pctStr(e.max, 0)}
                       {conflict ? <span className="warn"> · conflict</span> : lim?.status === "approved" ? null : <span> · generic</span>}
                     </span>
                   </div>

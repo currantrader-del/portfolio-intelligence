@@ -30,7 +30,7 @@ export default async function ResearchPage({ searchParams }: { searchParams: Pro
       symbol: h.symbol, name: r?.name ?? null, classification: v?.parsed.classification ?? null, coverage: c,
       action: v?.parsed.action ?? null, confidence: v?.parsed.confidence ?? null, researchAsOf: md(v?.research_as_of), versions: r?.versions ?? 0,
       price: h.price, zones: toZoneViews(v?.parsed.zones ?? []),
-      exposure: e ? `${pctStr(e.total)} of invested portfolio · limit ${pctStr(e.max, 0)}` : null,
+      exposure: e ? `${pctStr(e.total)} of investable · limit ${pctStr(e.max, 0)}` : null,
     };
   });
   const notOwned = ws.research.filter((r) => !ownedSet.has(r.symbol));

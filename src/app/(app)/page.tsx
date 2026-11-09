@@ -1,3 +1,4 @@
+import Form from "next/form";
 import { Suspense } from "react";
 import { after } from "next/server";
 import Link from "next/link";
@@ -17,8 +18,6 @@ import { MorningRunner } from "@/components/MorningRunner";
 import { OutdatedNotice } from "@/components/OutdatedNotice";
 import { loadContextEvents } from "@/lib/freshness/contextEvents";
 import { outdatedVerdict } from "@/lib/freshness/outdated";
-import { currentDecisionFor } from "@/lib/decision/currentPortfolio";
-import { loadDecisionFilings } from "@/lib/alerts/events";
 
 const pts = (v: number) => `${v >= 0 ? "+" : "−"}${Math.abs(v).toFixed(2)}`;
 
@@ -106,7 +105,7 @@ export default async function TodayPage() {
               {ws.benchmarks.map((b) => (
                 <Metric key={b.symbol} className="max-lg:hidden" size="sm" align="right" label={b.label} value={pctStr(b.dayPct, 1, true)} tone={b.dayPct === null ? null : b.dayPct >= 0 ? "gain" : "loss"} />
               ))}
-              <Metric size="sm" align="right" label="Invested" value={`${verified ? "" : "≈ "}${usd(p.total)}`} note={p.investableCapital > p.total + 0.5 ? `${usd(p.investableCapital)} with savings` : undefined} />
+              <Metric size="sm" align="right" label="Investable" value={`${verified ? "" : "≈ "}${usd(p.total)}`} />
             </div>
           </div>
           <p className="t-sm leading-relaxed">{brief.sentences.join(" ")}</p>
@@ -156,7 +155,20 @@ export default async function TodayPage() {
           )}
         </Card>
 
-        <Suspense fallback={<div className="card card-tight lg:col-span-12"><Skel w="60%" /></div>}><BestAction /></Suspense>
+        <Form action="/decisions/new-capital" className="card card-tight lg:col-span-12 !flex-row flex-wrap items-center justify-between gap-3">
+          <div className="flex flex-col min-w-0 flex-1 basis-56">
+            <span className="font-semibold">Invest new cash</span>
+            <span className="t-xs">Compares holdings, ETFs, new ideas and holding cash. A recommendation appears only when the evidence is current.</span>
+          </div>
+          <div className="flex gap-2 items-center">
+            <label htmlFor="amt" className="sr-only">Amount in dollars</label>
+            <div className="flex items-center rounded-[12px] border border-line-strong bg-ground px-3 min-h-11 w-32">
+              <span className="text-muted">$</span>
+              <input id="amt" name="amount" inputMode="decimal" defaultValue="1250" className="w-full min-h-11 bg-transparent px-1 num outline-none" />
+            </div>
+            <button className="btn">Compare <Chevron /></button>
+          </div>
+        </Form>
       </div>
     </div>
   );
@@ -181,21 +193,5 @@ async function MoverHeadlines({ movers }: { movers: { symbol: string; dayPct: nu
       ))}
       <p className="t-xs">Headlines are leads to check, not reasons to trade.</p>
     </div>
-  );
-}
-
-/** The Current Portfolio decision in one line: the same answer the Decisions page gives. */
-async function BestAction() {
-  const ws = await getWorkspace();
-  const d = currentDecisionFor(ws, await loadDecisionFilings(ws).catch(() => new Map()));
-  return (
-    <Link href="/decisions" className="card card-tight lg:col-span-12 !flex-row items-center justify-between gap-3 no-underline">
-      <span className="flex flex-col min-w-0">
-        <span className="cap">Best action now</span>
-        <span className="font-semibold text-ink">{d.headline}</span>
-        <span className="t-xs">From your holdings, approved research, cash and standing transfer limit. No AI. Open Decisions for the alternatives and what to confirm.</span>
-      </span>
-      <Chevron />
-    </Link>
   );
 }

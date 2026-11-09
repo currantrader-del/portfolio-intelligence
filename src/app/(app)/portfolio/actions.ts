@@ -18,20 +18,10 @@ const isoDate = (v: FormDataEntryValue | null) => {
 export async function saveSavings(formData: FormData): Promise<ActionResult> {
   const balance = money(formData.get("balance"));
   const date = isoDate(formData.get("as_of"));
-  const accountId = String(formData.get("account_id") ?? "");
-  const name = String(formData.get("name") ?? "").trim().slice(0, 80) || "Savings";
+  const name = String(formData.get("name") ?? "Savings").trim().slice(0, 80) || "Savings";
   if (!(balance >= 0) || !date) return fail("Enter a balance (for example 3000) and a date.");
   const db = await createClient();
-  // Update the account you chose. A new savings account is created only when you ask for one, so a balance
-  // update can never add a second copy of the same account (which would double-count savings).
-  let acct: { id: string } | null = null;
-  if (accountId && accountId !== "new") {
-    acct = (await db.from("accounts").select("id").eq("account_role", "cash").eq("id", accountId).maybeSingle()).data;
-    if (!acct) return fail("That savings account is not on file.");
-  } else {
-    if (accountId === "new" && !String(formData.get("name") ?? "").trim()) return fail("Name the new savings account.");
-    acct = (await db.from("accounts").select("id").eq("account_role", "cash").eq("name", name).maybeSingle()).data;
-  }
+  let { data: acct } = await db.from("accounts").select("id").eq("account_role", "cash").eq("name", name).maybeSingle();
   if (!acct) {
     const ins = await db.from("accounts").insert({ name, institution: "Bank (entered by you)", account_role: "cash" }).select("id").single();
     if (ins.error) throw ins.error;

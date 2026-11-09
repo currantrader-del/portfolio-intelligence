@@ -122,7 +122,6 @@ function tables(): Record<string, Record<string, unknown>[]> {
       { id: "acc-1", name: "Sample Brokerage", account_role: "taxable_brokerage" },
       { id: "acc-2", name: "Sample Round-ups", account_role: "taxable_brokerage" },
       { id: "acc-3", name: "Sample Roth IRA", account_role: "retirement" },
-      { id: "acc-4", name: "Sample Savings", account_role: "cash" },
     ],
     holding_snapshots: [
       { id: "s1", account_id: "acc-1", as_of: stmt + "T21:00:00Z", source_kind: "statement", total_value: null, cash_value: 1904, positions: [
@@ -139,7 +138,6 @@ function tables(): Record<string, Record<string, unknown>[]> {
       { id: "s3", account_id: "acc-3", as_of: old + "T21:00:00Z", source_kind: "statement", total_value: null, cash_value: 40, positions: [
         { symbol: "AVUV", quantity: 26, price: 96, market_value: 2496, cost_basis: null },
       ] },
-      { id: "s4", account_id: "acc-4", as_of: ago(2) + "T23:59:00Z", source_kind: "manual", total_value: 15000, cash_value: 15000, positions: [] },
     ],
     companies: [
       { symbol: "ACME", name: "Acme Systems", watchlist_status: "held", ...pipe("owned"), research_versions: [version("acme-1", ago(19), conclusion({ action: "HOLD", cls: "Quality growth", conf: "High", ref: 175, refDate: ago(19), bear: 120, base: 250, bull: 340, zones: [["< $150", "Add research trigger"], ["$150–$230", "Hold"], ["> $230", "Trim review"]], thesis: "Leader in its niche with expanding margins." }))] },
@@ -166,7 +164,6 @@ function tables(): Record<string, Record<string, unknown>[]> {
       { id: "ti-1", kind: "trade_idea", computed_at: ago(12) + "T15:00:00Z", inputs: {}, outputs: { entry: { at: ago(12) + "T15:00:00Z", underlying: 170.2, premium: 7.4, premiumSource: "quote", voo: 604.1 }, idea: { symbol: "ACME", instrument: "option", option: { type: "call", strike: 175, expiry: "2027-01-15", contract: "ACME270115C00175000", estPremium: 7.2 }, direction: "up", entryRef: 170.2, target: 205, stop: 158, endDate: "2027-01-08", confidence: "medium", probability: 0.5, thesis: "Data-center orders in the last two 8-Ks run well ahead of the consensus revenue for next quarter; results on Dec 10 should force estimates up.", whyNow: "Results on 2026-12-10; estimates have not moved since the orders were filed.", risks: ["Guidance could offset a strong quarter", "The option can expire worthless: the whole premium can be lost."], wouldChange: "A pre-announcement or a cut to capex by its two largest customers.", sizeUsd: 750, sources: [{ title: "Q3 8-K", url: "https://www.sec.gov/" }, { title: "Company IR", url: "https://example.com/ir" }], expectedPct: 0.066, hurdlePct: 0.039, rewardRisk: 2.9 } } },
       { id: "ti-0", kind: "trade_idea", computed_at: ago(70) + "T15:00:00Z", inputs: {}, outputs: { entry: { at: ago(70) + "T15:00:00Z", underlying: 199.0, premium: null, premiumSource: null, voo: 590.0 }, idea: { symbol: "CRWN", instrument: "stock", option: null, direction: "up", entryRef: 199, target: 228, stop: 186, endDate: ago(10), confidence: "high", probability: 0.6, thesis: "Price fell on a one-off charge the 10-Q shows is non-cash; buybacks resume next quarter.", whyNow: "Buyback window reopens after the 10-Q.", risks: ["Charge could recur"], wouldChange: "A second charge.", sizeUsd: 1500, sources: [{ title: "Q3 8-K", url: "https://www.sec.gov/" }, { title: "Company IR", url: "https://example.com/ir" }], expectedPct: 0.035, hurdlePct: 0.03, rewardRisk: 2.2 } } },
       { id: "tc-0", kind: "trade_close", computed_at: ago(20) + "T18:00:00Z", inputs: { idea_id: "ti-0" }, outputs: { mark: { underlying: 229.1, premium: null, voo: 601.0, today: ago(20) }, result: { status: "target", returnPct: 0.151, vooPct: 0.0186, edgePct: 0.1326, underlyingPct: 0.151, priced: "live" } } },
-      { id: "cp-1", kind: "capital_preference", computed_at: ago(1) + "T12:00:00Z", inputs: {}, outputs: { max_transfer: 10000 } },
       { id: "ws-1", kind: "watch_settings", computed_at: ago(2) + "T15:00:00Z", inputs: {}, outputs: { topic: "pi-sample7k2mfq9xw3hnd8r", enabled: true } },
       { id: "wr-2", kind: "watch_run", computed_at: ago(0) + "T15:30:00Z", inputs: {}, outputs: { version: "watch@1", at: ago(0) + "T15:30:00Z", trigger: "schedule", checked: 6, sent: [], summary: null, pushed: false, error: null, costUsd: 0 } },
       { id: "wr-1", kind: "watch_run", computed_at: ago(1) + "T17:00:00Z", inputs: {}, outputs: { version: "watch@1", at: ago(1) + "T17:00:00Z", trigger: "schedule", checked: 7, pushed: true, error: null, costUsd: 0.0006,
