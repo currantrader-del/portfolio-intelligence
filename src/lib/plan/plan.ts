@@ -3,7 +3,7 @@
  * market briefing into a target and an action for every holding and researched idea. Pure: the
  * instructions and the checks. The job lives in job.ts. The plan proposes; the investor decides.
  */
-export const PLAN_VERSION = "plan@2";
+export const PLAN_VERSION = "plan@3";
 export const PLAN_LIMITS = { turns: 10, searches: 2, ms: 6 * 60_000, maxTokens: 12000 };
 
 export const PLAN_SYSTEM = `You are the portfolio planner inside Portfolio Intelligence, working for one private investor whose portfolio, accounts, cash, policy limits, stored research and latest market briefing are given below. Write their portfolio plan: one page that turns everything already researched into an action for each position, and a plan for cash.
@@ -21,13 +21,27 @@ How to work:
 - Research basis: the app picks each company's record automatically from the evidence (get_research): a completed investigation is the investment model; one with open questions supports Hold, No Add and Trim but no new money until a targeted update resolves them; a preliminary screen or older note supports monitoring and Hold or No Add only. Without a completed investigation, do not set a target above today's weight or a buy-below price: the action is "Research Needed" and say which targeted research would settle it.
 - Opportunities: the companies at the "Ready for decision" stage (named in the question) are the shortlist for new cash. Rank them against simply buying VOO with the same money. For each, say "Buy now", "Wait for price" or "Not yet", with a buy-below price, a dollar amount within the deployable cash and the policy limits, the expected return from its research versus VOO's, and why. If none beats VOO today, say so in the cash plan.
 - Companies the investor marked "Passed" are decided: leave them out of positions and opportunities.
+- Action plans: give every holding (except broad ETFs, which need no company research) and every researched watchlist company a "plan". Take the thesis, buy range, conditions, invalidation, risks and catalysts from the research on file; never invent a price target, buy range, position size or expected return. A buy range or Buy/Add needs a completed investigation without open questions; otherwise the plan's action is Hold, No Add, Trim or Exit as the research supports, or "Research Needed" with a research_task. List those tasks in research_tasks, ranked by how much they could change a decision.
 - Prefer few, clear actions. Priority 1 is the most important.
 
 Reply with exactly one JSON object in a \`\`\`json fenced block and nothing else. Percentages are numbers like 4.5 (meaning 4.5%). Shape:
 {
   "summary": string,                                  // 2-4 sentences: the plan in plain words
   "market": { "stance": "Constructive" | "Neutral" | "Cautious", "short_term": string, "long_term": string },
-  "positions": [{ "symbol": string, "status": "held" | "idea", "target_pct": number | null, "action": string, "priority": 1 | 2 | 3, "reason": string }],
+  "positions": [{ "symbol": string, "status": "held" | "idea", "target_pct": number | null, "action": string, "priority": 1 | 2 | 3, "reason": string,
+    "plan": {                                        // the action plan: short, from the research only; null fields when the research cannot support them
+      "thesis": string,                              // the current investment thesis in 1-2 sentences
+      "action": "Buy" | "Add" | "Hold" | "No Add" | "Trim" | "Exit" | "Research Needed",
+      "buy_range": { "low": number, "high": number } | null,   // only when the research establishes one; never invented
+      "buy_conditions": string | null,               // what must be true to buy or add
+      "invalidation": string | null,                 // what would break the thesis
+      "entry_setup": string | null,                  // chart setup or entry condition, if the research or price history supports one
+      "sizing": string | null,                       // proposed position size within policy limits, or null
+      "risks": string | null,                        // the main downside risks
+      "catalysts": string | null,                    // important upcoming events with dates when known
+      "research_task": string | null                 // when the research cannot support an actionable plan: the targeted research that would
+    } }],
+  "research_tasks": [{ "symbol": string, "task": string, "why": string }],   // ranked, most important first: what to research next and why (at most 6)
   "opportunities": [{ "symbol": string, "verdict": "Buy now" | "Wait for price" | "Not yet", "buy_below": number | null, "amount_usd": number | null, "expected_return": string, "vs_voo": string, "reason": string }],   // best first
   "cash": { "now": string, "wait_for": string },
   "stale": [{ "symbol": string, "why": string }],
@@ -40,9 +54,17 @@ Ready for decision (the shortlist for new cash): ${stages.ready.join(", ") || "n
 Passed (leave out): ${stages.passed.join(", ") || "none"}.`;
 }
 
+export const PLAN_ACTIONS = ["Buy", "Add", "Hold", "No Add", "Trim", "Exit", "Research Needed"] as const;
+export type PlanAction = (typeof PLAN_ACTIONS)[number];
+/** A concise action plan for one company, filled from its research only. */
+export type ActionPlan = {
+  thesis: string; action: PlanAction; buyRange: { low: number; high: number } | null; buyConditions: string | null; invalidation: string | null;
+  entrySetup: string | null; sizing: string | null; risks: string | null; catalysts: string | null; researchTask: string | null;
+};
 export type PlanPosition = {
   symbol: string; status: "held" | "idea"; currentPct: number | null; targetPct: number | null; maxPct: number | null;
   action: string; priority: 1 | 2 | 3; reason: string; researchAsOf: string | null; flags: string[];
+  plan?: ActionPlan | null;
 };
 export type Opportunity = { symbol: string; verdict: "Buy now" | "Wait for price" | "Not yet"; buyBelow: number | null; amountUsd: number | null; expectedReturn: string; vsVoo: string; reason: string };
 export type Plan = {
@@ -53,12 +75,13 @@ export type Plan = {
   cash: { deployable: number | null; now: string; waitFor: string };
   stale: { symbol: string; why: string }[];
   nextActions: string[];
+  researchTasks?: { symbol: string; task: string; why: string }[];
   problems: string[];
 };
 
 export type PlanFacts = {
   holdings: { symbol: string; weight: number }[];         // weight as a fraction
-  researched: { symbol: string; asOf: string | null; stage?: string; approved?: boolean }[];
+  researched: { symbol: string; asOf: string | null; stage?: string; approved?: boolean; openQuestions?: boolean }[];
   maxFor: (symbol: string) => number | null;               // fraction
   deployable: number | null;
 };
@@ -81,6 +104,7 @@ export function validatePlan(raw: unknown, f: PlanFacts): Plan | { error: string
   // Only companies with research you approved can be a shortlist for new cash.
   const ready = new Set(f.researched.filter((x) => x.stage === "ready" && x.approved !== false).map((x) => x.symbol));
   const unapproved = new Set(f.researched.filter((x) => x.approved === false).map((x) => x.symbol));
+  const openQ = new Set(f.researched.filter((x) => x.openQuestions).map((x) => x.symbol));
   for (const x of f.researched) if (!passed.has(x.symbol)) known.set(x.symbol, { held: known.get(x.symbol)?.held ?? false, asOf: x.asOf });
 
   const seen = new Set<string>();
@@ -103,9 +127,10 @@ export function validatePlan(raw: unknown, f: PlanFacts): Plan | { error: string
       flags.push(`target ${r1(target)}% not used: the research is not approved, so no research-based increase`); target = r1(current * 100);
     }
     const pr = Number(p.priority);
+    const plan = actionPlanOf(p.plan, { symbol, researched: !!k.asOf, preliminary: unapproved.has(symbol), openQuestions: openQ.has(symbol), flags });
     positions.push({
       symbol, status: k.held ? "held" : "idea", currentPct: current === null ? null : r1(current * 100), targetPct: target, maxPct: max === null ? null : r1(max * 100),
-      action: str(p.action, 200) || "No action given", priority: pr === 1 || pr === 2 || pr === 3 ? pr : 3, reason: str(p.reason, 1200), researchAsOf: k.asOf, flags,
+      action: str(p.action, 200) || "No action given", priority: pr === 1 || pr === 2 || pr === 3 ? pr : 3, reason: str(p.reason, 1200), researchAsOf: k.asOf, flags, plan,
     });
   }
   for (const h of f.holdings) if (!seen.has(h.symbol)) problems.push(`${h.symbol} is held but the plan did not cover it`);
@@ -145,6 +170,35 @@ export function validatePlan(raw: unknown, f: PlanFacts): Plan | { error: string
     cash: { deployable: f.deployable, now: str(c.now, 800), waitFor: str(c.wait_for, 800) },
     stale: (Array.isArray(r.stale) ? (r.stale as Record<string, unknown>[]) : []).map((s) => ({ symbol: str(s?.symbol, 12).toUpperCase(), why: str(s?.why, 400) })).filter((s) => s.symbol).slice(0, 20),
     nextActions: (Array.isArray(r.next_actions) ? (r.next_actions as unknown[]) : []).map((x) => str(x, 300)).filter(Boolean).slice(0, 5),
+    researchTasks: (Array.isArray(r.research_tasks) ? (r.research_tasks as Record<string, unknown>[]) : []).map((t) => ({ symbol: str(t?.symbol, 12).toUpperCase(), task: str(t?.task, 400), why: str(t?.why, 400) })).filter((t) => t.symbol && t.task).slice(0, 6),
     problems,
+  };
+}
+
+const strOrNull = (v: unknown, max = 600) => str(v, max) || null;
+
+/**
+ * The action plan for one company, checked against what its research can support. Pure.
+ * A buy range, Buy or Add needs a completed investigation without open questions; anything else becomes
+ * Hold or Research Needed and is flagged. Nothing is invented: missing fields stay empty.
+ */
+export function actionPlanOf(raw: unknown, ctx: { symbol: string; researched: boolean; preliminary: boolean; openQuestions: boolean; flags: string[] }): ActionPlan | null {
+  if (!raw || typeof raw !== "object") return null;
+  const p = raw as Record<string, unknown>;
+  let action: PlanAction = (PLAN_ACTIONS as readonly string[]).includes(String(p.action)) ? (p.action as PlanAction) : "Research Needed";
+  const br = (p.buy_range ?? null) as { low?: unknown; high?: unknown } | null;
+  let buyRange = br && num(br.low) !== null && num(br.high) !== null && num(br.low)! > 0 && num(br.high)! >= num(br.low)! ? { low: num(br.low)!, high: num(br.high)! } : null;
+  let researchTask = strOrNull(p.research_task, 400);
+  const weak = !ctx.researched ? "no research on file" : ctx.preliminary ? "the research is preliminary" : ctx.openQuestions ? "the investigation still has open questions" : null;
+  if (weak && (action === "Buy" || action === "Add")) {
+    ctx.flags.push(`${action} not used: ${weak}`);
+    action = "Research Needed";
+    researchTask = researchTask ?? (ctx.openQuestions ? "Targeted update to resolve the open questions" : "Targeted investigation before any new money");
+  }
+  if (weak && buyRange) { ctx.flags.push(`buy range not shown: ${weak}`); buyRange = null; }
+  if (action === "Research Needed" && !researchTask) researchTask = !ctx.researched ? "Initial research" : "Targeted investigation";
+  return {
+    thesis: str(p.thesis, 500), action, buyRange, buyConditions: strOrNull(p.buy_conditions), invalidation: strOrNull(p.invalidation),
+    entrySetup: strOrNull(p.entry_setup), sizing: strOrNull(p.sizing, 300), risks: strOrNull(p.risks), catalysts: strOrNull(p.catalysts), researchTask,
   };
 }

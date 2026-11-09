@@ -11,13 +11,14 @@ import { getWorkspace } from "@/lib/workspace";
 import { HOLDINGS_FRESH_DAYS } from "@/lib/decision/newCapital";
 import { currentDecisionFor } from "@/lib/decision/currentPortfolio";
 import { loadDecisionFilings } from "@/lib/alerts/events";
+import type { PlanPosition } from "@/lib/plan/plan";
 
 export const dynamic = "force-dynamic";
 
 const STANCE_TONE = { Constructive: "gain", Neutral: "neutral", Cautious: "warn" } as const;
 const pct = (n: number | null) => (n === null ? "—" : `${n.toFixed(1)}%`);
 const money = (n: number) => `$${Math.round(n).toLocaleString("en-US")}`;
-const actionTone = (a: string) => (/refresh|review/i.test(a) ? "warn" : /\bno add|\bhold\b|wait/i.test(a) ? "neutral" : /trim|sell|avoid|exit/i.test(a) ? "alert" : /\badd|\bbuy/i.test(a) ? "gain" : "neutral");
+const actionTone = (a: string) => (/refresh|review|research needed/i.test(a) ? "warn" : /\bno add|\bhold\b|wait/i.test(a) ? "neutral" : /trim|sell|avoid|exit/i.test(a) ? "alert" : /\badd|\bbuy/i.test(a) ? "gain" : "neutral");
 
 /** The portfolio plan: market stance, a target and action for each position, the cash plan, and what is stale. */
 export default async function PlanPage() {
@@ -125,14 +126,14 @@ export default async function PlanPage() {
                       <span className="flex items-center gap-2 min-w-0">
                         <span className="text-ink font-semibold">{p.symbol}</span>
                         {p.status === "idea" && <Pill small>Idea</Pill>}
-                        <Pill small tone={actionTone(p.action)}>{p.action.length > 28 ? `${p.action.slice(0, 27)}…` : p.action}</Pill>
+                        <Pill small tone={actionTone(p.plan?.action ?? p.action)}>{p.plan ? p.plan.action : p.action.length > 28 ? `${p.action.slice(0, 27)}…` : p.action}</Pill>
                       </span>
                       <span className="t-sm num shrink-0">{pct(p.currentPct)} → {pct(p.targetPct)}</span>
                     </span>
                   }>
                     <div className="flex flex-col gap-1.5 t-sm">
-                      {p.action.length > 28 && <p className="text-ink">{p.action}</p>}
-                      <p>{p.reason}</p>
+                      {(p.action.length > 28 || p.plan) && <p className="text-ink">{p.action}</p>}
+                      {p.plan ? <ActionPlanView p={p} /> : <p>{p.reason}</p>}
                       <p className="t-xs">Priority {p.priority}{p.maxPct !== null ? ` · policy max ${pct(p.maxPct)}` : ""}{p.researchAsOf ? ` · research ${shortDate(p.researchAsOf)}` : " · no research on file"}</p>
                       {p.flags.map((f) => <p key={f} className="t-xs warn">{f}</p>)}
                       <Link href={`/research/${p.symbol}`} className="t-sm">Open {p.symbol}</Link>
@@ -149,6 +150,13 @@ export default async function PlanPage() {
             <p className="t-sm"><span className="text-ink font-semibold">Wait for: </span>{plan.cash.waitFor || "—"}</p>
             <p className="t-xs">The plan&apos;s cash view when it was built. For today: {best.headline}. <Link href="/decisions">Decisions</Link></p>
           </Card>
+
+          {(plan.researchTasks?.length ?? 0) > 0 && (
+            <Card labelledBy="pl-tasks" className="!gap-2">
+              <CardHead id="pl-tasks" title="Research tasks" right={<span className="t-xs">most important first</span>} />
+              <ol className="flex flex-col gap-1 t-sm list-decimal pl-5">{plan.researchTasks!.map((t) => <li key={`${t.symbol}-${t.task}`}><Link href={`/research/${t.symbol}`} className="text-ink font-semibold">{t.symbol}</Link> · {t.task}{t.why ? <span className="t-xs"> · {t.why}</span> : null}</li>)}</ol>
+            </Card>
+          )}
 
           {plan.stale.length > 0 && (
             <Card labelledBy="pl-stale" className="!gap-2">
@@ -185,5 +193,30 @@ function OldPlan({ outdated, at, children }: { outdated: boolean; at: string; ch
         <div className="flex flex-col gap-3">{children}</div>
       </Disclose>
     </Card>
+  );
+}
+
+/** One company's action plan: the essentials, each line only when the research supports it. */
+function ActionPlanView({ p }: { p: PlanPosition }) {
+  const a = p.plan!;
+  const usd2 = (n: number) => `$${n.toLocaleString("en-US", { maximumFractionDigits: 2 })}`;
+  const rows: [string, string | null][] = [
+    ["Thesis", a.thesis || null],
+    ["Buy range", a.buyRange ? `${usd2(a.buyRange.low)} to ${usd2(a.buyRange.high)}` : null],
+    ["Buy when", a.buyConditions],
+    ["Thesis breaks if", a.invalidation],
+    ["Entry setup", a.entrySetup],
+    ["Exposure and size", [p.currentPct !== null ? `now ${p.currentPct}%` : null, p.maxPct !== null ? `max ${p.maxPct}%` : null, a.sizing].filter(Boolean).join(" · ") || null],
+    ["Risks", a.risks],
+    ["Catalysts", a.catalysts],
+    ["Research task", a.researchTask],
+    ["Last research", p.researchAsOf ? shortDate(p.researchAsOf) : "none on file"],
+  ];
+  return (
+    <dl className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-1 t-sm">
+      {rows.filter(([, v]) => v).map(([k, v]) => (
+        <div key={k} className="contents"><dt className="t-xs pt-0.5">{k}</dt><dd className="min-w-0">{v}</dd></div>
+      ))}
+    </dl>
   );
 }

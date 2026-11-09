@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { PLAN_SYSTEM, validatePlan, type PlanFacts } from "./plan";
+import { PLAN_SYSTEM, actionPlanOf, validatePlan, type PlanFacts } from "./plan";
 
 // Synthetic tickers and numbers only.
 const facts: PlanFacts = {
@@ -77,5 +77,26 @@ describe("planner instructions follow the approved method", () => {
     expect(PLAN_SYSTEM).toMatch(/never mention or apply a hurdle/);
     expect(PLAN_SYSTEM).toMatch(/not like for like/);
     expect(PLAN_SYSTEM).not.toMatch(/buckets within their ranges/);
+  });
+});
+
+describe("action plans: only what the research supports", () => {
+  const ctx = (o: Partial<{ researched: boolean; preliminary: boolean; openQuestions: boolean }> = {}) => ({ symbol: "AAA", researched: true, preliminary: false, openQuestions: false, flags: [] as string[], ...o });
+  const raw = { thesis: "t", action: "Add", buy_range: { low: 20, high: 24 }, buy_conditions: "c", invalidation: "i", entry_setup: null, sizing: "to 5%", risks: "r", catalysts: "Q3 on Dec 1", research_task: null };
+  it("keeps a buy range and Add from a completed investigation", () => {
+    expect(actionPlanOf(raw, ctx())).toMatchObject({ action: "Add", buyRange: { low: 20, high: 24 }, sizing: "to 5%", researchTask: null });
+  });
+  it("turns Add into Research Needed and drops the range on preliminary research, with a task", () => {
+    const c = ctx({ preliminary: true });
+    expect(actionPlanOf(raw, c)).toMatchObject({ action: "Research Needed", buyRange: null, researchTask: "Targeted investigation before any new money" });
+    expect(c.flags.join(" ")).toMatch(/Add not used: the research is preliminary/);
+  });
+  it("keeps Hold or Trim on an investigation with open questions, but never a buy range", () => {
+    const c = ctx({ openQuestions: true });
+    expect(actionPlanOf({ ...raw, action: "Trim" }, c)).toMatchObject({ action: "Trim", buyRange: null });
+    expect(actionPlanOf({ ...raw, action: "Buy" }, ctx({ openQuestions: true }))).toMatchObject({ action: "Research Needed", researchTask: "Targeted update to resolve the open questions" });
+  });
+  it("never invents: an unknown action becomes Research Needed and missing fields stay empty", () => {
+    expect(actionPlanOf({ action: "Strong buy" }, ctx({ researched: false }))).toMatchObject({ action: "Research Needed", buyRange: null, invalidation: null, researchTask: "Initial research" });
   });
 });
