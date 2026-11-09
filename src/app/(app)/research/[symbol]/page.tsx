@@ -4,7 +4,7 @@ import { AGE_REMINDER_DAYS } from "@/lib/policy/limits";
 import { Suspense } from "react";
 import Link from "next/link";
 import { ResearchSummary } from "@/components/ResearchSummary";
-import { addToPipeline } from "../actions";
+import { addToPipeline, approveInFull } from "../actions";
 import { FeedSkeleton, FilingsList, FundamentalsCard, LinesSkeleton, NewsList } from "@/components/CompanyFeeds";
 import { isEtf } from "@/lib/portfolio/classify";
 import { createClient } from "@/lib/supabase/server";
@@ -42,7 +42,7 @@ const ERRORS: Record<string, string> = {
   ready: "Ready for decision needs complete research marked current. Refresh or finish the research first.",
   nofiling: "There is no stored research to check a filing against.",
 };
-const SAVED: Record<string, string> = { adopted: "Approved: the investigation is now your research in use. The earlier research stays on file.", provisional: "Approved provisionally: the investigation is in use with its open items listed, and no new money is suggested until they are resolved. The earlier research stays on file.", set_aside: "Kept your current research. The investigation stays on file, marked as set aside.", stage: "Stage saved.", screen: "Screen updated.", filing: "SEC filing checked and the result stored." };
+const SAVED: Record<string, string> = { full: "Approved in full: the research in use is no longer provisional. The open items you accepted stay listed on the record.", adopted: "Approved: the investigation is now your research in use. The earlier research stays on file.", provisional: "Approved provisionally: the investigation is in use with its open items listed, and no new money is suggested until they are resolved. The earlier research stays on file.", set_aside: "Kept your current research. The investigation stays on file, marked as set aside.", stage: "Stage saved.", screen: "Screen updated.", filing: "SEC filing checked and the result stored." };
 
 export default async function CompanyPage({ params, searchParams }: { params: Promise<{ symbol: string }>; searchParams: Promise<{ error?: string; saved?: string }> }) {
   const { symbol: raw } = await params;
@@ -127,7 +127,7 @@ export default async function CompanyPage({ params, searchParams }: { params: Pr
       {/* Investment view: the decision first. */}
       <div className="grid grid-cols-1 gap-3 lg:gap-4 lg:grid-cols-12 items-start">
         <div className="lg:col-span-7 flex flex-col gap-3 lg:gap-4 min-w-0">
-          <ResearchStatus s={standing} />
+          <ResearchStatus s={standing} symbol={company.symbol} />
           <InvestmentSummary ws={ws} symbol={company.symbol} brief={brief} />
           {pendingInv && <InvestigationConclusion symbol={company.symbol} v={pendingInv as unknown as InvVersion} inUse={inUseLabel} validation={(valRow?.outputs as ValidationReport | undefined) ?? null} />}
         </div>
@@ -263,7 +263,7 @@ function briefOf(s: Standing, parsedThesis: string | null): Brief | null {
 }
 
 /** Which research decisions use, what is waiting for you, what is history, and what is still open. */
-function ResearchStatus({ s }: { s: Standing }) {
+function ResearchStatus({ s, symbol }: { s: Standing; symbol: string }) {
   if (!s.inUse && !s.pending) return null;
   return (
     <Card labelledBy="rs-h" className="!gap-2">
@@ -279,6 +279,18 @@ function ResearchStatus({ s }: { s: Standing }) {
         )}
         {s.history.length > 0 && <div><span className="t-xs block">History</span><span>{s.history.length} earlier record{s.history.length === 1 ? "" : "s"}, kept unchanged (listed under Research history)</span></div>}
         <p className={`t-xs ${s.inUse?.approval === "approved" && !s.pending ? "" : "warn"}`}>{s.decisions}</p>
+        {s.inUse?.approval === "provisional" && s.inUse.v.completeness === "complete" && (
+          <Disclose summary={<span className="t-sm">Approve in full instead</span>}>
+            <ActionForm action={approveInFull} success="Approved in full" className="flex flex-col gap-2">
+              <input type="hidden" name="symbol" value={symbol} />
+              <input type="hidden" name="versionId" value={s.inUse.v.id} />
+              {s.inUse.open.length > 0 && <ul className="t-xs list-disc pl-4 flex flex-col gap-0.5">{s.inUse.open.slice(0, 20).map((x, i) => <li key={i}>{x}</li>)}</ul>}
+              <label className="t-sm flex items-start gap-2"><input type="checkbox" name="acknowledge" value="yes" required className="mt-1" />
+                <span>I accept {s.inUse.open.length ? `these ${s.inUse.open.length} open item${s.inUse.open.length === 1 ? "" : "s"}` : "the open items"} and approve this research in full. The research and its recommendation are unchanged; the items stay listed on the record as accepted by me. Approving the research does not approve any trade.</span></label>
+              <SubmitButton className="btn btn-sm self-start" pendingText="Approving…">Approve in full</SubmitButton>
+            </ActionForm>
+          </Disclose>
+        )}
         {s.pending && s.pending.open.length > 0 && (
           <Disclose summary={<span className="t-sm">Open items in the new investigation · {s.pending.open.length}</span>}>
             <ul className="t-xs list-disc pl-4 flex flex-col gap-0.5">{s.pending.open.slice(0, 20).map((x, i) => <li key={i}>{x}</li>)}</ul>

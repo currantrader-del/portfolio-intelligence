@@ -154,6 +154,35 @@ export async function adoptResearch(formData: FormData): Promise<ActionResult> {
 }
 
 /**
+ * Turns a provisional approval of the research in use into a full approval, at the investor's request.
+ * Only a complete investigation qualifies. The open items stay on the record as items the investor
+ * accepted (adoption.accepted_open_items); the research text, conclusion and evidence are unchanged.
+ * Logged like an approval.
+ */
+export async function approveInFull(formData: FormData): Promise<ActionResult> {
+  const symbol = cleanSymbol(formData.get("symbol"));
+  const versionId = String(formData.get("versionId") ?? "");
+  if (formData.get("acknowledge") !== "yes") return fail("Tick the box to confirm you accept the open items before approving in full.");
+  const db = await createClient();
+  const { data: v } = await db.from("research_versions").select("id, conclusion, completeness, is_current").eq("id", versionId).maybeSingle();
+  if (!v) return fail("That research record was not found.");
+  const c = (v.conclusion ?? {}) as Record<string, unknown>;
+  if (!v.is_current) return fail("Only the research in use can be approved in full.");
+  if (v.completeness !== "complete") return fail("This investigation is incomplete, so it can only stay approved provisionally. A refresh that completes it can be approved in full.");
+  if (c.review_state !== "adopted_provisional" && !(c.review_state === "adopted" && (c.adoption as { mode?: string } | undefined)?.mode === "provisional")) return fail("This research is not approved provisionally.");
+  const prev = (c.adoption ?? {}) as Record<string, unknown>;
+  const at = new Date().toISOString();
+  const accepted = Array.isArray(prev.open_items) ? (prev.open_items as unknown[]).map(String) : [];
+  const { error } = await db.from("research_versions").update({ conclusion: { ...c, review_state: "adopted", adoption: { ...prev, mode: "full", open_items: [], accepted_open_items: accepted, provisional_at: prev.at ?? null, at, promoted_from_provisional: true } } }).eq("id", v.id);
+  if (error) return fail(`Could not approve it in full: ${error.message}`);
+  await save(db, "research_adoption", "adoption@1", { symbol, version_id: v.id, mode: "full_from_provisional", at }, { accepted_open_items: accepted }).catch(() => null);
+  revalidatePath("/research");
+  revalidatePath(`/research/${symbol}`);
+  revalidatePath("/");
+  redirect(`/research/${symbol}?saved=full`);
+}
+
+/**
  * Keeps the research in use and sets a finished investigation aside, at the investor's request. The
  * investigation stays on file (marked "set aside"); nothing else changes. Logged like an approval.
  */
