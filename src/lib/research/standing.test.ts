@@ -44,3 +44,22 @@ describe("research standing (the NVDA page)", () => {
     expect(r.latest?.id).toBe("c00b7fe1");
   });
 });
+
+describe("provisional approval turned into full approval", () => {
+  const items = ["Material input not reconciled: net_debt. Not bridged to the filings."];
+  const base = { id: "13eea72b", research_as_of: "2026-11-08", created_at: "2026-11-08T20:00:00Z", completeness: "complete", origin: "claude_full", is_current: true } as const;
+  const provisional: VersionRow = { ...base, conclusion: { research_type: "full_investigation", review_state: "adopted_provisional", adoption: { mode: "provisional", open_items: items } } };
+  const full: VersionRow = { ...base, conclusion: { research_type: "full_investigation", review_state: "adopted", adoption: { mode: "full", open_items: [], accepted_open_items: items, promoted_from_provisional: true } } };
+  it("is provisional with its open items before", () => {
+    const s = researchStanding([provisional]);
+    expect(s.inUse?.approval).toBe("provisional");
+    expect(s.inUse?.open).toEqual(items);
+  });
+  it("is approved in full with no open items after, and no longer blocks decisions as provisional", () => {
+    const s = researchStanding([full]);
+    expect(s.inUse?.approval).toBe("approved");
+    expect(s.inUse?.authority).toBe("approved_full");
+    expect(s.inUse?.open).toEqual([]);
+    expect(toResearchRecord("IREN", "IREN", "held", [full]).approval).toBe("approved");
+  });
+});
