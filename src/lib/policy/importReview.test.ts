@@ -56,7 +56,7 @@ describe("what approving an imported rule changes", () => {
     expect(approvalEffect(item("Deployable cash"))).toMatch(/never invests, sells or holds back money to reach it.*no decision changes/);
   });
   it("says what the US broad-market revision removes", () => {
-    expect(approvalEffect(item("US broad-market equity"), true)).toMatch(/VOO no longer has a maximum/);
+    expect(approvalEffect(item("US broad-market equity"), true)).toMatch(/no longer have a maximum.*never an automatic destination/);
     expect(approvalEffect(item("US broad-market equity"))).toMatch(/50% as a ceiling/);
   });
   it("says a bucket approval only records the guideline", () => {

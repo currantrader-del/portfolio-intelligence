@@ -150,6 +150,14 @@ describe("new capital: ceilings and money source", () => {
     expect(r.options.find((o) => o.symbol === "AAA")!.maxWeight).toBe(0.05);
   });
 
+  it("treats a bucket maximum as a ceiling on the stocks in that bucket, not only on funds", () => {
+    const capped = policyFromRules([...approvedRules, row({ scope: "bucket", subject: "Quality/growth individual stocks", normal_low: 0.02, normal_high: 0.04, hard_max: 0.05 })]);
+    const p = buildPortfolio([{ ...snap, positions: snap.positions.filter((x) => x.symbol !== "BBB") }, savings], new Map(), capped, {}, [], now);
+    const r = newCapital({ amount: 1250, portfolio: p, research: [research("$26")], policy: capped, now, filings: quiet });
+    // AAA's own limit allows up to 10%, but its bucket's 5% maximum leaves only $77 (same arithmetic as above).
+    expect(r.recommendation.allocations[0]).toEqual({ symbol: "AAA", amount: 77 });
+  });
+
   it("does not grow the portfolio when the money is cash already held", () => {
     const policy = policyFromRules(approvedRules);
     const p = buildPortfolio([{ ...snap, cashValue: 1500 }, savings], new Map(), policy, {}, [], now);
