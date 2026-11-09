@@ -1,6 +1,7 @@
 /**
  * Builds the portfolio plan as a background job and stores it (model_runs kind "portfolio_plan").
- * Started by the Rebuild button, after each finished AI research, and weekly by the morning run.
+ * Started only by the Rebuild button and weekly by the Monday morning run. A policy, holdings or research
+ * change never starts a rebuild (that would be a paid AI call): the stored plan is marked outdated instead.
  */
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { buildWorkspace } from "@/lib/workspace-core";

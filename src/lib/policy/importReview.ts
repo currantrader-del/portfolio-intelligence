@@ -60,3 +60,30 @@ export function reviewImported(audit: PolicyAudit, weightOf: (symbol: string) =>
   const items = audit.imported.filter((s) => s.used).map((s) => ({ scope: s.scope, subject: s.subject, row: s.used!, ...judge(s, weightOf) }));
   return { retain: items.filter((x) => x.verdict === "retain"), exceptions: items.filter((x) => x.verdict !== "retain") };
 }
+
+/**
+ * What approving one imported rule actually changes in the app, in plain words. Approval never buys or sells
+ * anything; ranges stay guidelines and ceilings, never targets.
+ */
+export function approvalEffect(item: ImportReviewItem, revised = false): string {
+  const r = revised && item.revised ? { ...item.row, ...item.revised } : item.row;
+  const range = r.normal_low !== null && r.normal_high !== null ? `${pct(r.normal_low)}–${pct(r.normal_high)}` : null;
+  const max = r.hard_max !== null ? pct(r.hard_max) : null;
+  if (item.scope === "company") {
+    return `It becomes your own limit for ${item.subject}. With it, ${item.subject} can receive new money, but only when its approved research says add at today's price and nothing material has changed, and never above ${range ? `the top of its ${range} range` : `its ${max} maximum`}. Without your approval it gets no new money at all. ${max ? `The ${max} maximum is a ceiling either way. ` : ""}Nothing is bought or sold because of the approval.`;
+  }
+  if (item.scope === "generic_company") {
+    return revised
+      ? `The inherited ranges for companies without research are removed; only the ${max} single-company ceiling remains. No company gains new money from this, and nothing is sold.`
+      : `It confirms the archive rule as yours. Companies without their own limit still get no new money; the ${max} ceiling still applies. Nothing is bought or sold.`;
+  }
+  if (item.subject === "Deployable cash") {
+    return `It records ${range} as your guide for cash. The app never invests, sells or holds back money to reach it: being below ${pct(r.normal_low)} is not a reason to wait, and being above ${pct(r.normal_high)} is not a reason to buy. Approving only records it as yours; no decision changes.`;
+  }
+  if (item.subject === "US broad-market equity") {
+    return revised
+      ? `VOO no longer has a maximum: it stays the default home for money nothing else beats. ${range} remains a guide used only when choosing between diversified funds. Nothing is bought or sold.`
+      : `It confirms ${range} as your guide and ${max} as a ceiling on VOO and similar funds for new money. Nothing is bought or sold.`;
+  }
+  return `It records ${range ? `${range} as your guide` : "this as your guide"}${max ? ` and ${max} as a ceiling for new money` : ""} for ${item.subject}. The guide is used only when choosing between options (a fund whose bucket would go above the top of its range is not preferred); being below it is never a reason to buy. The app already uses it this way while it is imported, so approving only records it as yours; nothing is bought or sold.`;
+}

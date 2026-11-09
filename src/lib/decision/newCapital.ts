@@ -381,20 +381,23 @@ export function newCapital(args: {
   const pool = usable.length ? usable : etfFacts;
   const lower = (f: (typeof etfFacts)[number]) => atLevel.reduce((a, k) => { const r = f.imp?.rows.find((x) => x.key === k); return a + (r ? r.before - r.after : 0); }, 0);
   const voo = pool.find((f) => f.symbol === "VOO");
-  const belowLead = [...pool].filter((f) => f.below).sort((x, y) => (y.b.normal!.low - y.b.weight) - (x.b.normal!.low - x.b.weight))[0];
+  // Being below a bucket's guide range is information, never a reason to buy: it does not decide the choice.
   const lowerLead = atLevel.length ? [...pool].sort((x, y) => lower(y) - lower(x))[0] : undefined;
-  const chosen = belowLead ?? (lowerLead && voo && lower(lowerLead) > lower(voo) ? lowerLead : undefined) ?? voo ?? pool[0];
+  const chosen = (lowerLead && voo && lower(lowerLead) > lower(voo) ? lowerLead : undefined) ?? voo ?? pool[0];
   const exReasons: string[] = [];
   const whyOf = new Map<string, string>();
-  for (const f of etfFacts) {
-    const why = f === chosen
-      ? (f === belowLead ? `${f.b.bucket} is ${pct(f.b.weight)}, below its ${pct(f.b.normal!.low)}–${pct(f.b.normal!.high)} range, so it leads`
-        : f === lowerLead && f !== voo ? `it lowers the concentrations already at their levels (${atLevel.join(", ")}) the most`
-        : `it is your stated benchmark with published forecasts, it keeps ${f.b.bucket} inside its range (${pct(f.b.weight)} → ${pct(f.after)}), and none of your concentrations is at a level that calls for a less concentrated fund`)
-      : f.endsAbove ? `${f.b.bucket} would go to ${pct(f.after)}, above its ${pct(f.b.normal!.high)} normal top`
+  const notChosen = (f: (typeof etfFacts)[number]) => f.endsAbove ? `${f.b.bucket} would go to ${pct(f.after)}, above its ${pct(f.b.normal!.high)} normal top`
       : f.crosses.length ? `it would push ${f.crosses.map((r) => r.label).join(", ")} past ${f.crosses.length > 1 ? "their levels" : "its level"}`
       : !ALTERNATIVES.some((a) => a.symbol === f.symbol) ? `no published return forecast on file to compare it with, and no concentration needs it now`
-      : `${f.symbol === "VOO" ? "the default" : "a valid alternative"}, not preferred here`;
+      : `${f.symbol === "VOO" ? "the default" : "a valid alternative"}, not preferred here${f.below ? ` (its bucket is below its guide range, which is not a reason to buy)` : ""}`;
+  const vooFact = etfFacts.find((f) => f.symbol === "VOO");
+  for (const f of etfFacts) {
+    const inRange = `it keeps ${f.b.bucket} under the top of its guide range (${pct(f.b.weight)} → ${pct(f.after)})`;
+    const why = f !== chosen ? notChosen(f)
+      : f === lowerLead && f !== voo ? `it lowers the concentrations already at their levels (${atLevel.join(", ")}) the most`
+      : f.symbol === "VOO" && (f.endsAbove || f.crosses.length) ? `every core ETF has a drawback here (VOO: ${notChosen(f)}), and as your stated benchmark it is the least bad; keeping cash is equally valid`
+      : f.symbol === "VOO" ? `it is your stated benchmark with published forecasts, ${inRange}, and none of your concentrations is at a level that calls for a less concentrated fund`
+      : `VOO is not preferred here (${vooFact ? notChosen(vooFact) : "not available"}), and ${f.endsAbove || f.crosses.length ? "every core ETF has a drawback, so this is the least bad" : inRange}`;
     whyOf.set(f.symbol, why);
     exReasons.push(`${f.symbol}${f === chosen ? " (chosen)" : ""}: ${why}. ${f.imp?.summary ?? ""} ${f.b.bucket} ${pct(f.b.weight)} → ${pct(f.after)}${f.b.normal ? ` (normal ${pct(f.b.normal.low)}–${pct(f.b.normal.high)})` : ""}.`);
   }

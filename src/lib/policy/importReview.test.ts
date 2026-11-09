@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { auditRules, type PolicyRuleRow } from "./rules";
-import { reviewImported } from "./importReview";
+import { approvalEffect, reviewImported } from "./importReview";
 
 // The 12 rules imported from Portfolio Baseline v2 (revised), as stored: approval "approved", approved_at empty.
 let i = 0;
@@ -40,5 +40,26 @@ describe("review of imported rules", () => {
     const g = r.exceptions.find((x) => x.subject === "generic")!;
     expect(g.revised).toMatchObject({ normal_low: null, normal_high: null, hard_max: 0.18 });
     expect(r.exceptions.find((x) => x.subject === "NVDA")!.reason).toMatch(/17.6% including ETFs/);
+  });
+});
+
+describe("what approving an imported rule changes", () => {
+  const all = reviewImported(auditRules(rows), () => null);
+  const item = (s: string) => [...all.retain, ...all.exceptions].find((x) => x.subject === s)!;
+  it("says a company limit is what lets the company receive new money, never a reason to buy", () => {
+    const t = approvalEffect(item("NOW"));
+    expect(t).toMatch(/can receive new money, but only when its approved research says add/);
+    expect(t).toMatch(/Without your approval it gets no new money at all/);
+    expect(t).toMatch(/Nothing is bought or sold/);
+  });
+  it("says the cash range is a guide that never makes the app buy, sell or wait", () => {
+    expect(approvalEffect(item("Deployable cash"))).toMatch(/never invests, sells or holds back money to reach it.*no decision changes/);
+  });
+  it("says what the US broad-market revision removes", () => {
+    expect(approvalEffect(item("US broad-market equity"), true)).toMatch(/VOO no longer has a maximum/);
+    expect(approvalEffect(item("US broad-market equity"))).toMatch(/50% as a ceiling/);
+  });
+  it("says a bucket approval only records the guideline", () => {
+    expect(approvalEffect(item("Bonds"))).toMatch(/approving only records it as yours/);
   });
 });

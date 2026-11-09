@@ -249,9 +249,10 @@ describe("new capital: event-driven refresh and independent verdicts", () => {
     expect(aaa.eligible).toBe(false);
     expect(r.recommendation.allocations.find((x) => x.symbol === "AAA")).toBeUndefined();
     expect(r.toVerify.join(" ")).toMatch(/AAA: confirm or revise its imported limit/);
-    // With no stock qualifying, a core ETF below the bottom of its range leads; otherwise VOO is the default.
+    // With no stock qualifying, a diversified ETF gets the money. Here VOO would push the US bucket above its guide
+    // range, so VXUS is used; being below its own range is not what decides it.
     expect(r.recommendation.allocations).toEqual([{ symbol: "VXUS", amount: 400 }]);
-    expect(r.options.find((o) => o.symbol === "VXUS")!.notes[0]).toMatch(/^Chosen because International equity is 7\.8%, below its 12\.0%–20\.0% range, so it leads/);
+    expect(r.options.find((o) => o.symbol === "VXUS")!.notes[0]).toMatch(/^Chosen because VOO is not preferred here \(US broad-market equity would go to .*, above its 40\.0% normal top\), and it keeps International equity under the top of its guide range/);
   });
   it("treats a conditional add in the research as no add until the condition is confirmed", () => {
     const cond = toResearchRecord("AAA", "AAA", "held", [{ id: "v3", research_as_of: "2026-10-20", completeness: "complete", origin: "x", is_current: true,
