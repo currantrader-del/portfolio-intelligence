@@ -16,8 +16,6 @@ import { AskButton } from "@/components/AskPanel";
 import { FilingCheckCard, type StoredFilingCheck } from "@/components/FilingCheckCard";
 import { ResearchButton } from "@/components/ResearchButton";
 import { InvestigationRunner } from "@/components/InvestigationRunner";
-import { ShareResearchCard } from "@/components/ShareResearchCard";
-import { shareOptions } from "@/lib/research/share/report";
 import { InvestigationConclusion, InvestigationEvidence, InvestigationPills, type InvVersion, type SourceRow } from "@/components/InvestigationReport";
 import type { ValidationReport } from "@/lib/research/validate";
 import { updatePlanFor } from "@/lib/research/updateCheck";
@@ -117,7 +115,6 @@ export default async function CompanyPage({ params, searchParams }: { params: Pr
   const pendingInv = latestInv && !latestInv.is_current ? latestInv : null;
   const inUseLabel = standing.inUse ? { research_as_of: standing.inUse.v.research_as_of, label: standing.inUse.label } : null;
   const brief = briefOf(standing, cur?.parsed.thesis ?? null);
-  const share = shareOptions(versions);
 
   return (
     <div className="flex flex-col gap-3 lg:gap-4">
@@ -138,7 +135,6 @@ export default async function CompanyPage({ params, searchParams }: { params: Pr
         <div className="lg:col-span-5 flex flex-col gap-3 lg:gap-4 min-w-0">
           {!etf && <InvestigationRunner symbol={company.symbol} hasResearch={versions.some((v) => v.is_current || isInv(v))} hasInvestigation={investigations.some((v) => v.is_current)} plan={updatePlan} />}
           {!etf && <ResearchButton symbol={company.symbol} hasResearch={versions.length > 0} needsResearch={!latestInv && coverage(record, price, ws.now, AGE_REMINDER_DAYS).key !== "current"} />}
-          {!etf && <ShareResearchCard symbol={company.symbol} latest={share.latest} approved={share.approved} />}
           <Card labelledBy="tv-h" className="!gap-1.5">
             <CardHead id="tv-h" cap="Trading view · separate" />
             <p className="t-xs">Short-term trade ideas are tracked on their own page as paper trades. They never change the investment view, research or limits on this page.</p>

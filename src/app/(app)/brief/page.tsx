@@ -14,8 +14,6 @@ import { FeedSkeleton, MoverHeadlines } from "@/components/CompanyFeeds";
 import { AskButton } from "@/components/AskPanel";
 import { Tag } from "@/components/Tag";
 import { pctStr, shortDate, toneOf, usd } from "@/lib/format";
-import { currentDecisionFor } from "@/lib/decision/currentPortfolio";
-import { loadDecisionFilings } from "@/lib/alerts/events";
 
 const card = "bg-surface border border-line rounded-2xl p-5 flex flex-col gap-3";
 const SEV = { high: "alert", medium: "warn", low: "neutral" } as const;
@@ -28,19 +26,11 @@ export default async function BriefPage({ searchParams }: { searchParams: Promis
   const db = await createClient();
   const sessions = weekly ? 5 : 1;
   const symbols = p.holdings.map((h) => h.symbol);
-  const [histories, daily, { data: decisions }, { data: lastDecision }, filings] = await Promise.all([
+  const [histories, daily, { data: decisions }] = await Promise.all([
     getHistories([...symbols, "SPY", "QQQ"], "3mo"),
     loadDaily(db, 30),
     db.from("decisions").select("id, kind, symbol, decided_at, user_action").gte("decided_at", new Date(ws.now.getTime() - (weekly ? 7 : 1) * 86400000).toISOString()).order("decided_at", { ascending: false }),
-    db.from("decisions").select("decided_at, recommendation, user_action").eq("kind", "new_capital").order("decided_at", { ascending: false }).limit(1).maybeSingle(),
-    loadDecisionFilings(ws).catch(() => new Map()),
   ]);
-  // Same calculation as the Decisions page, so the brief can only say whether that decision changed, never make its own.
-  const best = currentDecisionFor(ws, filings);
-  const reassess = best.capacity.options.filter((o) => (o.kind === "stock" || o.kind === "new_stock") && (o.label === "Refresh required" || o.reassessment?.status === "needed" || /conflict/i.test(o.verdicts?.research.detail ?? "")));
-  const lastRec = (lastDecision?.recommendation ?? null) as { headline?: string; action?: string; allocations?: { symbol: string; amount: number }[] } | null;
-  const sameSyms = (a: { symbol: string }[] = [], b: { symbol: string }[] = []) => a.map((x) => x.symbol).sort().join() === b.map((x) => x.symbol).sort().join();
-  const changedSinceLast = lastRec ? !sameSyms(lastRec.allocations, best.allocations) : null;
   const spy = ws.benchmarks.find((b) => b.symbol === "SPY")?.dayPct ?? null;
   const moves = periodMoves(histories, symbols, sessions).sort((a, b) => Math.abs(b.change) - Math.abs(a.change));
   const bench = periodMoves(histories, ["SPY", "QQQ"], sessions);
@@ -73,7 +63,7 @@ export default async function BriefPage({ searchParams }: { searchParams: Promis
         {weekly ? (
           <p className="text-[16px] leading-relaxed">
             {change
-              ? `Over the week, today's holdings would have moved ${pctStr(change.pct, 1, true)} (${usd(change.dollars)}) of your invested portfolio, against ${pctStr(spyMove?.change, 1, true)} for the S&P 500.`
+              ? `Over the week, today's holdings would have moved ${pctStr(change.pct, 1, true)} (${usd(change.dollars)}) of investable capital, against ${pctStr(spyMove?.change, 1, true)} for the S&P 500.`
               : "Weekly price history is not available right now."}
             {moves[0] ? ` The biggest mover was ${moves[0].symbol} at ${pctStr(moves[0].change, 1, true)}.` : ""}
             {review.length ? ` ${review.length} item${review.length > 1 ? "s" : ""} to review.` : " Nothing needs a decision."}
@@ -105,21 +95,6 @@ export default async function BriefPage({ searchParams }: { searchParams: Promis
             {review.map((a) => <li key={a.id} className="py-2"><Link href={a.href} className="no-underline text-ink font-medium">{a.title}</Link> <Tag tone={SEV[a.severity]}>{a.severity}</Tag><div className="text-sm text-muted">{a.detail}</div></li>)}
           </ul>
         )}
-      </section>
-
-      <section aria-labelledby="rc-h" className={card}>
-        <h2 id="rc-h" className="font-semibold">Does a decision need another look?</h2>
-        <p className="text-sm"><span className="text-ink font-medium">Best action now:</span> {best.headline}. <Link href="/decisions">Decisions</Link></p>
-        {lastDecision && (
-          <p className="text-sm">{changedSinceLast
-            ? `This differs from your last recorded decision (${shortDate(lastDecision.decided_at)}: ${lastRec?.headline ?? lastRec?.action ?? "recorded"}). Look at Decisions before acting on the old one.`
-            : `Same direction as your last recorded decision (${shortDate(lastDecision.decided_at)}).`}</p>
-        )}
-        {reassess.length ? (
-          <ul className="flex flex-col gap-1 text-sm">
-            {reassess.map((o) => <li key={o.symbol}><Link href={`/research/${o.symbol}`} className="font-mono">{o.symbol}</Link>: {/conflict/i.test(o.verdicts?.research.detail ?? "") ? "research records conflict; resolve before new money" : "research needs reassessing before new money"}. {(o.reassessment?.changes.length ? o.reassessment.changes.slice(0, 2).join("; ") : o.verdicts?.research.detail ?? "").replace(/\.$/, "")}.</li>)}
-          </ul>
-        ) : <p className="text-sm text-muted">No held or researched stock has a material change (results, financing, filings, valuation) since its research.</p>}
       </section>
 
       <Suspense fallback={<FeedSkeleton title="Company events" />}><EventAlerts symbols={symbols} now={ws.now} /></Suspense>
