@@ -13,6 +13,7 @@ import type { Alert, Severity } from "./rules";
 import { save } from "@/lib/intel/jobs";
 import { shortDate } from "@/lib/format";
 import { FIXTURE } from "@/lib/dev/fixture";
+import { SEC_UA } from "@/lib/market/sec";
 
 export const REVIEW_VERSION = "filing-review@1";
 
@@ -113,7 +114,7 @@ export function classifyOffering(text: string): Offering {
 /** Reads only the start of a document (the cover page), then stops. */
 async function coverText(url: string): Promise<string | null> {
   try {
-    const res = await fetch(url, { headers: { "User-Agent": "PortfolioIntelligence/1.0 (personal research)" }, cache: "no-store", signal: AbortSignal.timeout(8000) });
+    const res = await fetch(url, { headers: { "User-Agent": SEC_UA }, cache: "no-store", signal: AbortSignal.timeout(8000) });
     if (!res.ok || !res.body) return null;
     const reader = res.body.getReader(); const dec = new TextDecoder(); let s = "";
     while (s.length < 120_000) { const { done, value } = await reader.read(); if (done) break; s += dec.decode(value, { stream: true }); }

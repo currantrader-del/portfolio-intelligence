@@ -6,8 +6,8 @@ export { classifyFiling };
  * fundamentals from XBRL company concepts. Every result carries its source URL and fetch time.
  * SEC asks automated clients to identify themselves: set SEC_USER_AGENT to "App name contact@example".
  */
-const UA = process.env.SEC_USER_AGENT || "PortfolioIntelligence/1.0 (personal research app)";
-export const SEC_USER_AGENT = UA;
+export const SEC_UA = process.env.SEC_USER_AGENT || "PortfolioIntelligence/1.0 (personal research app)";
+export const SEC_USER_AGENT = SEC_UA;
 const DAY = 86400;
 
 export type Filing = {
@@ -177,7 +177,7 @@ export function factsFromConcept(body: unknown): Fact[] {
 
 async function secJson(url: string, revalidate: number): Promise<unknown | null> {
   try {
-    const res = await fetch(url, { headers: { "User-Agent": UA, Accept: "application/json" }, next: { revalidate } });
+    const res = await fetch(url, { headers: { "User-Agent": SEC_UA, Accept: "application/json" }, next: { revalidate } });
     if (!res.ok) return null;
     return await res.json();
   } catch {
@@ -188,7 +188,7 @@ async function secJson(url: string, revalidate: number): Promise<unknown | null>
 /** Fetches one document from EDGAR as text, never cached (filing instances can be several MB). */
 export async function secText(url: string): Promise<{ ok: true; body: string } | { ok: false; error: string }> {
   try {
-    const res = await fetch(url, { headers: { "User-Agent": UA }, cache: "no-store" });
+    const res = await fetch(url, { headers: { "User-Agent": SEC_UA }, cache: "no-store" });
     if (!res.ok) return { ok: false, error: `HTTP ${res.status} from ${url}` };
     return { ok: true, body: await res.text() };
   } catch (e) {
