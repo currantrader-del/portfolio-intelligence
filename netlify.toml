@@ -9,3 +9,8 @@
 [functions]
   directory = "netlify/functions"
   node_bundler = "esbuild"
+
+# "Share full research" PDF: its own function so the PDF engine and fonts never ship in the Next.js server.
+[functions."share-pdf"]
+  external_node_modules = ["@react-pdf/renderer"]
+  included_files = ["src/lib/research/share/fonts/**"]
