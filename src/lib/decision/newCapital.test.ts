@@ -70,7 +70,8 @@ describe("new capital: evidence gates", () => {
     expect(r.gates.find((g) => g.key === "holdings")).toMatchObject({ ok: false, detail: expect.stringMatching(/Broker: statement 2026-10-15 \(20 days\)/) });
     expect(r.status).toBe("conditional");
     expect(r.recommendation.illustrative).toBe(true);
-    expect(r.recommendation.headline).toBe("$400 AAA, once your balances are verified");
+    // Room is measured on the invested portfolio (savings excluded): 10% of $8,700 minus $500 held = $370.
+    expect(r.recommendation.headline).toBe("$370 AAA + $30 VXUS, once your balances are verified");
     expect(r.lean).toMatch(/^Lean: add to AAA/);
     // Trades recorded since the statement show what probably happened; they do not verify the account.
     const ledger = [{ accountId: "a", tradeDate: "2026-11-03", kind: "deposit" as const, symbol: null, quantity: null, price: null, amount: 100 }];
@@ -93,7 +94,7 @@ describe("new capital: evidence gates", () => {
     expect(r.gates.every((g) => g.ok)).toBe(true);
     expect(r.status).toBe("ready");
     expect(r.recommendation.illustrative).toBe(false);
-    expect(r.recommendation.allocations[0]).toEqual({ symbol: "AAA", amount: 400 });
+    expect(r.recommendation.allocations[0]).toEqual({ symbol: "AAA", amount: 370 });
     expect(r.options.find((o) => o.symbol === "AAA")!.assessment!.judgment).toBe("favourable");
   });
 });
@@ -142,20 +143,20 @@ describe("new capital: research waiting for approval or approved provisionally",
 
 describe("new capital: ceilings and money source", () => {
   it("fills a stock only to the top of its normal range", () => {
-    const tight = policyFromRules([...approvedRules.filter((x) => x.subject !== "AAA"), row({ subject: "AAA", normal_low: 0.03, normal_high: 0.05, hard_max: 0.10 })]);
+    const tight = policyFromRules([...approvedRules.filter((x) => x.subject !== "AAA"), row({ subject: "AAA", normal_low: 0.03, normal_high: 0.06, hard_max: 0.10 })]);
     const p = buildPortfolio([{ ...snap, positions: snap.positions.filter((x) => x.symbol !== "BBB") }, savings], new Map(), tight, {}, [], now);
     const r = newCapital({ amount: 1250, portfolio: p, research: [research("$26")], policy: tight, now, filings: quiet });
-    // investable = 8300 + 2000 deployable savings = 10300; new money -> 11550; 5% = 577.5; minus 500 held = 77.5
-    expect(r.recommendation.allocations[0]).toEqual({ symbol: "AAA", amount: 77 });
-    expect(r.options.find((o) => o.symbol === "AAA")!.maxWeight).toBe(0.05);
+    // invested portfolio = 8300 (savings are not part of it); new money -> 9550; 6% = 573; minus 500 held = 73
+    expect(r.recommendation.allocations[0]).toEqual({ symbol: "AAA", amount: 73 });
+    expect(r.options.find((o) => o.symbol === "AAA")!.maxWeight).toBe(0.06);
   });
 
   it("treats a bucket maximum as a ceiling on the stocks in that bucket, not only on funds", () => {
-    const capped = policyFromRules([...approvedRules, row({ scope: "bucket", subject: "Quality/growth individual stocks", normal_low: 0.02, normal_high: 0.04, hard_max: 0.05 })]);
+    const capped = policyFromRules([...approvedRules, row({ scope: "bucket", subject: "Quality/growth individual stocks", normal_low: 0.02, normal_high: 0.04, hard_max: 0.06 })]);
     const p = buildPortfolio([{ ...snap, positions: snap.positions.filter((x) => x.symbol !== "BBB") }, savings], new Map(), capped, {}, [], now);
     const r = newCapital({ amount: 1250, portfolio: p, research: [research("$26")], policy: capped, now, filings: quiet });
-    // AAA's own limit allows up to 10%, but its bucket's 5% maximum leaves only $77 (same arithmetic as above).
-    expect(r.recommendation.allocations[0]).toEqual({ symbol: "AAA", amount: 77 });
+    // AAA's own limit allows up to 10%, but its bucket's 6% maximum leaves only $73 (same arithmetic as above).
+    expect(r.recommendation.allocations[0]).toEqual({ symbol: "AAA", amount: 73 });
   });
 
   it("does not grow the portfolio when the money is cash already held", () => {
@@ -369,14 +370,14 @@ describe("new capital: research guides, but is reassessed when the evidence chan
 
 describe("new capital: diversified option chosen on whole-portfolio exposure", () => {
   const policy = policyFromRules(approvedRules);
-  const balanced = { ...snap, positions: [
+  const balanced = { ...snap, cashValue: 2000, positions: [
     { symbol: "VOO", quantity: 10, price: 700, marketValue: 7000, costBasis: 7000 },
     { symbol: "VXUS", quantity: 30, price: 80, marketValue: 2400, costBasis: 2400 },
     { symbol: "NVDA", quantity: 10, price: 180, marketValue: 1800, costBasis: 1800 },
   ] };
-  const p = buildPortfolio([balanced, savings], new Map(), policy, {}, [], now);
+  const p = buildPortfolio([balanced], new Map(), policy, {}, [], now);
   it("compares VOO with the other core ETFs and cash on NVIDIA, chips, AI, technology and geography", () => {
-    const r = newCapital({ amount: 1250, source: "deposited", portfolio: p, research: [], policy, now });
+    const r = newCapital({ amount: 1250, source: "planned", portfolio: p, research: [], policy, now });
     const syms = r.exposure.impacts.map((x) => x.symbol);
     expect(syms).toEqual(expect.arrayContaining(["VOO", "VXUS", "CASH"]));
     const voo = r.exposure.impacts.find((x) => x.symbol === "VOO")!;
@@ -387,7 +388,7 @@ describe("new capital: diversified option chosen on whole-portfolio exposure", (
     expect(r.exposure.choice).toBe("VOO");
   });
   it("does not pick an ETF whose bucket would end above its normal range", () => {
-    const r = newCapital({ amount: 1250, source: "deposited", portfolio: p, research: [], policy, now });
+    const r = newCapital({ amount: 1250, source: "planned", portfolio: p, research: [], policy, now });
     // International is 21.6% of investable, above its 12-20% range.
     expect(r.exposure.reasons.find((x) => x.startsWith("VXUS"))).toMatch(/above its 20\.0% normal top/);
     expect(r.recommendation.allocations).toEqual([{ symbol: "VOO", amount: 1250 }]);

@@ -158,6 +158,7 @@ export default async function PolicyPage({ searchParams }: { searchParams: Promi
         <Link href="/portfolio" className="text-sm no-underline max-lg:hidden">← Portfolio</Link>
         <h1 className="h1 mt-1">Policy</h1>
         <p className="text-muted text-sm">What controls your decisions, what needs your call, and why. Nothing is ever deleted: older versions stay in history with their sources.</p>
+        <p className="text-muted text-sm">Every percentage limit here (company, bucket, exposure and cash ranges) is a share of your <span className="text-ink">invested portfolio</span>: Schwab, Acorns and Roth holdings plus their cash, after any purchase. Savings outside the brokerage are not in it, so they never create room under a limit; only money you actually move in does. The protected reserve is in neither view.</p>
       </div>
       {saved && <p className="rounded-xl bg-accent-soft px-4 py-2 text-sm">{saved[0] === "profile" ? "Saved. Every AI answer, research and plan now reads your updated profile." : saved[0] === "approved" ? `Approved. ${saved[1]} now uses the rule you chose.` : saved[0] === "rejected" ? `Rejected. ${saved[1]} keeps the rule that was in control.` : `Confirmed ${saved[1]} imported rules as yours.`}</p>}
 

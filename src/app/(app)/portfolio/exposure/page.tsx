@@ -50,7 +50,7 @@ export default async function ExposurePage({ searchParams }: { searchParams: Pro
     industry && { label: "Largest industry", name: industry.key.replace(" & Semiconductor Equipment", " and equipment"), value: range(industry), note: `of your stocks · ${pctStr(inv(industry.value))}${industry.upper ? `–${pctStr(inv(industry.upper))}` : ""} of investable capital`, subject: `exposure:industry:${industry.key}` },
     theme && { label: "Largest theme", name: theme.key, value: range(theme), note: `of your stocks · ${theme.contributors.slice(0, 4).map((c) => c.via).join(", ")}`, subject: `exposure:theme:${theme.key}` },
     { label: "Where", name: "US · developed · emerging", value: `${pctStr(mk("US")?.pct ?? 0, 0)} · ${pctStr(mk("Developed ex-US")?.pct ?? 0, 0)} · ${pctStr(mk("Emerging")?.pct ?? 0, 0)}`, note: `of your stocks · world market about 65% US · emerging up to ${pctStr(mk("Emerging")?.upperPct ?? mk("Emerging")?.pct ?? 0)}`, subject: "exposure:market:Emerging" },
-    company && { label: "Largest company", name: company.key, value: pctStr(inv(company.value)), note: `of investable capital · ${usd(company.direct)} direct, ${usd(company.indirect)} through funds${companyLimit ? ` · your max ${pctStr(companyLimit.max, 0)}` : ""}` },
+    company && { label: "Largest company", name: company.key, value: pctStr(inv(company.value)), note: `of invested portfolio · ${usd(company.direct)} direct, ${usd(company.indirect)} through funds${companyLimit ? ` · your max ${pctStr(companyLimit.max, 0)}` : ""}` },
   ].filter(Boolean) as { label: string; name: string; value: string; note: string; subject?: string }[];
 
   return (
@@ -79,7 +79,7 @@ export default async function ExposurePage({ searchParams }: { searchParams: Pro
               );
             })}
           </ul>
-          <p className="t-xs">Investable capital {usd(r.investable)} (protected reserve excluded); stocks {usd(r.equity)}. A range means the funds don&apos;t publish enough detail to pin it down; the low end counts only companies identified. Fund data as of {oldest?.source.asOf ?? "—"} or later{stale.length ? `; ${stale.length} source${stale.length > 1 ? "s are" : " is"} stale` : ""}.</p>
+          <p className="t-xs">Invested portfolio {usd(r.investable)} (savings and the protected reserve excluded; total investable capital incl. savings above the reserve is {usd(ws.portfolio.investableCapital)}); stocks {usd(r.equity)}. A range means the funds don&apos;t publish enough detail to pin it down; the low end counts only companies identified. Fund data as of {oldest?.source.asOf ?? "—"} or later{stale.length ? `; ${stale.length} source${stale.length > 1 ? "s are" : " is"} stale` : ""}.</p>
         </Card>
 
         <Card className="lg:col-span-5" labelledBy="do-h">
@@ -198,7 +198,7 @@ function DimensionDetail({ d }: { d: Dimension }) {
           </tbody>
         </table>
       </div>
-      <p className="t-xs mt-1">Percent of {d.base === "equity" ? "your stocks" : "investable capital"} ({usd(d.baseValue)}).{d.notes.length ? ` ${d.notes.join(" ")}` : ""}</p>
+      <p className="t-xs mt-1">Percent of {d.base === "equity" ? "your stocks" : "your invested portfolio"} ({usd(d.baseValue)}).{d.notes.length ? ` ${d.notes.join(" ")}` : ""}</p>
     </Disclose>
   );
 }
