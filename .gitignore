@@ -47,3 +47,4 @@ next-env.d.ts
 *.pdf
 originals/
 import-plan*.json
+/public/share-pdf/

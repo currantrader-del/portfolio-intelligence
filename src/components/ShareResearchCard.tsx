@@ -26,7 +26,10 @@ export function ShareResearchCard({ symbol, latest, approved }: { symbol: string
       const res = await fetch(`/api/share-pdf/${encodeURIComponent(symbol)}?version=${version}&format=json`, { cache: "no-store" });
       if (!res.ok) throw new Error((await res.text()).slice(0, 400) || `The server answered ${res.status}.`);
       const report = await res.json();
-      const { renderSharePdfBlob } = await import("@/lib/research/share/pdfBrowser");
+      // Built separately (scripts/build-share-pdf.mjs) and loaded outside the Next.js bundle on purpose:
+      // bundling the PDF engine into the app stalled every page of the live site.
+      const src = "/share-pdf/renderer.js";
+      const { renderSharePdfBlob } = (await import(/* webpackIgnore: true */ src)) as { renderSharePdfBlob: (r: unknown) => Promise<Blob> };
       const blob = await renderSharePdfBlob(report);
       const date = (report.facts as [string, string][]).find((f) => f[0] === "Research date")?.[1] ?? "";
       const iso = /\d{4}/.test(date) ? new Date(`${date} UTC`).toISOString().slice(0, 10) : new Date().toISOString().slice(0, 10);
