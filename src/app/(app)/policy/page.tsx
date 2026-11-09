@@ -5,7 +5,7 @@ import { Tag } from "@/components/Tag";
 import { Card, CardHead, Disclose } from "@/components/ui";
 import { AUTHORITY_LABEL, RECOMMEND_PREFIX, RETIRED_WHY, isRecommended, isRejected, type PolicyRuleRow, type SubjectAudit } from "@/lib/policy/rules";
 import { ALTERNATIVES } from "@/lib/policy/evidence";
-import { reviewImported, type ImportReviewItem } from "@/lib/policy/importReview";
+import { approvalEffect, reviewImported, type ImportReviewItem } from "@/lib/policy/importReview";
 import { addRule, approveRule, confirmImported, rejectRule, reviseImported, saveProfile } from "./actions";
 import { createClient } from "@/lib/supabase/server";
 import { loadProfile } from "@/lib/profile";
@@ -95,17 +95,22 @@ function ImportedReview({ retain, exceptions }: { retain: ImportReviewItem[]; ex
   return (
     <Card labelledBy="imp-h">
       <CardHead id="imp-h" title={`Review of ${total} imported rules`} right={<Tag>Not approved by you</Tag>} />
-      <p className="text-sm">These came from the old archive marked &quot;approved&quot;, which is not your approval. I checked each against your current method (beat simply owning VOO; limits from each company&apos;s own research; a limit is a ceiling, not a reason to buy). Until you act they stay in control as ceilings, labelled imported, and they lower the confidence of a recommendation rather than block it.</p>
-      <p className="text-sm font-medium">Retain {retain.length}, keep {interim.length} as interim ceilings, revise {revise.length}.</p>
-      <Disclose summary={`Retain (${retain.length})`}>
-        <ul className="text-sm flex flex-col divide-y divide-line">
-          {retain.map((x) => <li key={x.row.id} className="py-1.5 flex flex-col gap-0.5"><span className="flex flex-wrap justify-between gap-x-3"><span>{subjectName(x)}</span><span className="font-mono text-[13px]">{numbers(x.row)}</span></span><span className="text-xs text-muted">{x.reason}</span></li>)}
-        </ul>
-      </Disclose>
-      <ActionForm action={confirmImported} success="Confirmed" className="flex flex-col gap-2">
-        {retain.map((x) => <input key={x.row.id} type="hidden" name="rule_id" value={x.row.id} />)}
-        <SubmitButton className="btn btn-sm btn-primary self-start" pendingText="Confirming…">Confirm the {retain.length} retained rules as mine</SubmitButton>
-      </ActionForm>
+      <p className="text-sm">These came from the old archive marked &quot;approved&quot;, which is not your approval. I checked each against your current method (beat simply owning VOO, Treasuries or cash; limits from each company&apos;s own research; a range is a guide and a ceiling, never a target). Until you act: a bucket range stays a guideline and its maximum a ceiling; a company with only an imported limit gets no new money.</p>
+      <p className="text-sm font-medium">Retain {retain.length}, keep {interim.length} as interim ceilings, revise {revise.length}. Review each one on its own; each says exactly what approving it changes.</p>
+      <ul className="flex flex-col gap-3">
+        {retain.map((x) => (
+          <li key={x.row.id} className="flex flex-col gap-1.5 border-t border-line pt-2.5">
+            <div className="flex items-center justify-between gap-2"><span className="font-medium">{subjectName(x)}</span><Tag>Retain</Tag></div>
+            <span className="text-sm"><span className="text-muted">Imported guideline:</span> <span className="font-mono text-[13px]">{numbers(x.row)}</span></span>
+            <p className="text-xs text-muted">{x.reason}</p>
+            <p className="text-xs"><span className="font-medium">If you approve:</span> {approvalEffect(x)}</p>
+            <ActionForm action={confirmImported} success="Confirmed" className="flex flex-wrap gap-2">
+              <input type="hidden" name="rule_id" value={x.row.id} />
+              <SubmitButton className="btn btn-sm btn-primary" pendingText="Approving…">Approve as mine</SubmitButton>
+            </ActionForm>
+          </li>
+        ))}
+      </ul>
       <h3 className="text-sm font-semibold mt-1">Exceptions</h3>
       <ul className="flex flex-col gap-3">
         {exceptions.map((x) => (
@@ -114,6 +119,8 @@ function ImportedReview({ retain, exceptions }: { retain: ImportReviewItem[]; ex
             <span className="text-sm"><span className="text-muted">Imported, in control now:</span> <span className="font-mono text-[13px]">{numbers(x.row)}</span></span>
             {x.revised && <span className="text-sm"><span className="text-muted">Proposed, not in effect:</span> <span className="font-mono text-[13px]">{numbers({ ...x.row, ...x.revised })}</span></span>}
             <p className="text-xs text-muted">{x.reason}</p>
+            {x.revised && <p className="text-xs"><span className="font-medium">If you approve the revision:</span> {approvalEffect(x, true)}</p>}
+            <p className="text-xs"><span className="font-medium">If you {x.revised ? "keep the imported rule" : "confirm it"}:</span> {approvalEffect(x)}</p>
             <ActionForm actions={{ revise: reviseImported, keep: confirmImported }} successFor={{ revise: "Revision approved", keep: "Confirmed" }} className="flex flex-wrap gap-2">
               <input type="hidden" name="rule_id" value={x.row.id} />
               {x.revised ? (
@@ -183,11 +190,11 @@ export default async function PolicyPage({ searchParams }: { searchParams: Promi
       <Card labelledBy="how-h">
         <CardHead id="how-h" title="How a recommendation is made" />
         <ol className="list-decimal pl-5 text-sm flex flex-col gap-1.5">
-          <li><span className="font-medium">Portfolio limit.</span> Only a company&apos;s own limit gives room; a company without one gets no new money. New cash fills to the top of the normal range, or to the top of the high-conviction range when you approved that range and the case below is favourable and current.</li>
-          <li><span className="font-medium">Valuation against the alternatives.</span> The research&apos;s own price zone must allow adding. Its scenarios at today&apos;s price are compared with VOO&apos;s published forecasts (each shown separately, never averaged), a Treasury for the same horizon, the odds of a loss, the spread of outcomes and concentration. Favourable only when the expected return is above every VOO forecast and the research&apos;s own odds favour beating the lowest one. No fixed hurdle or premium.</li>
+          <li><span className="font-medium">Portfolio limit.</span> Only a company limit you approved gives room; a company without one gets no new money. Ranges are guidelines and ceilings, never targets: new money never takes a stock above the top of its normal range (or its high-conviction range, when you approved it and its conditions are met), and being below a range is never a reason to buy.</li>
+          <li><span className="font-medium">Valuation against the alternatives.</span> The research&apos;s own price zone must allow adding. Its scenarios at today&apos;s price are compared with VOO&apos;s published forecasts (each shown separately, never averaged), a Treasury for the same horizon, the odds of a loss, the spread of outcomes and concentration. A 2-4 year stock case and a 10-15 year forecast are not like for like, so that comparison is shown as context, not a pass/fail. No fixed hurdle or premium.</li>
           <li><span className="font-medium">Research is current.</span> Refresh is triggered by events: new results, a financing or share issuance, another material filing, or the price moving into a different action zone of the research. Age alone only prompts a filings check.</li>
         </ol>
-        <p className="text-xs text-muted">The three are assessed and shown separately. The app always gives its best recommendation on the evidence, with anything still to confirm listed beside it; it waits only when your cash is not known. Holding cash is always allowed.</p>
+        <p className="text-xs text-muted">The three are assessed and shown separately. The app always gives its best recommendation on the evidence. A dollar amount is &quot;ready to execute&quot; only when the money is verified, your holdings are confirmed and nothing material is unresolved; otherwise it is conditional. The protected savings reserve is never invested, and keeping cash is always an option.</p>
         <Disclose summary="The alternatives and their published forecasts">
           <ul className="text-sm flex flex-col gap-2">
             {ALTERNATIVES.map((alt) => (

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { validatePlan, type PlanFacts } from "./plan";
+import { PLAN_SYSTEM, validatePlan, type PlanFacts } from "./plan";
 
 // Synthetic tickers and numbers only.
 const facts: PlanFacts = {
@@ -65,5 +65,16 @@ describe("opportunities", () => {
     expect(p.positions.some((x) => x.symbol === "DELTA")).toBe(false);
     expect(p.problems.some((x) => x.startsWith("BETA was suggested"))).toBe(true);
     expect(p.problems.some((x) => x.startsWith("DELTA"))).toBe(false);
+  });
+});
+
+describe("planner instructions follow the approved method", () => {
+  it("treats ranges as guidelines and ceilings, keeps the reserve firm, and never applies retired hurdles", () => {
+    expect(PLAN_SYSTEM).toMatch(/guidelines and risk ceilings, never targets to fill/);
+    expect(PLAN_SYSTEM).toMatch(/below 5% cash, is never by itself a reason to buy, sell, or delay investing/);
+    expect(PLAN_SYSTEM).toMatch(/protected savings reserve .* firm restriction/);
+    expect(PLAN_SYSTEM).toMatch(/never mention or apply a hurdle/);
+    expect(PLAN_SYSTEM).toMatch(/not like for like/);
+    expect(PLAN_SYSTEM).not.toMatch(/buckets within their ranges/);
   });
 });

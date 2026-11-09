@@ -9,9 +9,9 @@ import { Bar, Card, CardHead, Cap, DataLabel, Disclose, Dot, LinkRow, Metric, Pa
 import { DataQualityNote } from "@/components/cards/DataQuality";
 
 const STATUS = {
-  below: { tone: "warn", label: "Below range" },
-  within: { tone: null, label: "Within range" },
-  above: { tone: "warn", label: "Above range" },
+  below: { tone: null, label: "Below guide range" },
+  within: { tone: null, label: "Within guide range" },
+  above: { tone: null, label: "Above guide range" },
   over_max: { tone: "loss", label: "Over maximum" },
   no_limit: { tone: null, label: "No limit set" },
 } as const;
