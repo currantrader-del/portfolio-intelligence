@@ -54,13 +54,16 @@ export function supersededMentions(text: string, facts: PolicyFacts, perSymbol: 
   const out: string[] = [];
   if (/\bhurdle\b|assumed 7%|7% (?:return )?assumption|ETF return (?:and|&) hurdle|ETF return assumption/i.test(text))
     out.push("It applies a fixed return hurdle or a 7% ETF-return assumption. Both are retired: stocks are now compared with published forecasts, Treasuries and cash over matching horizons.");
+  // Only statements about the LIMIT being undecided count; "research not approved" is a different, valid statement.
+  const undecided = /(?:limit|ceiling|maximum|allocation)[^.]{0,50}(?:disagree|conflict|undecided|unresolved|not (?:yet )?approved|provisional)|(?:disagree|conflict|undecided|unresolved|approve (?:one|a limit|the limit)|decide which)[^.]{0,50}(?:limit|ceiling|maximum|allocation)/i;
+  const sentences = text.split(/(?<=[.;!?])\s+/);
   for (const a of facts.approved) {
-    const sym = a.symbol.replace(/[^A-Z.]/g, "");
-    const re = new RegExp(`(?:approve|disagree|conflict|provisional|not approved)[^.]{0,80}\\b${sym}\\b|\\b${sym}\\b[^.]{0,80}(?:disagree|conflict|provisional|not approved)`, "i");
-    const own = perSymbol.filter((x) => x.symbol === a.symbol).some((x) => /disagree|conflict|provisional|not approved|approve (?:one|a limit|the limit)/i.test(x.text));
-    if (re.test(text) || own) out.push(`It treats the ${a.symbol} limit as undecided; you approved it on ${a.at.slice(0, 10)}.`);
+    const sym = new RegExp(`\\b${a.symbol.replace(/[^A-Z.]/g, "")}\\b`);
+    const inText = sentences.some((x) => sym.test(x) && undecided.test(x));
+    const own = perSymbol.filter((x) => x.symbol === a.symbol).some((x) => x.text.split(/(?<=[.;!?])\s+/).some((y) => undecided.test(y)));
+    if (inText || own) out.push(`It treats the ${a.symbol} limit as undecided; you approved it on ${a.at.slice(0, 10)}.`);
   }
-  if (/(?:rebuild|build|raise|top up)[^.]{0,40}cash[^.]{0,60}(?:toward|to|reach(?:es)?)\s+(?:about\s+)?\d+(?:\.\d+)?%|below the \d+[–-]\d+% (?:policy )?range/i.test(text))
+  if (/cash (?:is )?(?:below|under) \d+(?:\.\d+)?%|cash rebuilt|(?:rebuild|build|raise|top up)[^.]{0,40}cash[^.]{0,60}(?:toward|to|reach(?:es)?)\s+(?:about\s+)?\d+(?:\.\d+)?%|below the \d+[–-]\d+% (?:policy )?range/i.test(text))
     out.push("It treats the 5–15% deployable-cash range as a target to rebuild or a reason to wait. That range is only a guide: being below it is not a reason to buy, sell or delay.");
   if (facts.imported.includes("US broad-market equity") && /(?:US|U\.S\.)(?: broad-market)? bucket[^.]{0,40}\d+% (?:limit|max)|VOO[^.]{0,80}(?:ceiling|\d+% limit)/i.test(text))
     out.push("It presents the US broad-market range as a VOO limit. That range is an imported guideline you have not approved, and a revision without a maximum is waiting for you on the Policy page.");

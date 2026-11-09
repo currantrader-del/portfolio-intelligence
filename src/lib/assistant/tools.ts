@@ -159,7 +159,7 @@ export async function runTool(name: string, input: Record<string, unknown>, ws: 
           weight: r4(h.weight), day_pct: r4(h.dayPct), contribution_pts: r4(h.contributionPts), cost_basis: h.costBasis, unrealized: h.unrealized,
           bucket: h.bucket, accounts: h.accounts,
         })),
-        buckets: p.buckets.map((b) => ({ bucket: b.bucket, weight: r4(b.weight), normal: b.normal, hard_max: b.hardMax, status: b.status })),
+        buckets: p.buckets.map((b) => ({ bucket: b.bucket, weight: r4(b.weight), normal: b.normal, hard_max: b.hardMax, status: b.status, meaning: b.status === "below" ? "information only: never a reason to buy, to rebuild toward, or to wait for" : b.status === "above" ? "a reason to review, not to sell" : undefined })),
         company_exposure: p.exposures.map((e) => ({ symbol: e.symbol, direct: r4(e.direct), via_etfs: r4(e.viaEtfs), total: r4(e.total), max: e.max, limit_status: ws.policy?.companies[e.symbol]?.status ?? "none", limit_source: ws.policy?.companies[e.symbol]?.source ?? null, headroom_dollars: e.headroomDollars })),
         lookthrough_weights_as_of: LOOKTHROUGH_AS_OF,
       };
