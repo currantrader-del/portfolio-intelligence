@@ -36,7 +36,7 @@
 import type { PlannedTransfer, PortfolioView } from "@/lib/portfolio/engine";
 
 const fmt$ = (n: number) => `$${n.toLocaleString("en-US", { maximumFractionDigits: 2 })}`;
-import { DEFAULT_ETF_FOR_BUCKET, type Bucket } from "@/lib/portfolio/classify";
+import { DEFAULT_ETF_FOR_BUCKET, bucketOf, type Bucket } from "@/lib/portfolio/classify";
 import { companyLimit, type Policy } from "@/lib/policy/limits";
 import type { ResearchRecord } from "@/lib/research/records";
 import type { Quote } from "@/lib/market/quotes";
@@ -445,10 +445,15 @@ export function newCapital(args: {
   const wouldChange: string[] = [];
   let remaining = amount;
   let confidence = 6;
+  // A bucket maximum (e.g. the high-risk sleeve) is a ceiling on the stocks in it too, shared by all of them.
+  const bucketRoom = new Map(portfolio.buckets.filter((b) => b.hardMax !== null).map((b) => [b.bucket, b.hardMax! * postTotal - b.value]));
   for (const c of eligible) {
     if (remaining < 1) break;
-    const toStock = Math.floor(Math.min(c.headroomDollars ?? 0, remaining));
-    if (toStock <= 0) continue;
+    const bucket = portfolio.holdings.find((h) => h.symbol === c.symbol)?.bucket ?? bucketOf(c.symbol, research.find((r) => r.symbol === c.symbol)?.current?.parsed.classification);
+    const room = bucketRoom.get(bucket);
+    const toStock = Math.floor(Math.min(c.headroomDollars ?? 0, remaining, room ?? Infinity));
+    if (toStock <= 0) { if (room !== undefined && room < 1 && (c.headroomDollars ?? 0) >= 1) rationale.push(`${c.symbol}: no new money, because ${bucket} is at its maximum.`); continue; }
+    if (room !== undefined) bucketRoom.set(bucket, room - toStock);
     allocations.push({ symbol: c.symbol, amount: toStock });
     remaining -= toStock;
     rationale.push(`${c.symbol}: the research supports adding at today's price ("${c.stance?.text ?? ""}") and nothing material has changed since. ${c.assessment?.summary ?? ""}${c.highConviction ? " Sized to its approved high-conviction range." : ""}`);

@@ -25,7 +25,7 @@ function judge(s: SubjectAudit, weightOf: (symbol: string) => number | null): Om
     case "US broad-market equity":
       return {
         verdict: "revise",
-        reason: `VOO is the alternative every other investment has to beat, so it is where money goes when nothing beats it. A ${pct(r.hard_max)} maximum would force money into weaker options once it is reached. The imported high-conviction range (${pct(r.high_conviction_low)}–${pct(r.high_conviction_high)}) also starts below the normal range, which looks like a transcription error. Proposed: keep ${pct(r.normal_low)}–${pct(r.normal_high)} as a guide, no maximum, no high-conviction range.`,
+        reason: `VOO is the main diversified alternative every investment is compared with, alongside other ETFs, Treasuries and cash. A ${pct(r.hard_max)} maximum is not based on your research and could rule it out even when it is the best option. The imported high-conviction range (${pct(r.high_conviction_low)}–${pct(r.high_conviction_high)}) also starts below the normal range, which looks like a transcription error. Proposed: keep ${pct(r.normal_low)}–${pct(r.normal_high)} as a guide, no maximum, no high-conviction range.`,
         revised: { normal_low: r.normal_low, normal_high: r.normal_high, high_conviction_low: null, high_conviction_high: null, hard_max: null },
       };
     case "generic":
@@ -82,7 +82,7 @@ export function approvalEffect(item: ImportReviewItem, revised = false): string 
   }
   if (item.subject === "US broad-market equity") {
     return revised
-      ? `VOO no longer has a maximum: it stays the default home for money nothing else beats. ${range} remains a guide used only when choosing between diversified funds. Nothing is bought or sold.`
+      ? `VOO and similar funds no longer have a maximum. VOO stays one alternative among ETFs, Treasuries and cash, never an automatic destination. ${range} remains a guide used only when choosing between diversified funds; being below it is not a reason to buy. Nothing is bought or sold.`
       : `It confirms ${range} as your guide and ${max} as a ceiling on VOO and similar funds for new money. Nothing is bought or sold.`;
   }
   return `It records ${range ? `${range} as your guide` : "this as your guide"}${max ? ` and ${max} as a ceiling for new money` : ""} for ${item.subject}. The guide is used only when choosing between options (a fund whose bucket would go above the top of its range is not preferred); being below it is never a reason to buy. The app already uses it this way while it is imported, so approving only records it as yours; nothing is bought or sold.`;
