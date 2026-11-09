@@ -7,13 +7,21 @@
  * with the PDF engine can only ever affect this one download.
  */
 import { createServerClient, parseCookieHeader } from "@supabase/ssr";
-import { loadShareReport } from "../../src/lib/research/share/load";
-import { renderSharePdf } from "../../src/lib/research/share/pdf";
-import { ShareLeakError } from "../../src/lib/research/share/report";
 
 const text = (body: string, status: number) => new Response(body, { status, headers: { "content-type": "text/plain; charset=utf-8", "cache-control": "no-store" } });
 
 export default async (req: Request) => {
+  try {
+    return await handle(req);
+  } catch (e) {
+    // Show what failed instead of Netlify's generic crash page (no portfolio data is in these messages).
+    const err = e as Error;
+    console.error("share: crashed", err);
+    return text(`Could not build the PDF.\n\n${err?.name ?? "Error"}: ${err?.message ?? String(e)}\n${(err?.stack ?? "").split("\n").slice(1, 6).join("\n")}`, 500);
+  }
+};
+
+async function handle(req: Request): Promise<Response> {
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
   const key = process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY;
   if (!url || !key) return text("The app is not configured.", 500);
@@ -35,6 +43,12 @@ export default async (req: Request) => {
   const { data: aal } = await db.auth.mfa.getAuthenticatorAssuranceLevel();
   if (aal?.nextLevel === "aal2" && aal.currentLevel !== "aal2") return text("Finish two-step sign-in first.", 401);
 
+  // Loaded here, not at the top, so a problem loading the PDF engine is caught and shown above.
+  const [{ loadShareReport }, { renderSharePdf }, { ShareLeakError }] = await Promise.all([
+    import("../../src/lib/research/share/load"),
+    import("../../src/lib/research/share/pdf"),
+    import("../../src/lib/research/share/report"),
+  ]);
   try {
     const res = await loadShareReport(db, symbol, choice);
     if ("error" in res) return text(res.error, res.status);
@@ -55,8 +69,8 @@ export default async (req: Request) => {
       return text(`The export was stopped because ${e.leaks.length} passage${e.leaks.length === 1 ? "" : "s"} still looked like private portfolio information after redaction. Nothing was shared.`, 422);
     }
     console.error("share: failed", symbol, (e as Error).message);
-    return text("Could not build the PDF.", 500);
+    throw e;
   }
-};
+}
 
 export const config = { path: "/api/share-pdf/:symbol" };
