@@ -48,7 +48,6 @@ export default async function PlanPage() {
   const best = currentDecisionFor(ws, filings);
   const brokers = ws.portfolio.accounts.filter((a) => a.role !== "cash" && a.role !== "protected_savings");
   const unverified = brokers.filter((a) => a.ageDays > HOLDINGS_FRESH_DAYS || a.tradesAfter > 0);
-  const reserveRule = audit?.subjects.find((x) => x.subject === "protected_reserve");
 
   return (
     <div className="flex flex-col gap-3 lg:gap-4 max-w-3xl">
@@ -68,7 +67,6 @@ export default async function PlanPage() {
       <Card labelledBy="pl-now" className="!gap-2">
         <CardHead id="pl-now" title="Where things stand today" right={<Pill small>Computed now · no AI</Pill>} />
         <ul className="flex flex-col gap-1.5 t-sm">
-          <li><span className="text-ink font-semibold">Protected reserve:</span> {money(cd.protectedReserve)} in savings, {reserveRule?.authority === "you" ? "approved by you" : "app default, not approved"}. A firm restriction: never invested and never counted as buying power.</li>
           <li><span className="text-ink font-semibold">Cash you could invest:</span> {money(cd.spendableNow)} in your brokerage account{best.money.transferable.amount >= 1 ? `, plus up to ${money(best.money.transferable.amount)} from savings under your standing transfer limit (only for an opportunity that justifies it)` : ""}. {unverified.length ? "Estimated, not confirmed" : "Verified by recent statements"}. Investing it, or leaving it in cash, are both valid.</li>
           <li><span className="text-ink font-semibold">Holdings:</span> {unverified.length ? `estimated. ${unverified.map((a) => `${a.name} is known from a ${a.asOf.slice(0, 10)} statement${a.tradesAfter ? ` plus recorded trades` : ""}`).join("; ")}. Check them before acting on a dollar amount.` : "verified by statements within a week."}</li>
           <li><span className="text-ink font-semibold">Best action now:</span> {best.headline}. <Link href="/decisions" className="t-sm">Decisions</Link></li>

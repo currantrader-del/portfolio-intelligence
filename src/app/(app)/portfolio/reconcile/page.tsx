@@ -50,8 +50,7 @@ export default async function ReconcilePage({ searchParams }: { searchParams: Pr
         <dl className="grid grid-cols-2 sm:grid-cols-4 gap-3 text-sm">
           <div><dt className="text-muted">Brokerage cash</dt><dd className="font-mono">{usd(c.brokerage)}</dd><dd className="text-xs text-muted">from statements</dd></div>
           <div><dt className="text-muted">Savings</dt><dd className="font-mono">{c.savings === null ? "Not entered" : usd(c.savings)}</dd><dd className="text-xs text-muted">{c.savingsAsOf ? `as of ${shortDate(c.savingsAsOf)}` : "enter below"}</dd></div>
-          <div><dt className="text-muted">Protected reserve</dt><dd className="font-mono">{usd(c.protectedReserve)}</dd><dd className="text-xs text-muted">excluded from sizing{c.reserveShortfall > 0 && c.savings !== null ? ` · short ${usd(c.reserveShortfall)}` : ""}</dd></div>
-          <div><dt className="text-muted">Deployable</dt><dd className="font-mono">{usd(c.deployable)}</dd><dd className="text-xs text-muted">brokerage + savings above reserve</dd></div>
+          <div><dt className="text-muted">Deployable</dt><dd className="font-mono">{usd(c.deployable)}</dd><dd className="text-xs text-muted">brokerage + savings</dd></div>
         </dl>
         <ActionForm action={saveSavings} success="Balance saved" className="flex flex-wrap gap-2 items-end">
           {savingsAccts.length > 0 ? (

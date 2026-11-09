@@ -166,11 +166,11 @@ describe("new capital: ceilings and money source", () => {
     const fromCash = newCapital({ amount: 1000, source: "existing", portfolio: p, research: [research("$26")], policy, now });
     const room = (x: typeof fromNew) => x.options.find((o) => o.symbol === "AAA")!.headroomDollars!;
     expect(room(fromNew) - room(fromCash)).toBeCloseTo(100, 1); // 10% of the extra 1000
-    // Cash already held is only what the brokerage account itself holds: savings above the reserve
-    // ($12,000 - $10,000) needs a planned transfer first.
+    // Cash already held is only what the brokerage account itself holds: savings need a planned transfer first.
     const tooMuch = newCapital({ amount: 5000, source: "existing", portfolio: p, research: [], policy, now });
     expect(tooMuch.funds).toMatchObject({ requested: 5000, used: 1500, verified: true });
-    expect(tooMuch.funds.detail).toMatch(/Broker holds \$1,500 of cash that can buy a stock or ETF, so this is sized on \$1,500\. Savings hold \$2,000 above the reserve; that can be used only after you plan a transfer to Broker\. The \$10,000 savings reserve is never used\./);
+    expect(tooMuch.funds.detail).toMatch(/Broker holds \$1,500 of cash that can buy a stock or ETF, so this is sized on \$1,500\. Savings hold \$12,000; that can be used only after you plan a transfer to Broker\./);
+    expect(tooMuch.funds.detail).not.toMatch(/reserve/);
     expect(tooMuch.recommendation.allocations.reduce((a, x) => a + x.amount, 0)).toBe(1500);
     // With a planned $2,000 transfer it can be used, but only as conditional money until it arrives.
     const transfers = [{ id: "t1", fromAccountId: "s", toAccountId: "a", amount: 2000, date: "2026-11-06", note: null, createdAt: "2026-11-05T15:00:00Z" }];

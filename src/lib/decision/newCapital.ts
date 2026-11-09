@@ -26,7 +26,7 @@
  *
  * EXECUTION READINESS (needed before a dollar amount is "ready to execute"):
  *  - the money is verified: planned money that has not arrived is a plan, never an order; cash already held is
- *    capped at what is deployable after the protected reserve;
+ *    capped at what is deployable;
  *  - holdings and balances are verified: a statement, sync or your own check within a week. Trades recorded
  *    since an older statement are not a reconciliation;
  *  - no unresolved material development (results, financing, material 8-K) for any held or receiving stock.
@@ -149,7 +149,7 @@ export function newCapital(args: {
   consider?: string[];
   /** Transfers between your accounts that you recorded as planned (savings to brokerage, for example). */
   transfers?: PlannedTransfer[];
-  /** Savings you could move under your standing transfer limit (already net of the reserve and planned transfers).
+  /** Savings you could move under your standing transfer limit (already net of planned transfers).
    *  Only used with source "existing": it can fund the purchase only if you choose to transfer it. */
   authorizedSavings?: number;
 }): NewCapitalResult {
@@ -157,7 +157,7 @@ export function newCapital(args: {
   const source: MoneySource = !args.source || args.source === "new" ? "planned" : args.source;
   const requested = args.amount;
   // ---- Money by account: only the self-directed brokerage account can buy a chosen stock or ETF. Savings
-  //      above the reserve can fund it only through a transfer you planned; Acorns and Roth cash stay where they are. ----
+  //      can fund it only through a transfer you planned; Acorns and Roth cash stay where they are. ----
   const cd = portfolio.cashDetail;
   const inv = cd.investingAccount ?? null;
   const invName = inv?.name ?? "your brokerage account";
@@ -168,7 +168,7 @@ export function newCapital(args: {
   const plannedIn = Math.round(pendingIn.reduce((a, t) => a + t.amount, 0) * 100) / 100;
   const elsewhere = (cd.accounts ?? []).filter((a) => !a.canBuyChosen && a.use !== "savings" && a.cash >= 0.5);
   const elsewhereNote = elsewhere.length ? ` Cash in ${elsewhere.map((a) => `${a.name} (${fmt$(a.cash)})`).join(" and ")} stays in ${elsewhere.length > 1 ? "those accounts" : "that account"} and is not counted.` : "";
-  const reserveNote = `The ${fmt$(cd.protectedReserve)} savings reserve is never used.`;
+  const reserveNote = "";
   const authorized = source === "existing" ? Math.max(0, Math.round((args.authorizedSavings ?? 0) * 100) / 100) : 0;
   const deployable = spendable + plannedIn + authorized;
   const amount = source === "existing" ? Math.min(requested, Math.floor(deployable * 100) / 100) : requested;
@@ -177,7 +177,7 @@ export function newCapital(args: {
   const recordedCash = Math.round(spendable * 100) / 100;
   const depositShows = source === "deposited" && recordedCash + 0.5 >= amount;
   const fromTransfer = source === "existing" ? Math.max(0, Math.round((amount - spendable) * 100) / 100) : 0;
-  const savingsHint = cd.deployableSavings >= 1 && !plannedIn ? ` Savings hold ${fmt$(cd.deployableSavings)} above the reserve; that can be used only after you plan a transfer to ${invName}.` : "";
+  const savingsHint = cd.deployableSavings >= 1 && !plannedIn ? ` Savings hold ${fmt$(cd.deployableSavings)}; that can be used only after you plan a transfer to ${invName}.` : "";
   const funds: NewCapitalResult["funds"] = source === "planned"
     ? { requested, used: amount, verified: false, detail: `${fmt$(requested)} of planned new money for ${invName}, not yet deposited. This is what to do once it arrives, not an order to place now` }
     : source === "deposited"
@@ -441,7 +441,7 @@ export function newCapital(args: {
   const cash: Option = {
     kind: "cash", symbol: "CASH", label: "Valid option", price: null, priceSource: null, expectedReturn: null, headroomDollars: null,
     weightNow: portfolio.total ? portfolio.cash / portfolio.total : 0, maxWeight: null, limitStatus: null, eligible: true,
-    notes: ["Policy: new cash does not have to be invested immediately", `The $${portfolio.cashDetail.protectedReserve.toLocaleString()} protected reserve is excluded from sizing`,
+    notes: ["Policy: new cash does not have to be invested immediately", "Brokerage cash and transferable savings are shown separately",
       yields.y2 ? `Risk-free alternative: 2-year Treasury ${yields.y2.value.toFixed(2)}% (FRED, ${yields.y2.date}); your savings yield is not entered` : "Treasury yields not loaded; your savings yield is not entered",
       ...(cashImp ? [`Whole-portfolio effect: ${cashImp.summary}`] : [])],
     researchAction: null, zoneAction: null, toVerify: [],
@@ -494,7 +494,7 @@ export function newCapital(args: {
     { key: "funds", label: "The money is verified, in the account that buys", ok: source === "planned" ? false : source === "deposited" ? depositShows : funds.verified && cd.savings !== null,
       detail: source === "planned" ? `${funds.detail}. Choose "New, already deposited" once it has arrived`
         : source === "deposited" ? funds.detail
-        : cd.savings === null ? "Enter your savings balance so the protected reserve is known"
+        : cd.savings === null ? "Enter your savings balance so transferable capital is known"
         : amount < 1 ? `No cash in ${invName} to invest.${savingsHint}` : funds.detail },
     { key: "holdings", label: "Holdings and balances are verified", ok: confirmed || (!unverified.length && !gaps.length),
       detail: confirmed ? `You confirmed today that the holdings and balances shown match your broker accounts${portfolio.quality.reconciliation.complete ? "" : ` (still open, not blocking: ${portfolio.quality.reconciliation.gaps.join("; ")})`}`
@@ -554,7 +554,7 @@ export function newCapital(args: {
       alternatives: ALTERNATIVES, riskFree10y: riskFreeFor(10, yields),
       items: [
         funds.detail,
-        `Investable capital $${Math.round(portfolio.total).toLocaleString()} (${portfolio.quality.status}); the $${portfolio.cashDetail.protectedReserve.toLocaleString()} protected reserve is excluded`,
+        `Investable capital $${Math.round(portfolio.total).toLocaleString()} (${portfolio.quality.status})`,
         `Prices: ${portfolio.pricedLive} of ${portfolio.holdings.length} holdings from delayed quotes, the rest from statements`,
         "Fund look-through from each fund's dated published holdings and sector/country splits; industry and theme figures are lower bounds",
         "Exposure levels: those you approved, else the app's drafted proposals (labelled proposed)",

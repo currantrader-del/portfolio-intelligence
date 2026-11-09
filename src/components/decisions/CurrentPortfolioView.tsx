@@ -53,7 +53,7 @@ export async function CurrentPortfolioView({ ws, confirmed }: { ws: Workspace; c
                       <td className="text-right px-1">{x.limit !== null ? `${pctStr(x.limit, 0)} of invested` : "—"}</td></tr>
                   ))}
                   <tr className="border-t border-line"><td className="text-left px-1 py-1">Invested portfolio</td><td className="text-right px-1">{usd(d.projected.invested.before)} → {usd(d.projected.invested.after)}</td><td className="text-right px-1">{usd(d.projected.investable.before)} (unchanged)</td><td /></tr>
-                  <tr className="border-t border-line"><td className="text-left px-1 py-1">Savings above reserve</td><td className="text-right px-1" colSpan={2}>{usd(d.projected.savingsAboveReserve.before)} → {usd(d.projected.savingsAboveReserve.after)}</td><td /></tr>
+                  <tr className="border-t border-line"><td className="text-left px-1 py-1">Savings</td><td className="text-right px-1" colSpan={2}>{usd(d.projected.savingsAboveReserve.before)} → {usd(d.projected.savingsAboveReserve.after)}</td><td /></tr>
                 </tbody>
               </table>
             </div>
@@ -77,15 +77,14 @@ export async function CurrentPortfolioView({ ws, confirmed }: { ws: Workspace; c
             {d.money.plannedIn > 0 && <li className="flex justify-between gap-3 py-1.5 border-t border-line"><span className="flex flex-col"><span className="text-ink">Transfers you planned</span><span className="t-xs">Counted once, until the money shows in the account</span></span><span className="num text-ink">{usd(d.money.plannedIn, 2)}</span></li>}
             <li className="flex justify-between gap-3 py-1.5 border-t border-line"><span className="flex flex-col"><span className="text-ink">Savings you could transfer</span><span className="t-xs">{tr.detail}</span></span><span className="num text-ink">{usd(tr.amount)}</span></li>
             <li className="flex justify-between gap-3 py-1.5 border-t border-line"><span className="flex flex-col"><span className="text-ink">Invested portfolio</span><span className="t-xs">Schwab, Acorns and Roth holdings plus their cash. Every weight and limit uses this; savings never change it</span></span><span className="num text-ink">{usd(ws.portfolio.total)}</span></li>
-            <li className="flex justify-between gap-3 py-1.5 border-t border-line"><span className="flex flex-col"><span className="text-ink">Total investable capital</span><span className="t-xs">Invested portfolio plus savings above the reserve, for planning and liquidity</span></span><span className="num text-ink">{usd(ws.portfolio.investableCapital)}</span></li>
-            <li className="flex justify-between gap-3 py-1.5 border-t border-line"><span className="flex flex-col"><span className="text-ink">Protected reserve</span><span className="t-xs">Never invested, never counted</span></span><span className="num text-muted">{usd(tr.reserve)}</span></li>
+            <li className="flex justify-between gap-3 py-1.5 border-t border-line"><span className="flex flex-col"><span className="text-ink">Total investable capital</span><span className="t-xs">Invested portfolio plus savings, for planning and liquidity</span></span><span className="num text-ink">{usd(ws.portfolio.investableCapital)}</span></li>
           </ul>
           <div className="border-t border-line -mb-2">
             <Disclose summary={ws.capitalPreference ? `Your standing transfer limit: ${usd(ws.capitalPreference.maxTransfer)}` : "Set your standing transfer limit"}>
               <ActionForm action={saveCapitalPreference} success="Preference saved" className="flex flex-col gap-2">
                 <p className="t-sm">I am willing to transfer up to this much from savings to {invName} if a sufficiently attractive investment opportunity is identified.</p>
                 <label className="field">Most I would transfer<input name="max_transfer" inputMode="decimal" defaultValue={ws.capitalPreference?.maxTransfer ?? ""} placeholder="10000" className="input num" /></label>
-                <span className="t-xs">A maximum for evaluating opportunities, not a plan to invest and not buying power. The amount actually considered is min(this limit, savings − the {usd(tr.reserve)} reserve), less any transfers already planned. The app never moves money.</span>
+                <span className="t-xs">A maximum for evaluating opportunities, not a plan to invest and not buying power. The amount actually considered is min(this limit, savings), less any transfers already planned. The app never moves money.</span>
                 <SubmitButton className="btn self-start" pendingText="Saving…">Save limit</SubmitButton>
               </ActionForm>
             </Disclose>

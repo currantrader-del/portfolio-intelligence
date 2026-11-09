@@ -26,7 +26,7 @@ export function portfolioContext(ws: Workspace): PortfolioContext {
     };
   }).sort((a, b) => b.weight - a.weight);
   const c = p.cashDetail;
-  const cashNote = `Cash: brokerage ${Math.round(c.brokerage)}; savings ${c.savings == null ? "not entered" : Math.round(c.savings)}; protected reserve ${Math.round(c.protectedReserve)} is excluded from all percentages.`;
+  const cashNote = `Cash: brokerage ${Math.round(c.brokerage)}; savings ${c.savings == null ? "not entered" : Math.round(c.savings)}; savings are outside every percentage; there is no protected reserve.`;
   const upcoming = ws.alerts.filter((a) => a.kind === "event").map((a) => `${a.title} (${a.timing === "upcoming" ? "estimated date" : "filed"})`).slice(0, 10);
   return { quality: p.quality.status === "verified" ? "verified holdings" : `${p.quality.headline}; values are estimates`, holdings, cashNote, upcoming };
 }

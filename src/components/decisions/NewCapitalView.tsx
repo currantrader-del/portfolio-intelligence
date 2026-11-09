@@ -115,7 +115,7 @@ export async function NewCapitalView({ ws, amount, source, confirmed, action }: 
 
 /**
  * Each account's own cash and what it can do. Cash never moves between accounts on its own; savings can fund the
- * brokerage only through a transfer you plan here (recorded only, nothing is moved), and the reserve never can.
+ * brokerage only through a transfer you plan here (recorded only, nothing is moved).
  */
 export function AccountCashCard({ ws }: { ws: Workspace }) {
   const cd = ws.portfolio.cashDetail;
@@ -129,7 +129,7 @@ export function AccountCashCard({ ws }: { ws: Workspace }) {
       <ul className="flex flex-col">
         {accounts.map((a) => (
           <li key={a.id} className="flex items-start justify-between gap-3 py-1.5 border-t border-line first:border-t-0">
-            <span className="flex flex-col min-w-0"><span className="t-sm text-ink">{a.name}</span><span className="t-xs">{a.use === "savings" ? `${a.note}. ${usd(cd.protectedReserve)} is your protected reserve; ${usd(cd.deployableSavings)} is above it.` : a.note}</span>
+            <span className="flex flex-col min-w-0"><span className="t-sm text-ink">{a.name}</span><span className="t-xs">{a.use === "savings" ? `${a.note}. ${usd(cd.deployableSavings)} could be transferred.` : a.note}</span>
               {a.basis && <span className={`t-xs ${a.basis.confirmed ? "" : "warn"}`}>{a.basis.detail}{a.basis.checks.length ? ` ${a.basis.checks.join(" ")}` : ""}</span>}</span>
             <span className="flex flex-col items-end shrink-0"><span className="t-sm num text-ink">{usd(a.cash, 2)}</span>{a.basis && <Pill small tone={a.basis.confirmed ? "gain" : "warn"}>{a.basis.confirmed ? (a.basis.status === "manual" ? "Your entry" : "Statement") : a.basis.status === "derived" ? "Worked out" : "Check"}</Pill>}</span>
           </li>
@@ -157,7 +157,7 @@ export function AccountCashCard({ ws }: { ws: Workspace }) {
                 <label className="field">Amount<input name="amount" inputMode="decimal" className="input" placeholder={cd.deployableSavings >= 1 ? String(Math.floor(cd.deployableSavings)) : "0"} /></label>
                 <label className="field">Date<input name="date" type="date" className="input" defaultValue={ws.now.toISOString().slice(0, 10)} /></label>
               </div>
-              <span className="t-xs">This only records your plan; it moves no money. The protected reserve cannot be planned out.</span>
+              <span className="t-xs">This only records your plan; it moves no money.</span>
               <SubmitButton className="btn self-start" pendingText="Saving…">Record planned transfer</SubmitButton>
             </ActionForm>
           </Disclose>

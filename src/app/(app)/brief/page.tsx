@@ -81,7 +81,7 @@ export default async function BriefPage({ searchParams }: { searchParams: Promis
         ) : (
           <p className="text-[16px] leading-relaxed">{daySentences.join(" ")}</p>
         )}
-        <p className="text-xs text-muted">{weekly ? "Hypothetical: today's share counts at last week's prices, so trades and deposits during the week are not reflected. " : ""}Estimated investable capital {usd(p.total)}; protected reserve excluded.</p>
+        <p className="text-xs text-muted">{weekly ? "Hypothetical: today's share counts at last week's prices, so trades and deposits during the week are not reflected. " : ""}Estimated investable capital {usd(p.total)}; savings excluded.</p>
         {weekly && weekAgo && recordedNow && (
           <p className="text-sm">Recorded value: {usd(weekAgo.investable)} on {shortDate(weekAgo.as_of)} → {usd(recordedNow.investable)} on {shortDate(recordedNow.as_of)} <span className="text-xs text-muted">(includes any deposits or withdrawals you recorded)</span></p>
         )}

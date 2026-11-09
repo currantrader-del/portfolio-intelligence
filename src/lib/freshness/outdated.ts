@@ -95,9 +95,11 @@ export function outdatedVerdict(args: {
   });
 
   const contradictions: string[] = [];
-  if (args.text && args.currentReserve) {
+  if (args.text && args.currentReserve !== undefined && args.currentReserve !== null) {
     const wrong = reserveMentions(args.text).filter((n) => Math.abs(n - args.currentReserve!) > 1);
-    if (wrong.length) contradictions.push(`It uses a $${wrong.map((n) => n.toLocaleString("en-US")).join(" / $")} reserve; the approved reserve is $${args.currentReserve.toLocaleString("en-US")}.`);
+    if (wrong.length) contradictions.push(args.currentReserve === 0
+      ? `It holds back a $${wrong.map((n) => n.toLocaleString("en-US")).join(" / $")} savings reserve; there is no protected reserve any more.`
+      : `It uses a $${wrong.map((n) => n.toLocaleString("en-US")).join(" / $")} reserve; the approved reserve is $${args.currentReserve.toLocaleString("en-US")}.`);
   }
   if (args.text && args.policy) contradictions.push(...supersededMentions(args.text, args.policy, args.perSymbol));
 

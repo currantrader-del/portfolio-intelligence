@@ -10,9 +10,10 @@
  *  - Invested portfolio (`total`): holdings in the brokerage, Acorns and retirement accounts plus the cash inside
  *    them. Every holding weight, bucket weight, company exposure and allocation limit uses this. Savings outside
  *    the brokerage never change it.
- *  - Total investable capital (`investableCapital`): the invested portfolio plus savings above the protected
- *    reserve. Used for capital planning, liquidity and "share of everything I could invest" views.
- * The protected reserve is tracked but excluded from both (policy rule).
+ *  - Total investable capital (`investableCapital`): the invested portfolio plus savings. Used for capital
+ *    planning, liquidity and "share of everything I could invest" views.
+ * There is no protected savings reserve (investor's direction, 2026-11-09): brokerage cash and transferable
+ * savings both count as available, shown separately. `protectedReserve` stays in the shape as 0.
  */
 import type { Quote } from "@/lib/market/quotes";
 import { companyLimit, type Policy, type Range } from "@/lib/policy/limits";
@@ -206,7 +207,7 @@ export type CompanyExposure = {
 
 export type PortfolioView = {
   total: number; // invested portfolio (holdings + cash inside investment accounts): the denominator for every weight and limit
-  /** Invested portfolio plus savings above the protected reserve: for capital planning and liquidity, never a limit denominator. */
+  /** Invested portfolio plus savings: for capital planning and liquidity, never a limit denominator. */
   investableCapital: number;
   netWorthTracked: number; // investable capital + protected reserve
   cash: number; // cash inside investment accounts (savings excluded; see cashDetail)
@@ -299,7 +300,8 @@ export function buildPortfolio(
     if (gap !== null && Math.abs(gap) > 1) missing.push(`${s.accountName}: statement total differs from its positions plus cash by ${gap > 0 ? "" : "-"}$${Math.abs(gap).toFixed(2)}`);
   }
 
-  const reserve = policy?.protectedSavingsFloor ?? 3000;
+  // No protected reserve (2026-11-09 direction); the old policy row is kept on file but no longer applied.
+  const reserve = 0;
   const deployableSavings = savings === null ? 0 : Math.max(0, savings - reserve);
   const selfDirected = accountCash.filter((a) => a.use === "self_directed").sort((a, b) => b.cash - a.cash);
   const investingAccount = selfDirected[0] ? { id: selfDirected[0].id, name: selfDirected[0].name, cash: Math.max(0, selfDirected[0].cash), confirmed: selfDirected[0].basis?.confirmed ?? false, basis: selfDirected[0].basis } : null;
@@ -317,7 +319,7 @@ export function buildPortfolio(
   };
   // Savings stay outside the invested portfolio: entering a savings balance never changes a holding's weight.
   const cash = brokerageCash;
-  if (savings === null) missing.push("Savings balance not entered, so deployable savings and the protected reserve are not counted");
+  if (savings === null) missing.push("Savings balance not entered, so transferable savings are not counted");
 
   const rows = [...bySymbol.entries()].map(([symbol, h]) => {
     const q = quotes.get(symbol);
@@ -416,7 +418,7 @@ export function buildPortfolio(
   const reconciliation = reconciliationGaps({
     brokerAsOfs: brokerAccounts.map((a) => a.asOf),
     savingsEntered: savings !== null,
-    reserveApproved: policy?.audit?.protectedReserve.status === "approved",
+    reserveApproved: true,
     ledgerRows: ledger.length,
     positionsWithoutBasis: noBasis.length,
   });

@@ -55,7 +55,7 @@ describe("cash belongs to its account", () => {
     expect(accountCashUse("USAA Savings", "cash")).toBe("savings");
   });
 
-  it("only the Schwab cash can buy today; Acorns, the Roth and the reserve never pay", () => {
+  it("only the Schwab cash can buy today; Acorns, the Roth and savings never pay without a transfer", () => {
     const p = buildPortfolio([schwab, acorns, roth, usaa(3000)], new Map(), policy, {}, [], now);
     const cd = p.cashDetail;
     expect(cd.investingAccount).toMatchObject({ id: "schwab", name: "Schwab One (Thinkorswim)", cash: 82.2, confirmed: true });
@@ -63,21 +63,21 @@ describe("cash belongs to its account", () => {
     expect(cd.accounts.map((a) => [a.name, a.cash, a.canBuyChosen])).toEqual([
       ["Schwab One (Thinkorswim)", 82.2, true], ["Acorns Invest", 5, false], ["Acorns Later (Roth IRA)", 3.97, false], ["USAA Savings", 3000, false],
     ]);
-    expect(cd.deployableSavings).toBe(0); // all $3,000 of savings is the protected reserve
+    expect(cd.deployableSavings).toBe(3000); // no protected reserve: all savings could be transferred
 
     const r = newCapital({ amount: 1250, source: "existing", portfolio: p, research: [], policy, now });
     expect(r.funds).toMatchObject({ requested: 1250, used: 82.2, verified: true });
     expect(r.funds.detail).toMatch(/Schwab One \(Thinkorswim\) holds \$82\.2 of cash that can buy a stock or ETF/);
-    expect(r.funds.detail).toMatch(/The \$3,000 savings reserve is never used\./);
+    expect(r.funds.detail).not.toMatch(/reserve/);
     expect(r.funds.detail).toMatch(/Cash in Acorns Invest \(\$5\) and Acorns Later \(Roth IRA\) \(\$3\.97\) stays in those accounts and is not counted\./);
     expect(r.recommendation.allocations.reduce((a, x) => a + x.amount, 0)).toBeCloseTo(82.2, 2);
   });
 
-  it("savings above the reserve are used only through a planned transfer, and stay conditional until they arrive", () => {
+  it("savings are used only through a planned transfer, and stay conditional until they arrive", () => {
     const p = buildPortfolio([schwab, acorns, roth, usaa(4500)], new Map(), policy, {}, [], now);
     const noPlan = newCapital({ amount: 1000, source: "existing", portfolio: p, research: [], policy, now });
     expect(noPlan.funds.used).toBe(82.2);
-    expect(noPlan.funds.detail).toMatch(/Savings hold \$1,500 above the reserve; that can be used only after you plan a transfer to Schwab One/);
+    expect(noPlan.funds.detail).toMatch(/Savings hold \$4,500; that can be used only after you plan a transfer to Schwab One/);
     const transfers = [{ id: "t", fromAccountId: "usaa", toAccountId: "schwab", amount: 1000, date: "2026-11-10", note: null, createdAt: "2026-11-08T22:00:00Z" }];
     const planned = newCapital({ amount: 1000, source: "existing", portfolio: p, research: [], policy, now, transfers });
     expect(planned.funds).toMatchObject({ used: 1000, verified: false });

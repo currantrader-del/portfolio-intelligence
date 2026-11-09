@@ -76,7 +76,7 @@ export const TOOLS: Anthropic.Beta.BetaTool[] = [
   },
   {
     name: "get_current_decision",
-    description: "The app's Current Portfolio decision, the same one the Decisions page shows: the best action now given the recorded holdings, approved research, today's prices, limits, brokerage cash and the savings the investor authorised under their standing transfer limit (min(limit, savings - reserve), net of planned transfers; never buying power). Gives the headline, the amount and funding, the alternatives and what to confirm. Use this, not your own sizing, whenever the question is what to do now with the money the investor has.",
+    description: "The app's Current Portfolio decision, the same one the Decisions page shows: the best action now given the recorded holdings, approved research, today's prices, limits, brokerage cash and the savings the investor authorised under their standing transfer limit (min(limit, savings), net of planned transfers; never buying power). Gives the headline, the amount and funding, the alternatives and what to confirm. Use this, not your own sizing, whenever the question is what to do now with the money the investor has.",
     input_schema: { type: "object", properties: {}, required: [], additionalProperties: false },
     strict: true,
   },
