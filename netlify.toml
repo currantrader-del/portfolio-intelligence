@@ -13,4 +13,5 @@
 # "Share full research" PDF: its own function so the PDF engine and fonts never ship in the Next.js server.
 [functions."share-pdf"]
   external_node_modules = ["@react-pdf/renderer"]
-  included_files = ["src/lib/research/share/fonts/**"]
+  # pdfkit loads its built-in fonts and colour profile by dynamic require/URL, which bundling does not trace.
+  included_files = ["src/lib/research/share/fonts/**", "node_modules/pdfkit/js/standard-fonts/**", "node_modules/pdfkit/js/data/**"]
