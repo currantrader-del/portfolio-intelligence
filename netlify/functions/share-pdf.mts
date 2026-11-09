@@ -1,5 +1,6 @@
 /**
- * GET /api/share-pdf/<SYMBOL>?version=latest|approved -> the full investigation as a PDF, with the
+ * GET /api/share-pdf/<SYMBOL>?version=latest|approved[&format=json] -> the full investigation (as JSON for
+ * the browser to draw, or as a PDF for short reports), with the
  * owner's private financial information removed. Read-only: no research is re-run and no AI is called.
  *
  * Runs as its own Netlify function, outside the Next.js server, on purpose: bundling the PDF engine
@@ -44,14 +45,19 @@ async function handle(req: Request): Promise<Response> {
   if (aal?.nextLevel === "aal2" && aal.currentLevel !== "aal2") return text("Finish two-step sign-in first.", 401);
 
   // Loaded here, not at the top, so a problem loading the PDF engine is caught and shown above.
-  const [{ loadShareReport }, { renderSharePdf }, { ShareLeakError }] = await Promise.all([
+  const [{ loadShareReport }, { ShareLeakError }] = await Promise.all([
     import("../../src/lib/research/share/load"),
-    import("../../src/lib/research/share/pdf"),
     import("../../src/lib/research/share/report"),
   ]);
   try {
     const res = await loadShareReport(db, symbol, choice);
     if ("error" in res) return text(res.error, res.status);
+    // The app asks for the redacted report and draws the PDF in the browser: drawing a long report
+    // here took longer than Netlify lets a request run.
+    if (new URL(req.url).searchParams.get("format") === "json") {
+      return new Response(JSON.stringify(res.report), { headers: { "content-type": "application/json; charset=utf-8", "cache-control": "private, no-store" } });
+    }
+    const { renderSharePdf } = await import("../../src/lib/research/share/pdf");
     const pdf = await renderSharePdf(res.report);
     const date = res.report.facts.find((f) => f[0] === "Research date")?.[1] ?? "";
     const iso = /\d{4}/.test(date) ? new Date(`${date} UTC`).toISOString().slice(0, 10) : new Date().toISOString().slice(0, 10);
