@@ -201,7 +201,10 @@ export function newCapital(args: {
   const yields = args.yields ?? { y2: null, y10: null };
   // Money already counted as deployable cash only moves within the portfolio; new money grows it.
   const isNew = source === "planned" || (source === "deposited" && !depositShows);
-  const postTotal = isNew ? portfolio.total + amount : portfolio.total;
+  // Limits apply to the invested portfolio. New money grows it; so does savings moved into the brokerage (an
+  // internal transfer: not new capital overall, but it joins the invested portfolio). Savings that stay put never do.
+  const movedIn = isNew ? amount : fromTransfer;
+  const postTotal = portfolio.total + movedIn;
   const warnings: string[] = [];
   if (portfolio.quality.status === "estimated") warnings.push(portfolio.quality.headline + ". " + portfolio.quality.reasons[0]);
   if (portfolio.pricedLive < portfolio.holdings.length) warnings.push("Some prices are from statements, not live quotes.");
@@ -369,7 +372,7 @@ export function newCapital(args: {
   const nvdaCl = companyLimit(policy, "NVDA");
   const heldResearched = stockOptions.filter((o) => o.stance).map((o) => ({ symbol: o.symbol, label: "Existing holding" }));
   const ex = exposureImpact({
-    holdings: portfolio.holdings.map((h) => ({ symbol: h.symbol, value: h.value })), cash: portfolio.cash, amount, source: isNew ? "new" : "existing",
+    holdings: portfolio.holdings.map((h) => ({ symbol: h.symbol, value: h.value })), cash: portfolio.cash + (isNew ? 0 : fromTransfer), amount, source: isNew ? "new" : "existing",
     options: [...etfBuckets.map((b) => ({ symbol: DEFAULT_ETF_FOR_BUCKET[b.bucket] ?? "VOO", label: b.bucket })), ...heldResearched, { symbol: "CASH", label: "Keep cash" }],
     rules: exposureRules(args.rules ?? []),
     nvdaMax: nvdaCl.hasLimit ? { value: nvdaCl.newMoneyMax, status: policy?.companies.NVDA?.authority === "you" ? "approved" : "imported" } : null, now,

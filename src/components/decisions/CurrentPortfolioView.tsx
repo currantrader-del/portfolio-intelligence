@@ -6,7 +6,7 @@ import { loadDecisionFilings } from "@/lib/alerts/events";
 import { saveCapitalPreference } from "@/app/(app)/decisions/actions";
 import { ActionForm, SubmitButton } from "@/components/forms";
 import { AskButton } from "@/components/AskPanel";
-import { usd } from "@/lib/format";
+import { pctStr, usd } from "@/lib/format";
 import { Card, CardHead, DataLabel, Disclose, Pill } from "@/components/ui";
 import { AccountCashCard, AssumptionsDisclose, ExposureCard, OptionsCard, RecordDisclose } from "@/components/decisions/NewCapitalView";
 
@@ -39,6 +39,28 @@ export async function CurrentPortfolioView({ ws, confirmed }: { ws: Workspace; c
           </div>
         </Card>
 
+        {d.allocations.length > 0 && (
+          <Card labelledBy="pj-h" className="!gap-2">
+            <CardHead id="pj-h" title="Projected allocation" right={<span className="t-xs">before → after</span>} />
+            <div className="overflow-x-auto -mx-1">
+              <table className="w-full t-xs num">
+                <thead><tr className="text-muted"><th className="text-left font-normal px-1"></th><th className="text-right font-normal px-1">Of invested portfolio</th><th className="text-right font-normal px-1">Of all investable</th><th className="text-right font-normal px-1">Limit</th></tr></thead>
+                <tbody>
+                  {d.projected.rows.map((x) => (
+                    <tr key={x.symbol} className="border-t border-line"><td className="text-left px-1 py-1 text-ink">{usd(x.amount)} {x.symbol}{x.lookthrough ? "*" : ""}</td>
+                      <td className="text-right px-1">{pctStr(x.before)} → <span className={x.limit !== null && x.afterInvested > x.limit + 0.0005 ? "warn" : "text-ink"}>{pctStr(x.afterInvested)}</span></td>
+                      <td className="text-right px-1">{pctStr(x.beforeInvestable)} → {pctStr(x.afterInvestable)}</td>
+                      <td className="text-right px-1">{x.limit !== null ? `${pctStr(x.limit, 0)} of invested` : "—"}</td></tr>
+                  ))}
+                  <tr className="border-t border-line"><td className="text-left px-1 py-1">Invested portfolio</td><td className="text-right px-1">{usd(d.projected.invested.before)} → {usd(d.projected.invested.after)}</td><td className="text-right px-1">{usd(d.projected.investable.before)} (unchanged)</td><td /></tr>
+                  <tr className="border-t border-line"><td className="text-left px-1 py-1">Savings above reserve</td><td className="text-right px-1" colSpan={2}>{usd(d.projected.savingsAboveReserve.before)} → {usd(d.projected.savingsAboveReserve.after)}</td><td /></tr>
+                </tbody>
+              </table>
+            </div>
+            <span className="t-xs">Limits apply to the invested portfolio after the purchase. Moving savings into {invName} is an internal transfer: it grows the invested portfolio but not your total investable capital, and it is not new money. {d.projected.rows.some((x) => x.lookthrough) ? "* Company exposure includes its share inside your ETFs, counted once." : ""}</span>
+          </Card>
+        )}
+
         <Card labelledBy="cf-h" className="!gap-2.5">
           <CardHead id="cf-h" title="Before you act" right={d.confirm.length ? <Pill>{d.confirm.length}</Pill> : null} />
           {d.confirm.length ? <ol className="flex flex-col gap-1.5 t-sm list-decimal pl-5">{d.confirm.map((t) => <li key={t}>{t}</li>)}</ol> : <p className="t-sm">Nothing to confirm.</p>}
@@ -54,6 +76,8 @@ export async function CurrentPortfolioView({ ws, confirmed }: { ws: Workspace; c
             <li className="flex justify-between gap-3 py-1.5"><span className="flex flex-col"><span className="text-ink">Cash in {invName}</span><span className="t-xs">The only cash that can buy a chosen stock or ETF{d.money.brokerageConfirmed ? "" : ". Worked out from records, not confirmed: check it in the broker's app"}</span></span><span className="num text-ink">{usd(d.money.brokerageCash, 2)}</span></li>
             {d.money.plannedIn > 0 && <li className="flex justify-between gap-3 py-1.5 border-t border-line"><span className="flex flex-col"><span className="text-ink">Transfers you planned</span><span className="t-xs">Counted once, until the money shows in the account</span></span><span className="num text-ink">{usd(d.money.plannedIn, 2)}</span></li>}
             <li className="flex justify-between gap-3 py-1.5 border-t border-line"><span className="flex flex-col"><span className="text-ink">Savings you could transfer</span><span className="t-xs">{tr.detail}</span></span><span className="num text-ink">{usd(tr.amount)}</span></li>
+            <li className="flex justify-between gap-3 py-1.5 border-t border-line"><span className="flex flex-col"><span className="text-ink">Invested portfolio</span><span className="t-xs">Schwab, Acorns and Roth holdings plus their cash. Every weight and limit uses this; savings never change it</span></span><span className="num text-ink">{usd(ws.portfolio.total)}</span></li>
+            <li className="flex justify-between gap-3 py-1.5 border-t border-line"><span className="flex flex-col"><span className="text-ink">Total investable capital</span><span className="t-xs">Invested portfolio plus savings above the reserve, for planning and liquidity</span></span><span className="num text-ink">{usd(ws.portfolio.investableCapital)}</span></li>
             <li className="flex justify-between gap-3 py-1.5 border-t border-line"><span className="flex flex-col"><span className="text-ink">Protected reserve</span><span className="t-xs">Never invested, never counted</span></span><span className="num text-muted">{usd(tr.reserve)}</span></li>
           </ul>
           <div className="border-t border-line -mb-2">

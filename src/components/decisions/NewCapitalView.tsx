@@ -190,7 +190,7 @@ export function ExposureCard({ r }: { r: NewCapitalResult }) {
       </table>
     </div>
     <ul className="list-disc pl-4 t-sm flex flex-col gap-1">{r.exposure.reasons.map((x) => <li key={x}>{x}</li>)}</ul>
-    <span className="t-xs">% of investable capital, including what each fund holds. Levels: NVIDIA&apos;s limit and the exposure levels on file ({shown[0]?.rows.find((x) => x.key === "semis")?.level?.status ?? "proposed"}). Industry and theme figures are lower bounds.</span>
+    <span className="t-xs">% of your invested portfolio after the money moves in (savings that stay put are not counted), including what each fund holds; each company counted once. Levels: NVIDIA&apos;s limit and the exposure levels on file ({shown[0]?.rows.find((x) => x.key === "semis")?.level?.status ?? "proposed"}). Industry and theme figures are lower bounds.</span>
   </Card>
 
   );
@@ -253,7 +253,7 @@ export function AssumptionsDisclose({ r, ws }: { r: NewCapitalResult; ws: Worksp
         <li key={`${alt.symbol}-${f.firm}-${f.asset}`} className="flex justify-between gap-3"><span>{alt.symbol}: {f.firm}, {f.asset}</span><span className="num text-ink text-right">{f.kind === "range" ? `${pctStr(f.low)}–${pctStr(f.high)}` : pctStr(f.low)} <span className="t-xs">· {f.horizonYears[0] === f.horizonYears[1] ? f.horizonYears[0] : f.horizonYears.join("–")} yrs, {f.asOf}</span></span></li>
       )))}
       {r.assumptions.riskFree10y && <li className="flex justify-between gap-3"><span>10-year Treasury (risk-free)</span><span className="num text-ink">{pctStr(r.assumptions.riskFree10y.rate, 2)} <span className="t-xs">· FRED {r.assumptions.riskFree10y.asOf}</span></span></li>}
-      <li className="flex justify-between gap-3"><span>Investable capital</span><span className="num text-ink">{usd(ws.portfolio.total)} <span className="t-xs">· {ws.portfolio.quality.status}, {ws.portfolio.quality.reconciliation.label.toLowerCase()}</span></span></li>
+      <li className="flex justify-between gap-3"><span>Invested portfolio (limit denominator)</span><span className="num text-ink">{usd(ws.portfolio.total)} <span className="t-xs">· {ws.portfolio.quality.status}, {ws.portfolio.quality.reconciliation.label.toLowerCase()}</span></span></li>
     </ul>
     <p className="t-xs">Vanguard does not say what its range endpoints represent; J.P. Morgan does not say whether its figure is a median or a mean. Treat both as uncertain.</p>
     <Link href="/policy" className="t-sm">Sources and your limits on the Policy page</Link>

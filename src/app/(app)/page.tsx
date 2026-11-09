@@ -106,7 +106,7 @@ export default async function TodayPage() {
               {ws.benchmarks.map((b) => (
                 <Metric key={b.symbol} className="max-lg:hidden" size="sm" align="right" label={b.label} value={pctStr(b.dayPct, 1, true)} tone={b.dayPct === null ? null : b.dayPct >= 0 ? "gain" : "loss"} />
               ))}
-              <Metric size="sm" align="right" label="Investable" value={`${verified ? "" : "≈ "}${usd(p.total)}`} />
+              <Metric size="sm" align="right" label="Invested" value={`${verified ? "" : "≈ "}${usd(p.total)}`} note={p.investableCapital > p.total + 0.5 ? `${usd(p.investableCapital)} with savings` : undefined} />
             </div>
           </div>
           <p className="t-sm leading-relaxed">{brief.sentences.join(" ")}</p>

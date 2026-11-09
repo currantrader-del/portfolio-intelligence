@@ -17,7 +17,7 @@ export async function recordDaily(db: SupabaseClient, ws: Workspace): Promise<vo
   if (!ws.userId || !spy || p.pricedLive === 0 || !p.holdings.length) return;
   const row = {
     as_of: nyDate(spy.asOf),
-    investable: p.total,
+    investable: p.investableCapital,
     invested: p.invested,
     cash: p.cash,
     net_worth_tracked: p.netWorthTracked,

@@ -62,6 +62,13 @@ export function transferableSavings(args: { portfolio: PortfolioView; transfers:
   return { savings, savingsAsOf: cd.savingsAsOf, reserve, aboveReserve, cap, alreadyPlanned, amount, verified, detail };
 }
 
+export type Projection = {
+  invested: { before: number; after: number };
+  investable: { before: number; after: number };
+  rows: { symbol: string; amount: number; before: number; afterInvested: number; beforeInvestable: number; afterInvestable: number; limit: number | null; lookthrough: boolean }[];
+  savingsAboveReserve: { before: number; after: number };
+};
+
 export type Alternative = { key: "add" | "new" | "etf" | "cash"; title: string; status: string; detail: string; symbol: string | null; href: string | null };
 
 export type CurrentDecision = {
@@ -78,6 +85,8 @@ export type CurrentDecision = {
   /** Before acting: the open checks, then the transfer and trade steps you would take yourself. */
   confirm: string[];
   money: { brokerageCash: number; brokerageConfirmed: boolean; plannedIn: number; transferable: Transferable };
+  /** Each proposed purchase before and after, on both denominators. Limits apply to the invested portfolio. */
+  projected: Projection;
   /** The engine result the recommendation is sized on (exposure, gates, options), for the detail cards and the record. */
   result: NewCapitalResult;
   /** What the same engine says if every dollar you authorised were available: which stocks qualify and their room. */
@@ -106,9 +115,18 @@ export function currentPortfolioDecision(args: EngineArgs & { preference: Capita
   const kindOf = (r: NewCapitalResult, s: string) => r.options.find((o) => o.symbol === s);
   const stockNeed = capacity.recommendation.allocations.filter((a) => isStock(kindOf(capacity, a.symbol))).reduce((a, x) => a + x.amount, 0);
   // 2. Size on what is worth deploying: brokerage cash first; savings only for the stock adds that need them.
-  const fromSavings = stockNeed > here ? Math.min(tr.amount, Math.ceil(stockNeed - here)) : 0;
+  // Limits are a share of the invested portfolio, and money moved in grows it, so the room at the full authorised
+  // amount overstates the room at a smaller transfer. Shrink the transfer until it matches what the stocks can take.
+  let fromSavings = stockNeed > here ? Math.min(tr.amount, Math.ceil(stockNeed - here)) : 0;
+  let result = here + fromSavings >= 1 ? run(here + fromSavings, fromSavings) : capacity;
+  for (let i = 0; i < 8 && fromSavings > 0; i++) {
+    const took = result.recommendation.allocations.filter((a) => isStock(kindOf(result, a.symbol))).reduce((a, x) => a + x.amount, 0);
+    const next = Math.max(0, Math.min(fromSavings, Math.ceil(took - here)));
+    if (next >= fromSavings) break;
+    fromSavings = next;
+    result = here + fromSavings >= 1 ? run(here + fromSavings, fromSavings) : capacity;
+  }
   const total = here + fromSavings;
-  const result = total >= 1 ? run(total, fromSavings) : capacity;
   const allocations = total >= 1 ? result.recommendation.allocations : [];
   const stockAllocs = allocations.filter((a) => isStock(kindOf(result, a.symbol)));
   const etfAlloc = allocations.find((a) => kindOf(result, a.symbol)?.kind === "etf");
@@ -161,8 +179,29 @@ export function currentPortfolioDecision(args: EngineArgs & { preference: Capita
     ...(allocations.length ? ["Check the live price and your buying power in the broker's app before placing any order; the app never trades."] : []),
   ].filter((x, i, a) => a.indexOf(x) === i);
 
+  // Projected allocation: the invested portfolio grows by what moves in from savings (an internal transfer, so total
+  // investable capital does not change). Companies use look-through exposure (direct + inside ETFs, counted once).
+  const T = portfolio.total;
+  const moved = plannedIn + fromSavings;
+  const I = portfolio.investableCapital;
+  const valueOf = (sym: string) => {
+    const e = portfolio.exposures.find((x) => x.symbol === sym);
+    if (e) return { v: e.total * T, look: true };
+    return { v: portfolio.holdings.find((h) => h.symbol === sym)?.value ?? 0, look: false };
+  };
+  const projected: Projection = {
+    invested: { before: T, after: T + moved },
+    investable: { before: I, after: I },
+    savingsAboveReserve: { before: cd.deployableSavings, after: Math.max(0, cd.deployableSavings - moved) },
+    rows: allocations.map((a) => {
+      const { v, look } = valueOf(a.symbol);
+      const o = kindOf(result, a.symbol);
+      return { symbol: a.symbol, amount: a.amount, before: T ? v / T : 0, afterInvested: T + moved ? (v + a.amount) / (T + moved) : 0, beforeInvestable: I ? v / I : 0, afterInvestable: I ? (v + a.amount) / I : 0, limit: isStock(o) ? o?.maxWeight ?? null : null, lookthrough: look };
+    }),
+  };
+
   return {
-    headline, why, allocations, status: result.status, alternatives, confirm, result, capacity,
+    headline, why, allocations, status: result.status, alternatives, confirm, result, capacity, projected,
     funding: { brokerage: Math.min(here, allocations.reduce((a, x) => a + x.amount, 0)), fromSavings,
       detail: !allocations.length ? "Nothing to fund." : fromSavings ? `${$2(Math.min(here, total))} already in ${invName}${plannedIn ? ` (including ${$2(plannedIn)} you planned to transfer)` : ""} + ${$(fromSavings)} from savings, of the ${$(tr.amount)} you authorised.` : `Cash already in ${invName}${plannedIn ? ` (including ${$2(plannedIn)} you planned to transfer)` : ""}. Savings untouched.` },
     money: { brokerageCash, brokerageConfirmed: inv?.confirmed ?? true, plannedIn, transferable: tr },

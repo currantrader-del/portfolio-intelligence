@@ -93,6 +93,26 @@ describe("current portfolio decision", () => {
     expect(d.allocations.reduce((a, x) => a + x.amount, 0)).toBeLessThanOrEqual(200);
   });
 
+  it("projects allocation on both denominators; a transfer grows the invested portfolio but not investable capital", () => {
+    const d = currentPortfolioDecision(args());
+    const p = args().portfolio;
+    expect(d.projected.invested).toEqual({ before: p.total, after: p.total + d.funding.fromSavings });
+    expect(d.projected.investable.after).toBe(p.investableCapital);
+    const aaa = d.projected.rows.find((x) => x.symbol === "AAA")!;
+    expect(aaa.afterInvested).toBeLessThanOrEqual(0.10 + 1e-9); // its approved 10% limit, on the invested portfolio
+    expect(aaa.afterInvestable).toBeLessThan(aaa.afterInvested);
+    expect(d.projected.savingsAboveReserve.after).toBe(10000 - d.funding.fromSavings);
+  });
+
+  it("savings do not create room under a limit by being on file: only money actually moved in counts", () => {
+    const withSavings = buildPortfolio([broker(200), savingsSnap(13000)], new Map(), policy, {}, [], now);
+    const without = buildPortfolio([broker(200), savingsSnap(3000)], new Map(), policy, {}, [], now);
+    expect(withSavings.total).toBe(without.total);
+    expect(withSavings.exposures.find((e) => e.symbol === "AAA")!.headroomDollars).toBe(without.exposures.find((e) => e.symbol === "AAA")!.headroomDollars);
+    expect(withSavings.holdings.map((h) => h.weight)).toEqual(without.holdings.map((h) => h.weight));
+    expect(withSavings.investableCapital - without.investableCapital).toBe(10000);
+  });
+
   it("does nothing when there is no cash and nothing qualifies", () => {
     const d = currentPortfolioDecision(args({ portfolio: buildPortfolio([broker(0), savingsSnap(3000)], new Map(), policy, {}, [], now), research: [research("HOLD / NO ADD", "Hold")] }));
     expect(d.allocations).toEqual([]);

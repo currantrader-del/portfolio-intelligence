@@ -73,7 +73,7 @@ export default async function BriefPage({ searchParams }: { searchParams: Promis
         {weekly ? (
           <p className="text-[16px] leading-relaxed">
             {change
-              ? `Over the week, today's holdings would have moved ${pctStr(change.pct, 1, true)} (${usd(change.dollars)}) of investable capital, against ${pctStr(spyMove?.change, 1, true)} for the S&P 500.`
+              ? `Over the week, today's holdings would have moved ${pctStr(change.pct, 1, true)} (${usd(change.dollars)}) of your invested portfolio, against ${pctStr(spyMove?.change, 1, true)} for the S&P 500.`
               : "Weekly price history is not available right now."}
             {moves[0] ? ` The biggest mover was ${moves[0].symbol} at ${pctStr(moves[0].change, 1, true)}.` : ""}
             {review.length ? ` ${review.length} item${review.length > 1 ? "s" : ""} to review.` : " Nothing needs a decision."}
