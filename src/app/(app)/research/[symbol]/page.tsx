@@ -11,12 +11,12 @@ import { createClient } from "@/lib/supabase/server";
 import { EXTRACTION_LABEL, ORIGIN_LABEL } from "@/lib/research-labels";
 import { getWorkspace } from "@/lib/workspace";
 import { dayChangePct } from "@/lib/market/quotes";
-import { InvestmentSummary } from "@/components/TodayValuation";
+import { InvestmentSummary, type Brief } from "@/components/TodayValuation";
 import { AskButton } from "@/components/AskPanel";
 import { FilingCheckCard, type StoredFilingCheck } from "@/components/FilingCheckCard";
 import { ResearchButton } from "@/components/ResearchButton";
 import { InvestigationRunner } from "@/components/InvestigationRunner";
-import { InvestigationReport, type InvVersion, type SourceRow } from "@/components/InvestigationReport";
+import { InvestigationConclusion, InvestigationEvidence, InvestigationPills, type InvVersion, type SourceRow } from "@/components/InvestigationReport";
 import type { ValidationReport } from "@/lib/research/validate";
 import { updatePlanFor } from "@/lib/research/updateCheck";
 import { measuredEstimates } from "@/lib/research/costEstimates";
@@ -25,7 +25,7 @@ import { getQuote } from "@/lib/market/quotes";
 import { coverage } from "@/lib/research/status";
 import { researchStanding, qualityOf, QUALITY_LABEL, approvalOf, type Standing } from "@/lib/research/standing";
 import { pctStr, shortDate, toneOf, usd } from "@/lib/format";
-import { Card, CardHead, Chevron, DataLabel, Disclose, Pill, SourceRef } from "@/components/ui";
+import { Card, CardHead, Chevron, DataLabel, Disclose, LinkRow, Pill, SourceRef } from "@/components/ui";
 
 type Phase = { phase_number: number; title: string | null; extraction: string; body_markdown: string | null; details?: Record<string, unknown> | null };
 type Version = {
@@ -98,7 +98,6 @@ export default async function CompanyPage({ params, searchParams }: { params: Pr
   const record = ws.research.find((x) => x.symbol === company.symbol);
   const held = !!h;
   const cur = record?.current ?? record?.latest;
-  const thesis = cur?.parsed.thesis;
   const phases = versions.reduce((n, v) => n + (v.research_phases?.length ?? 0), 0);
   const isInv = (v: Version) => v.conclusion?.research_type === "full_investigation" || v.conclusion?.research_type === "material_event_refresh";
   const investigations = versions.filter(isInv).sort((a, b) => (b.created_at ?? b.research_as_of).localeCompare(a.created_at ?? a.research_as_of));
@@ -113,6 +112,10 @@ export default async function CompanyPage({ params, searchParams }: { params: Pr
     ? await supabase.from("model_runs").select("outputs").eq("kind", "research_validation").eq("inputs->>version_id", latestInv.id).order("computed_at", { ascending: false }).limit(1).maybeSingle()
     : { data: null };
 
+  const pendingInv = latestInv && !latestInv.is_current ? latestInv : null;
+  const inUseLabel = standing.inUse ? { research_as_of: standing.inUse.v.research_as_of, label: standing.inUse.label } : null;
+  const brief = briefOf(standing, cur?.parsed.thesis ?? null);
+
   return (
     <div className="flex flex-col gap-3 lg:gap-4">
       <Header symbol={company.symbol} name={company.name} kicker={`${company.symbol}${cur?.parsed.classification ? ` · ${cur.parsed.classification}` : ""}`} price={price} day={day} />
@@ -121,26 +124,45 @@ export default async function CompanyPage({ params, searchParams }: { params: Pr
       )}
       {sp.saved && SAVED[sp.saved] && <p role="status" className="t-sm rounded-[12px] bg-surface-2 px-3 py-2">{SAVED[sp.saved]}</p>}
 
+      {/* Investment view: the decision first. */}
       <div className="grid grid-cols-1 gap-3 lg:gap-4 lg:grid-cols-12 items-start">
         <div className="lg:col-span-7 flex flex-col gap-3 lg:gap-4 min-w-0">
           <ResearchStatus s={standing} />
-          {latestInv && <InvestigationReport symbol={company.symbol} v={latestInv as unknown as InvVersion} sources={latestInv.research_sources ?? []} inUse={standing.inUse && standing.inUse.v.id !== latestInv.id ? { research_as_of: standing.inUse.v.research_as_of, label: standing.inUse.label } : null} validation={(valRow?.outputs as ValidationReport | undefined) ?? null} />}
-          <InvestmentSummary ws={ws} symbol={company.symbol} />
-          {thesis && (
-            <Card labelledBy="th-h" className="!gap-2">
-              <CardHead id="th-h" title="Thesis" right={cur && <SourceRef kind="Research">{shortDate(cur.research_as_of).replace(/, \d{4}$/, "")}</SourceRef>} />
-              <p className="t-sm leading-relaxed">{thesis}</p>
-            </Card>
-          )}
-          {!etf && <Suspense fallback={<FeedSkeleton title="Reported financials" />}><FundamentalsCard symbol={company.symbol} /></Suspense>}
+          <InvestmentSummary ws={ws} symbol={company.symbol} brief={brief} />
+          {pendingInv && <InvestigationConclusion symbol={company.symbol} v={pendingInv as unknown as InvVersion} inUse={inUseLabel} validation={(valRow?.outputs as ValidationReport | undefined) ?? null} />}
         </div>
 
         <div className="lg:col-span-5 flex flex-col gap-3 lg:gap-4 min-w-0">
           {!etf && <InvestigationRunner symbol={company.symbol} hasResearch={versions.some((v) => v.is_current || isInv(v))} hasInvestigation={investigations.some((v) => v.is_current)} plan={updatePlan} />}
           {!etf && <ResearchButton symbol={company.symbol} hasResearch={versions.length > 0} needsResearch={!latestInv && coverage(record, price, ws.now, AGE_REMINDER_DAYS).key !== "current"} />}
+          <Card labelledBy="tv-h" className="!gap-1.5">
+            <CardHead id="tv-h" cap="Trading view · separate" />
+            <p className="t-xs">Short-term trade ideas are tracked on their own page as paper trades. They never change the investment view, research or limits on this page.</p>
+            <LinkRow href="/trades">Trade ideas</LinkRow>
+          </Card>
+        </div>
+      </div>
+
+      {/* Supporting research: everything behind the summary, collapsed. */}
+      <h2 className="cap mt-2 lg:mt-3">Supporting research</h2>
+      <div className="grid grid-cols-1 gap-3 lg:gap-4 lg:grid-cols-12 items-start">
+        <div className="lg:col-span-7 flex flex-col gap-3 lg:gap-4 min-w-0">
+          {latestInv && (
+            <Card labelledBy="ev-h" className="!gap-2">
+              <CardHead id="ev-h" title={`${latestInv.conclusion?.research_type === "material_event_refresh" ? "Material-event refresh" : "Full investigation"} · ${shortDate(latestInv.research_as_of)}`} right={<InvestigationPills v={latestInv as unknown as InvVersion} />} />
+              <div className="flex flex-col rounded-[12px] border border-line px-3">
+                {!pendingInv && (
+                  <Disclose summary={<span className="t-sm">Full conclusion · reasons, valuation, portfolio fit, reviewer corrections</span>}>
+                    <InvestigationConclusion bare symbol={company.symbol} v={latestInv as unknown as InvVersion} inUse={inUseLabel} validation={(valRow?.outputs as ValidationReport | undefined) ?? null} />
+                  </Disclose>
+                )}
+                <InvestigationEvidence v={latestInv as unknown as InvVersion} sources={latestInv.research_sources ?? []} />
+              </div>
+            </Card>
+          )}
           {versions.length > 0 && (
             <Card flush>
-              <Disclose summary={`Your research · ${versions.length} record${versions.length > 1 ? "s" : ""}${phases ? `, ${phases} phases` : ""}`}>
+              <Disclose summary={`Research history · ${versions.length} record${versions.length > 1 ? "s" : ""}${phases ? `, ${phases} phases` : ""}`}>
                 {versions.map((v) => {
                   const c = v.conclusion as Record<string, string | number | null>;
                   return (
@@ -176,6 +198,10 @@ export default async function CompanyPage({ params, searchParams }: { params: Pr
               </Disclose>
             </Card>
           )}
+          {!etf && <Suspense fallback={<FeedSkeleton title="Reported financials" />}><FundamentalsCard symbol={company.symbol} /></Suspense>}
+        </div>
+
+        <div className="lg:col-span-5 flex flex-col gap-3 lg:gap-4 min-w-0">
           {record && !etf && (
             <ResearchSummary r={record} held={held} price={price} now={ws.now} freshDays={AGE_REMINDER_DAYS} error={sp.error ? ERRORS[sp.error] : undefined} />
           )}
@@ -196,10 +222,49 @@ export default async function CompanyPage({ params, searchParams }: { params: Pr
   );
 }
 
+/**
+ * The short text for the top of the page, from the research in use (reviewer annotations applied):
+ * thesis, principal risks, what would change the call, and the material open items. Nothing is
+ * generated or changed; it only picks fields already on the record.
+ */
+function briefOf(s: Standing, parsedThesis: string | null): Brief | null {
+  const strs = (x: unknown) => (Array.isArray(x) ? x.filter((t): t is string => typeof t === "string" && !!t.trim()) : []);
+  const pend = s.pending ? (() => {
+    const pc = (s.pending.v.conclusion ?? {}) as Record<string, unknown>;
+    const psm = (pc.investment_summary ?? {}) as Record<string, unknown>;
+    return { date: s.pending.v.research_as_of, action: (psm.action ?? pc.action ?? null) as string | null, confidence: (psm.confidence ?? pc.confidence ?? null) as string | null, running: s.pending.state === "running" };
+  })() : null;
+  if (!s.inUse) return pend ? { from: "", thesis: null, risks: [], wouldChange: [], unresolved: [], pending: pend } : null;
+  const v = s.inUse.v;
+  const c = (v.conclusion ?? {}) as Record<string, unknown>;
+  const sm = (c.investment_summary ?? null) as Record<string, unknown> | null;
+  const ev = (c.evidence ?? {}) as { findings?: { id: string; claim: string; withdrawn?: unknown; classification?: { cls: string; explanation: string } }[]; questions?: { id: string; question: string; status: string; could_change_conclusion?: boolean }[] };
+  const review = (c.review ?? null) as { material_inputs?: { input: string; scenario: string; note: string }[] } | null;
+  const unresolved = [
+    ...s.inUse.open,
+    ...(review?.material_inputs ?? []).map((m) => `Material input not reconciled: ${m.input}${m.scenario === "all" ? "" : ` (${m.scenario})`}. ${m.note}`),
+    ...(ev.findings ?? []).filter((f) => !f.withdrawn && f.classification?.cls === "unresolved_thesis_changing").map((f) => `${f.claim} (${f.id}): ${f.classification!.explanation}`),
+    ...(ev.questions ?? []).filter((q) => q.status !== "resolved" && q.could_change_conclusion).map((q) => `${q.question} (${q.id}, ${q.status})`),
+  ];
+  const seen = new Set<string>();
+  const dedup = unresolved.filter((x) => { const k = x.slice(0, 60).toLowerCase(); if (seen.has(k)) return false; seen.add(k); return true; });
+  const type = c.research_type === "full_investigation" ? "full investigation" : c.research_type === "material_event_refresh" ? "material-event refresh" : c.research_type === "preliminary_screen" ? "preliminary screen" : "research";
+  return {
+    from: `${shortDate(v.research_as_of)} ${type}`,
+    action: (sm?.action ?? c.action ?? null) as string | null,
+    confidence: (sm?.confidence ?? c.confidence ?? null) as string | null,
+    headline: (sm?.headline ?? null) as string | null,
+    thesis: ((sm?.thesis as string | undefined) || (c.thesis as string | undefined) || parsedThesis) ?? null,
+    risks: strs(sm?.risks ?? c.risks ?? c.key_risks),
+    wouldChange: strs(sm?.would_change ?? c.would_change),
+    unresolved: dedup,
+    pending: pend,
+  };
+}
+
 /** Which research decisions use, what is waiting for you, what is history, and what is still open. */
 function ResearchStatus({ s }: { s: Standing }) {
   if (!s.inUse && !s.pending) return null;
-  const gaps = [...(s.inUse?.open ?? []).map((x) => ({ x, from: "in use" })), ...(s.pending?.open ?? []).map((x) => ({ x, from: "new investigation" }))];
   return (
     <Card labelledBy="rs-h" className="!gap-2">
       <CardHead id="rs-h" cap="Research status" />
@@ -212,11 +277,11 @@ function ResearchStatus({ s }: { s: Standing }) {
             <span className="text-ink">{shortDate(s.pending.v.research_as_of)} · {s.pending.state === "running" ? "in progress" : `${s.pending.complete ? "complete" : s.pending.kind === "material_uncertainty" ? "incomplete: a material question has no reliable answer" : "incomplete"} · waiting for your decision (not used until you approve it)`}{s.pending.open.length ? ` · ${s.pending.open.length} open item${s.pending.open.length === 1 ? "" : "s"}` : ""}</span>
           </div>
         )}
-        {s.history.length > 0 && <div><span className="t-xs block">History</span><span>{s.history.length} earlier record{s.history.length === 1 ? "" : "s"}, kept unchanged (listed under Your research)</span></div>}
+        {s.history.length > 0 && <div><span className="t-xs block">History</span><span>{s.history.length} earlier record{s.history.length === 1 ? "" : "s"}, kept unchanged (listed under Research history)</span></div>}
         <p className={`t-xs ${s.inUse?.approval === "approved" && !s.pending ? "" : "warn"}`}>{s.decisions}</p>
-        {gaps.length > 0 && (
-          <Disclose summary={<span className="t-sm">Open evidence gaps · {gaps.length}</span>}>
-            <ul className="t-xs list-disc pl-4 flex flex-col gap-0.5">{gaps.slice(0, 20).map((g, i) => <li key={i}><span className="text-ink">{g.from}:</span> {g.x}</li>)}</ul>
+        {s.pending && s.pending.open.length > 0 && (
+          <Disclose summary={<span className="t-sm">Open items in the new investigation · {s.pending.open.length}</span>}>
+            <ul className="t-xs list-disc pl-4 flex flex-col gap-0.5">{s.pending.open.slice(0, 20).map((x, i) => <li key={i}>{x}</li>)}</ul>
           </Disclose>
         )}
       </div>
