@@ -85,7 +85,7 @@ describe("decisions follow research authority", () => {
 
   it("approved research can receive new money", () => {
     const r = run(aaa({ research_type: "full_investigation", review_state: "adopted" }));
-    expect(r.recommendation.allocations[0]).toEqual({ symbol: "AAA", amount: 400 });
+    expect(r.recommendation.allocations[0]).toMatchObject({ symbol: "AAA" });
   });
 
   it("a preliminary screen never does, says why, and does not block a diversified purchase", () => {

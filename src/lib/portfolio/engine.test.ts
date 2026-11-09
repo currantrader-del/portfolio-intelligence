@@ -75,9 +75,10 @@ describe("portfolio engine", () => {
     const p = buildPortfolio([snap(), sav], new Map(), null);
     // With no policy loaded the reserve defaults to the $3,000 USAA reserve you set (the old $10,000 is retired).
     expect(p.cashDetail).toMatchObject({ brokerage: 100, savings: 14000, protectedReserve: 3000, deployableSavings: 11000, deployable: 11100 });
-    // the reserve is excluded from the denominator
-    expect(p.total).toBe(1000 + 100 + 11000);
-    expect(p.holdings.find((h) => h.symbol === "VOO")!.weight).toBeCloseTo(600 / 12100, 6);
+    // Weights use the invested portfolio: savings never change them. Investable capital adds savings above the reserve.
+    expect(p.total).toBe(1000 + 100);
+    expect(p.investableCapital).toBe(1000 + 100 + 11000);
+    expect(p.holdings.find((h) => h.symbol === "VOO")!.weight).toBeCloseTo(600 / 1100, 6);
     expect(p.netWorthTracked).toBe(15100);
   });
 
