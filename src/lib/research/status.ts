@@ -4,6 +4,7 @@
  */
 import { researchAgeDays, type FilingCheckInfo, type ResearchRecord, type VersionRow } from "./records";
 import { repriceCheck } from "./valuation";
+import { isInvestigation } from "./standing";
 
 /**
  * How deep the research behind a record actually goes. Six sections written by Claude are automated
@@ -32,7 +33,9 @@ export function unresolvedFiling(researchAsOf: string, fc: FilingCheckInfo | nul
 export function researchDepth(v: Pick<VersionRow, "research_as_of" | "completeness" | "origin" | "conclusion">, fc: FilingCheckInfo | null | undefined): ResearchDepth {
   const nv = (v.conclusion as { not_verified?: unknown })?.not_verified;
   const openQuestions = Array.isArray(nv) ? nv.filter((x): x is string => typeof x === "string" && x.trim().length > 0) : [];
-  const automated = AUTOMATED_ORIGINS.has(v.origin);
+  // A complete full investigation (approved before it is ever in use) is not the old one-minute automated research.
+  const investigation = isInvestigation(v) && v.completeness === "complete";
+  const automated = !investigation && AUTOMATED_ORIGINS.has(v.origin);
   const pending = unresolvedFiling(v.research_as_of, fc);
   const checkedAfter = fc && fc.at.slice(0, 10) >= v.research_as_of;
   const filings: ResearchDepth["filings"] = pending
@@ -42,7 +45,7 @@ export function researchDepth(v: Pick<VersionRow, "research_as_of" | "completene
       : { state: "not_checked", detail: checkedAfter ? `The app's filing check on ${fc!.at.slice(0, 10)} could not confirm everything (${fc!.reason.replace(/\.$/, "")})` : "The app has not checked SEC filings since this research" };
   const complete = v.completeness === "complete";
   const level: ResearchDepth["level"] = automated || openQuestions.length || !complete ? "preliminary" : filings.state === "checked" ? "filings_checked" : "company_research";
-  const label = level === "preliminary" ? (automated ? "Automated research (preliminary)" : "Preliminary research") : level === "filings_checked" ? "Company research, filings checked" : "Company research";
+  const label = level === "preliminary" ? (automated ? "Automated research (preliminary)" : "Preliminary research") : level === "filings_checked" ? `${investigation ? "Full investigation" : "Company research"}, filings checked` : investigation ? "Full investigation" : "Company research";
   return { level, label, automated, openQuestions, filings };
 }
 
