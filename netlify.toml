@@ -14,4 +14,4 @@
 [functions."share-pdf"]
   external_node_modules = ["@react-pdf/renderer"]
   # pdfkit loads its built-in fonts and colour profile by dynamic require/URL, which bundling does not trace.
-  included_files = ["src/lib/research/share/fonts/**", "node_modules/pdfkit/js/standard-fonts/**", "node_modules/pdfkit/js/data/**"]
+  included_files = ["public/share-fonts/**", "node_modules/pdfkit/js/standard-fonts/**", "node_modules/pdfkit/js/data/**"]
