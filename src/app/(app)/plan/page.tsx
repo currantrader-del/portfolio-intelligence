@@ -58,7 +58,7 @@ export default async function PlanPage() {
       </div>
 
       <Card className="!gap-2">
-        <PlanRunner running={st.running} hasPlan={!!plan} />
+        <PlanRunner running={st.running} hasPlan={!!plan} latestAt={last?.at ?? null} />
         {when && <p className="t-xs">Last built {shortDate(last!.at)} {when.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit", timeZone: "America/New_York" })} ET · {last!.trigger === "research" ? "after new research" : last!.trigger === "weekly" ? "weekly" : last!.trigger === "policy" ? "after a policy change" : "by you"} · ${last!.costUsd.toFixed(2)}</p>}
         {last && !last.ok && <p role="alert" className="t-sm warn">The last build failed: {last.error}</p>}
         {check && <OutdatedNotice v={check} what="plan" />}
