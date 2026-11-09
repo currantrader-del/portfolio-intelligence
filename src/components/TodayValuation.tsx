@@ -78,8 +78,8 @@ export async function InvestmentSummary({ ws, symbol, brief }: { ws: Workspace; 
 
   return (
     <Card labelledBy="inv-h">
-      <CardHead id="inv-h" cap="Investment summary" right={<span className="pill" style={{ color: cov.tone === "gain" ? "var(--gain)" : cov.tone === "warn" ? "var(--warn-ink)" : undefined, background: cov.tone === "warn" ? "var(--warn-bg)" : undefined }} title={cov.detail}><span className={`dot ${cov.dot === "hollow" ? "dot-hollow" : ""}`} aria-hidden="true" />Research in use: {cov.label.toLowerCase()}{r?.approval === "automatic" ? ", not approved" : r?.approval === "provisional" ? ", provisional" : ""}</span>} />
-      {r && r.authoritative === false && (r.current || r.latest) && <p className="t-sm rounded-[12px] bg-warn-bg text-warn-ink px-3 py-2">No approved research for {symbol}. The record below is {r.authority === "preliminary_screen" ? "a preliminary screen" : "research you have not approved"}, shown for context only: the app makes no add, buy-zone or target recommendation from it.</p>}
+      <CardHead id="inv-h" cap="Investment summary" right={<span className="pill" style={{ color: cov.tone === "gain" ? "var(--gain)" : cov.tone === "warn" ? "var(--warn-ink)" : undefined, background: cov.tone === "warn" ? "var(--warn-bg)" : undefined }} title={cov.detail}><span className={`dot ${cov.dot === "hollow" ? "dot-hollow" : ""}`} aria-hidden="true" />Research in use: {cov.label.toLowerCase()}{r?.approval === "provisional" ? ", open questions" : ""}</span>} />
+      {r && r.authoritative === false && (r.current || r.latest) && <p className="t-sm rounded-[12px] bg-warn-bg text-warn-ink px-3 py-2">Preliminary research only for {symbol}. The record below is {r.authority === "preliminary_screen" ? "a preliminary screen" : "older research"}: enough for Hold or No Add, but the app makes no add, buy-range or target recommendation from it until a targeted investigation is done.</p>}
       {any?.parsed.classification && <span className="t-xs -mt-1">Classification: <span className="text-ink">{any.parsed.classification}</span></span>}
       {any ? (
         <div className="grid grid-cols-3 gap-x-2 gap-y-3">
@@ -103,7 +103,7 @@ export async function InvestmentSummary({ ws, symbol, brief }: { ws: Workspace; 
           <div className="flex flex-col gap-2.5">
             <div className="flex items-center justify-between gap-3"><span className="t-sm">Valuation at today&apos;s price</span><DataLabel kind="model" /></div>
             {v.parsed.zones.length > 0 && <ZoneBar zones={toZoneViews(v.parsed.zones)} price={price} unapproved={r?.authoritative === false} />}
-            {zone && <span className="t-xs">Band today: {zone.label} · {zone.action}. {r?.authoritative === false ? "From unapproved research: context only." : "A prompt to research, not a trade."}</span>}
+            {zone && <span className="t-xs">Band today: {zone.label} · {zone.action}. {r?.authoritative === false ? "From preliminary research: context only." : "A prompt to research, not a trade."}</span>}
             {check?.ok ? (
               <>
                 {cmp && (

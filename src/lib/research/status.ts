@@ -60,11 +60,11 @@ export function coverage(r: ResearchRecord | undefined, price: number | null, no
   const complete = v.completeness === "complete";
   // No live price is a data gap, not a reason to redo the research: judge it on age alone then.
   const age = researchAgeDays(r, now);
-  // Only research you approved is an investment model. Anything else is context, however complete it looks.
+  // Only a completed investigation supports buy ranges and new money; a preliminary screen supports Hold or No Add.
   if (r.authoritative === false) {
     const what = r.authority === "preliminary_screen" ? "Preliminary screen" : r.authority === "historical" ? "Older research" : "Research";
-    return { key: "unapproved", label: r.pendingReview ? "Not approved · review waiting" : "Not approved", tone: "warn", dot: "hollow",
-      detail: `${what} you have not approved: context only, so no new money, buy zones or research-based targets.${r.pendingReview ? ` A finished investigation (${r.pendingReview.research_as_of}) is waiting for your decision.` : " Run a full investigation and approve it to use research for decisions."}${ageText(age, reminderDays)}` };
+    return { key: "unapproved", label: "Preliminary", tone: "warn", dot: "hollow",
+      detail: `${what}: enough for monitoring and Hold or No Add, not for new money, buy ranges or research-based targets. A targeted investigation is the research task.${ageText(age, reminderDays)}` };
   }
   const check = price ? repriceCheck(v.parsed, price, age, reminderDays) : { ok: true, reason: null, note: undefined };
   if (!check.ok) return { key: "refresh", label: "Refresh", tone: "warn", dot: "hollow", detail: check.reason ?? "Needs a refresh" };

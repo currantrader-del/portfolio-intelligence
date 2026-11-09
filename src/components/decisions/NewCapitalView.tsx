@@ -11,7 +11,7 @@ import { pctStr, usd } from "@/lib/format";
 import { Card, CardHead, DataLabel, Disclose, Dot, Pill } from "@/components/ui";
 
 const LABEL_TONE: Record<OptionLabel, "gain" | "warn" | "neutral" | "solid" | "alert"> = {
-  Candidate: "solid", "Valid option": "neutral", "Refresh required": "warn", "Research needed": "warn", "Research not approved": "warn", "No limit set": "warn", "At limit": "warn", "Not ahead of VOO": "neutral", "Research says hold": "neutral", "Condition not met": "warn", "Limit not approved": "warn", "Trim review": "alert",
+  Candidate: "solid", "Valid option": "neutral", "Refresh required": "warn", "Research needed": "warn", "Preliminary research": "warn", "No limit set": "warn", "At limit": "warn", "Not ahead of VOO": "neutral", "Research says hold": "neutral", "Condition not met": "warn", "Limit not approved": "warn", "Trim review": "alert",
 };
 const KIND: Record<string, string> = { stock: "Existing position", new_stock: "New position", etf: "Diversified ETF", cash: "Always available", trim: "Reduce exposure" };
 const GATE_LINK: Record<string, { href: string; label: string }> = {

@@ -4,7 +4,7 @@ import { AGE_REMINDER_DAYS } from "@/lib/policy/limits";
 import { Suspense } from "react";
 import Link from "next/link";
 import { ResearchSummary } from "@/components/ResearchSummary";
-import { addToPipeline, approveInFull } from "../actions";
+import { addToPipeline } from "../actions";
 import { FeedSkeleton, FilingsList, FundamentalsCard, LinesSkeleton, NewsList } from "@/components/CompanyFeeds";
 import { isEtf } from "@/lib/portfolio/classify";
 import { createClient } from "@/lib/supabase/server";
@@ -114,7 +114,9 @@ export default async function CompanyPage({ params, searchParams }: { params: Pr
     ? await supabase.from("model_runs").select("outputs").eq("kind", "research_validation").eq("inputs->>version_id", latestInv.id).order("computed_at", { ascending: false }).limit(1).maybeSingle()
     : { data: null };
 
-  const pendingInv = latestInv && !latestInv.is_current ? latestInv : null;
+  // Only a run still working is shown as pending; a finished investigation is used automatically.
+  const pendingInv = standing.pending && latestInv && latestInv.id === standing.pending.v.id ? latestInv : null;
+  const usedId = standing.inUse?.v.id ?? null;
   const inUseLabel = standing.inUse ? { research_as_of: standing.inUse.v.research_as_of, label: standing.inUse.label } : null;
   const brief = briefOf(standing, cur?.parsed.thesis ?? null);
   const share = shareOptions(versions);
@@ -122,17 +124,17 @@ export default async function CompanyPage({ params, searchParams }: { params: Pr
   return (
     <div className="flex flex-col gap-3 lg:gap-4">
       <Header symbol={company.symbol} name={company.name} kicker={`${company.symbol}${cur?.parsed.classification ? ` · ${cur.parsed.classification}` : ""}`} price={price} day={day} />
-      {versions.length > 1 && !versions.some((v) => v.is_current) && (
-        <p role="alert" className="t-sm rounded-[12px] bg-warn-bg text-warn-ink px-3 py-2">These records disagree and none is marked current. A targeted refresh is needed before any advice.</p>
+      {versions.length > 0 && !standing.inUse && !standing.pending && (
+        <p role="alert" className="t-sm rounded-[12px] bg-warn-bg text-warn-ink px-3 py-2">No finished research on file. A targeted investigation is needed before any advice.</p>
       )}
       {sp.saved && SAVED[sp.saved] && <p role="status" className="t-sm rounded-[12px] bg-surface-2 px-3 py-2">{SAVED[sp.saved]}</p>}
 
       {/* Investment view: the decision first. */}
       <div className="grid grid-cols-1 gap-3 lg:gap-4 lg:grid-cols-12 items-start">
         <div className="lg:col-span-7 flex flex-col gap-3 lg:gap-4 min-w-0">
-          <ResearchStatus s={standing} symbol={company.symbol} />
+          <ResearchStatus s={standing} />
           <InvestmentSummary ws={ws} symbol={company.symbol} brief={brief} />
-          {pendingInv && <InvestigationConclusion symbol={company.symbol} v={pendingInv as unknown as InvVersion} inUse={inUseLabel} validation={(valRow?.outputs as ValidationReport | undefined) ?? null} />}
+          {pendingInv && <InvestigationConclusion symbol={company.symbol} v={pendingInv as unknown as InvVersion} inUse={inUseLabel} usedId={usedId} validation={(valRow?.outputs as ValidationReport | undefined) ?? null} />}
         </div>
 
         <div className="lg:col-span-5 flex flex-col gap-3 lg:gap-4 min-w-0">
@@ -153,11 +155,11 @@ export default async function CompanyPage({ params, searchParams }: { params: Pr
         <div className="lg:col-span-7 flex flex-col gap-3 lg:gap-4 min-w-0">
           {latestInv && (
             <Card labelledBy="ev-h" className="!gap-2">
-              <CardHead id="ev-h" title={`${latestInv.conclusion?.research_type === "material_event_refresh" ? "Material-event refresh" : "Full investigation"} · ${shortDate(latestInv.research_as_of)}`} right={<InvestigationPills v={latestInv as unknown as InvVersion} />} />
+              <CardHead id="ev-h" title={`${latestInv.conclusion?.research_type === "material_event_refresh" ? "Material-event refresh" : "Full investigation"} · ${shortDate(latestInv.research_as_of)}`} right={<InvestigationPills v={latestInv as unknown as InvVersion} usedId={usedId} />} />
               <div className="flex flex-col rounded-[12px] border border-line px-3">
                 {!pendingInv && (
                   <Disclose summary={<span className="t-sm">Full conclusion · reasons, valuation, portfolio fit, reviewer corrections</span>}>
-                    <InvestigationConclusion bare symbol={company.symbol} v={latestInv as unknown as InvVersion} inUse={inUseLabel} validation={(valRow?.outputs as ValidationReport | undefined) ?? null} />
+                    <InvestigationConclusion bare symbol={company.symbol} v={latestInv as unknown as InvVersion} inUse={inUseLabel} usedId={usedId} validation={(valRow?.outputs as ValidationReport | undefined) ?? null} />
                   </Disclose>
                 )}
                 <InvestigationEvidence v={latestInv as unknown as InvVersion} sources={latestInv.research_sources ?? []} />
@@ -173,12 +175,11 @@ export default async function CompanyPage({ params, searchParams }: { params: Pr
                     <div key={v.id} className="flex flex-col gap-2 pb-3 border-b border-line last:border-b-0 last:pb-0">
                       <div className="flex flex-wrap items-center gap-1.5">
                         <span className="text-ink font-semibold mr-1">{shortDate(v.research_as_of)}</span>
-                        {v.is_current && <Pill small tone={approvalOf(v) === "approved" ? "gain" : "warn"} dot="solid">{approvalOf(v) === "approved" ? "In use" : approvalOf(v) === "provisional" ? "In use, provisional" : "In use, not approved by you"}</Pill>}
+                        {v.id === usedId && <Pill small tone={approvalOf(v) === "approved" ? "gain" : "warn"} dot="solid">{approvalOf(v) === "approved" ? "In use" : approvalOf(v) === "provisional" ? "In use, open questions" : "In use, preliminary"}</Pill>}
                         <Pill small tone={qualityOf(v) === "complete_investigation" || qualityOf(v) === "imported" ? "neutral" : "warn"}>{v.completeness === "in_progress" ? "In progress" : QUALITY_LABEL[qualityOf(v)]}</Pill>
                         <Pill small>{v.conclusion?.research_type === "preliminary_screen" ? "Preliminary screen" : v.conclusion?.research_type === "full_investigation" ? "Full investigation" : v.conclusion?.research_type === "material_event_refresh" ? "Material-event refresh" : ORIGIN_LABEL[v.origin] ?? v.origin}</Pill>
-                        {v.conclusion?.review_state === "awaiting_approval" && !v.is_current && <Pill small tone="copper">Awaiting your decision</Pill>}
                         {v.conclusion?.review_state === "set_aside" && <Pill small>Set aside</Pill>}
-                        {!v.is_current && v !== standing.pending?.v && <Pill small>History</Pill>}
+                        {v.id !== usedId && v !== standing.pending?.v && <Pill small>History</Pill>}
                       </div>
                       <div className="grid grid-cols-2 gap-x-4 gap-y-1 t-sm">
                         {(["action", "confidence", "classification", "reference_price"] as const).map((k) => (
@@ -267,7 +268,7 @@ function briefOf(s: Standing, parsedThesis: string | null): Brief | null {
 }
 
 /** Which research decisions use, what is waiting for you, what is history, and what is still open. */
-function ResearchStatus({ s, symbol }: { s: Standing; symbol: string }) {
+function ResearchStatus({ s }: { s: Standing }) {
   if (!s.inUse && !s.pending) return null;
   return (
     <Card labelledBy="rs-h" className="!gap-2">
@@ -283,16 +284,9 @@ function ResearchStatus({ s, symbol }: { s: Standing; symbol: string }) {
         )}
         {s.history.length > 0 && <div><span className="t-xs block">History</span><span>{s.history.length} earlier record{s.history.length === 1 ? "" : "s"}, kept unchanged (listed under Research history)</span></div>}
         <p className={`t-xs ${s.inUse?.approval === "approved" && !s.pending ? "" : "warn"}`}>{s.decisions}</p>
-        {s.inUse?.approval === "provisional" && s.inUse.v.completeness === "complete" && (
-          <Disclose summary={<span className="t-sm">Approve in full instead</span>}>
-            <ActionForm action={approveInFull} success="Approved in full" className="flex flex-col gap-2">
-              <input type="hidden" name="symbol" value={symbol} />
-              <input type="hidden" name="versionId" value={s.inUse.v.id} />
-              {s.inUse.open.length > 0 && <ul className="t-xs list-disc pl-4 flex flex-col gap-0.5">{s.inUse.open.slice(0, 20).map((x, i) => <li key={i}>{x}</li>)}</ul>}
-              <label className="t-sm flex items-start gap-2"><input type="checkbox" name="acknowledge" value="yes" required className="mt-1" />
-                <span>I accept {s.inUse.open.length ? `these ${s.inUse.open.length} open item${s.inUse.open.length === 1 ? "" : "s"}` : "the open items"} and approve this research in full. The research and its recommendation are unchanged; the items stay listed on the record as accepted by me. Approving the research does not approve any trade.</span></label>
-              <SubmitButton className="btn btn-sm self-start" pendingText="Approving…">Approve in full</SubmitButton>
-            </ActionForm>
+        {s.inUse && s.inUse.open.length > 0 && (
+          <Disclose summary={<span className="t-sm">Open questions · {s.inUse.open.length} · a targeted update resolves them</span>}>
+            <ul className="t-xs list-disc pl-4 flex flex-col gap-0.5">{s.inUse.open.slice(0, 20).map((x, i) => <li key={i}>{x}</li>)}</ul>
           </Disclose>
         )}
         {s.pending && s.pending.open.length > 0 && (

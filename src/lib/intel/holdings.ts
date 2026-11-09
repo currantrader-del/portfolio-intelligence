@@ -13,7 +13,7 @@ import { getFilings, type Filing } from "../market/sec";
 import type { DeskResult, Item, Source } from "./desks";
 import { DESK_VERSION } from "./desks";
 import { usableVersion } from "../research/records";
-import { AUTHORITY_LABEL, authorityOf, isAuthoritative } from "../research/standing";
+import { AUTHORITY_LABEL, effectiveAuthority, isAuthoritative, selectInUse } from "../research/standing";
 import type { PortfolioContext } from "./synthesis";
 
 export const FILING_WINDOW_DAYS = 14;
@@ -64,33 +64,33 @@ export function researchItems(r: ResearchState, weight: number | null, now: Date
   const held = weight != null ? `Held at ${pct(weight)} of the portfolio. ` : "";
   const cur = r.current;
   const newest = r.newer[0] ?? null;
-  const curAuthority = cur ? authorityOf({ ...cur, conclusion: cur.conclusion ?? {} }, now) : null;
+  const curAuthority = cur ? effectiveAuthority({ ...cur, conclusion: cur.conclusion ?? {} }, now) : null;
   if (cur && !isAuthoritative(curAuthority)) {
     out.push({
-      headline: `${r.symbol}: no approved research (the record in use is ${AUTHORITY_LABEL[curAuthority!].toLowerCase()}, dated ${cur.research_as_of})`,
-      detail: `The record in use${action(cur) ? ` (${action(cur)})` : ""} was set automatically and the investor never approved it, so it is context only: no adds, buy zones or research-based targets come from it.${newest ? ` A newer version dated ${newest.research_as_of} (${newest.completeness}) is on file and also not approved yet.` : ""}`,
+      headline: `${r.symbol}: preliminary research only (${AUTHORITY_LABEL[curAuthority!].toLowerCase()}, dated ${cur.research_as_of})`,
+      detail: `The record in use${action(cur) ? ` (${action(cur)})` : ""} is a preliminary screen, not a completed investigation: it supports monitoring and Hold or No Add, but no adds, buy ranges or research-based targets come from it until a targeted investigation is done.`,
       kind: "verified", significance: "medium", sources: [{ ...page, published: cur.research_as_of }], portfolio: `${held}${NOT_A_SIGNAL}`, unsourced: false, period: cur.research_as_of,
       check: { status: "primary", url: page.url, found: [], missing: [], note: "read from the stored research versions", retrievedAt: now.toISOString() },
     });
   } else if (newest && !cur) {
     out.push({
-      headline: `${r.symbol}: no approved research; latest version dated ${newest.research_as_of}${action(newest) ? ` (${action(newest)})` : ""}`,
-      detail: `${r.versions ?? r.newer.length} research version(s) on file, none marked approved. The latest is ${newest.completeness}, dated ${newest.research_as_of}. Its conclusions are not an approved basis for decisions until one version is approved.`,
+      headline: `${r.symbol}: no usable research; latest version dated ${newest.research_as_of}${action(newest) ? ` (${action(newest)})` : ""}`,
+      detail: `${r.versions ?? r.newer.length} research version(s) on file, none finished. The latest is ${newest.completeness}, dated ${newest.research_as_of}. Its conclusions are not a basis for decisions until research is completed.`,
       kind: "verified", significance: "medium", sources: [{ ...page, published: newest.research_as_of }], portfolio: `${held}${NOT_A_SIGNAL}`, unsourced: false, period: newest.research_as_of,
       check: { status: "primary", url: page.url, found: [], missing: [], note: "read from the stored research versions", retrievedAt: now.toISOString() },
     });
   } else if (newest) {
     out.push({
-      headline: `${r.symbol}: research update in progress, dated ${newest.research_as_of}${action(newest) ? ` (${action(newest)})` : ""}`,
-      detail: `A newer research version (${newest.completeness}, ${newest.origin.replace(/_/g, " ")}, dated ${newest.research_as_of}) exists and is not yet approved. ${reason(newest) ?? ""} ${cur ? `The approved version is dated ${cur.research_as_of}${action(cur) ? ` with the call ${action(cur)}` : ""}; it stays on file unchanged, and its conclusions should be treated as under review until the update is finished.` : "No version is approved."}`.replace(/\s+/g, " ").trim(),
-      kind: "verified", significance: "high", sources: [{ ...page, published: newest.research_as_of }], portfolio: `${held}${NOT_A_SIGNAL}`, unsourced: false, period: newest.research_as_of,
+      headline: `${r.symbol}: a newer, less complete research note is on file, dated ${newest.research_as_of}${action(newest) ? ` (${action(newest)})` : ""}`,
+      detail: `A newer research version (${newest.completeness}, ${newest.origin.replace(/_/g, " ")}, dated ${newest.research_as_of}) exists but is less complete than the record in use. ${reason(newest) ?? ""} ${cur ? `Decisions keep using the ${cur.research_as_of} record${action(cur) ? ` (${action(cur)})` : ""}; check whether the newer note raises anything that needs a targeted update.` : ""}`.replace(/\s+/g, " ").trim(),
+      kind: "verified", significance: "medium", sources: [{ ...page, published: newest.research_as_of }], portfolio: `${held}${NOT_A_SIGNAL}`, unsourced: false, period: newest.research_as_of,
       check: { status: "primary", url: page.url, found: [], missing: [], note: "read from the stored research versions", retrievedAt: now.toISOString() },
     });
   } else if (cur) {
     const age = Math.floor((now.getTime() - new Date(`${cur.research_as_of}T00:00:00Z`).getTime()) / 86400000);
     if (age > freshDays) out.push({
       headline: `${r.symbol}: research is ${age} days old`,
-      detail: `The approved research is dated ${cur.research_as_of}${action(cur) ? ` (${action(cur)})` : ""}, more than ${freshDays} days ago. A reminder to check what has been filed since, not a rule that it is wrong.`,
+      detail: `The research in use is dated ${cur.research_as_of}${action(cur) ? ` (${action(cur)})` : ""}, more than ${freshDays} days ago. A reminder to check what has been filed since, not a rule that it is wrong.`,
       kind: "verified", significance: "medium", sources: [{ ...page, published: cur.research_as_of }], portfolio: `${held}${NOT_A_SIGNAL}`, unsourced: false, period: cur.research_as_of,
       check: { status: "primary", url: page.url, found: [], missing: [], note: "read from the stored research versions", retrievedAt: now.toISOString() },
     });
@@ -118,8 +118,8 @@ export async function loadResearch(db: SupabaseClient, symbols: string[]): Promi
   ]);
   return (cos ?? []).map((c) => {
     const versions = ((c.research_versions ?? []) as Version[]).filter((v) => usableVersion({ is_current: v.is_current, conclusion: v.conclusion ?? {} })).sort((a, b) => b.research_as_of.localeCompare(a.research_as_of));
-    const current = versions.find((v) => v.is_current) ?? null;
-    const newer = versions.filter((v) => !v.is_current && (!current || v.research_as_of > current.research_as_of));
+    const current = selectInUse(versions.map((v) => ({ ...v, conclusion: v.conclusion ?? {} }))) ?? null;
+    const newer = versions.filter((v) => v.id !== current?.id && (!current || v.research_as_of > current.research_as_of));
     const row = (checks ?? []).find((k) => (k.inputs as { symbol?: string }).symbol === c.symbol);
     const o = row?.outputs as { status: string; statusReason: string; document: NonNullable<ResearchState["filingCheck"]>["document"]; findings?: { material: boolean; text: string }[]; refresh?: { level: string } } | undefined;
     return {

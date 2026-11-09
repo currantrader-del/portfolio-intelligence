@@ -42,12 +42,12 @@ describe("Update research: pay only to read what is new", () => {
 describe("what an update builds on", () => {
   const screen = { id: "s", research_as_of: "2026-11-07", created_at: "2026-11-07T08:00:00Z", completeness: "complete", origin: "claude_full", is_current: true, conclusion: { generated_by: "ai-research@2" } };
   const inv = { id: "i", research_as_of: "2026-11-08", created_at: "2026-11-08T21:22:53Z", completeness: "complete", origin: "claude_full", is_current: false, conclusion: { research_type: "full_investigation", review_state: "awaiting_approval" } };
-  it("never a quick screen; the finished investigation even before approval; the approved one after", () => {
+  it("never a quick screen; always the newest finished investigation", () => {
     expect(updateFoundation([screen], now)).toBeNull();
     expect(updateFoundation([screen, inv], now)?.v.id).toBe("i");
     const approved = { ...inv, id: "a", is_current: true, conclusion: { research_type: "full_investigation", review_state: "adopted" } };
     const newer = { ...inv, id: "n", created_at: "2026-11-19T00:00:00Z" };
-    expect(updateFoundation([{ ...screen, is_current: false }, approved, newer], now)?.v.id).toBe("a");
+    expect(updateFoundation([{ ...screen, is_current: false }, approved, newer], now)?.v.id).toBe("n");
   });
 });
 

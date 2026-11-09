@@ -30,14 +30,42 @@ const conc = (v: V) => (v.conclusion ?? {}) as C;
 export type Authority = "approved_full" | "approved_provisional" | "awaiting_approval" | "running" | "historical" | "preliminary_screen" | "stopped";
 
 export const AUTHORITY_LABEL: Record<Authority, string> = {
-  approved_full: "Approved full research",
-  approved_provisional: "Approved provisionally",
-  awaiting_approval: "Investigation awaiting your approval",
+  approved_full: "Completed investigation",
+  approved_provisional: "Completed investigation with open questions",
+  awaiting_approval: "Completed investigation",
   running: "Investigation running",
-  historical: "Historical research (not approved)",
-  preliminary_screen: "Preliminary screen (not approved)",
+  historical: "Older research",
+  preliminary_screen: "Preliminary screen",
   stopped: "Stopped run (incomplete)",
 };
+
+/**
+ * Which record the app uses, decided automatically from the evidence (2026-11-09 direction: approval is no
+ * longer a barrier). A finished investigation outranks any quick screen or imported note whatever their dates,
+ * so a newer preliminary summary never overrides a completed dossier; within a tier the newest wins. Runs
+ * that are still working, stopped, failed or that the investor set aside are never used. Nothing stored changes.
+ */
+export function evidenceTier(v: V, now: Date = new Date()): 0 | 1 | 2 | 3 {
+  const a = authorityOf(v, now);
+  if (a === "running" || a === "stopped") return 0;
+  if (String(conc(v).review_state ?? "") === "set_aside") return 0;
+  if (isInvestigation(v)) return 3;
+  return v.completeness === "complete" ? 2 : 1;
+}
+
+export function selectInUse<T extends V>(versions: T[], now: Date = new Date()): T | null {
+  const when = (v: V) => v.created_at ?? v.research_as_of;
+  return versions
+    .map((v) => ({ v, t: evidenceTier(v, now) }))
+    .filter((x) => x.t > 0)
+    .sort((a, b) => b.t - a.t || b.v.research_as_of.localeCompare(a.v.research_as_of) || String(when(b.v)).localeCompare(String(when(a.v))))[0]?.v ?? null;
+}
+
+/** The authority of the record in use, from its evidence: a finished investigation is a decision basis. */
+export function effectiveAuthority(v: V, now: Date): Authority {
+  if (evidenceTier(v, now) === 3) return openItems(v).length ? "approved_provisional" : "approved_full";
+  return authorityOf(v, now);
+}
 
 /** A run with no progress for this long is treated as stopped (the restart logic gives up well before). */
 export const STALE_RUN_MS = 3 * 3600_000;
@@ -63,8 +91,14 @@ export const isAuthoritative = (a: Authority | null | undefined) => a === "appro
 
 export const isInvestigation = (v: Pick<V, "conclusion">) => ["full_investigation", "material_event_refresh"].includes(String(conc(v as V).research_type ?? ""));
 
-/** How a record in use came to be in use: approved by you (in full or provisionally), or set automatically before approvals existed. */
+/** How strong the evidence of a record is: a completed investigation, one with open questions, or preliminary. */
 export function approvalOf(v: V): Approval {
+  if (isInvestigation(v) && !String(conc(v).review_state ?? "").match(/^(running|failed|set_aside)$/) && v.completeness !== "in_progress") return openItems(v).length ? "provisional" : "approved";
+  return legacyApprovalOf(v);
+}
+
+/** How the record came to be marked current in the database (kept for history pages). */
+export function legacyApprovalOf(v: V): Approval {
   const rs = conc(v).review_state;
   if (rs === "adopted") return v.completeness === "complete" ? "approved" : "provisional";
   if (rs === "adopted_provisional") return "provisional";
@@ -86,9 +120,9 @@ export const QUALITY_LABEL: Record<Quality, string> = {
   partial: "Partial record",
 };
 export const APPROVAL_LABEL: Record<Approval, string> = {
-  approved: "approved by you",
-  provisional: "approved provisionally by you",
-  automatic: "set automatically, not approved by you",
+  approved: "evidence complete",
+  provisional: "open questions remain",
+  automatic: "preliminary",
 };
 
 /** The open items a record lists: its completion reasons, or the questions it could not verify. */
@@ -114,13 +148,14 @@ export type Standing = {
 
 export function researchStanding(versions: V[], now: Date = new Date()): Standing {
   const when = (v: V) => v.created_at ?? v.research_as_of;
-  const cur = versions.find((v) => v.is_current) ?? null;
+  const cur = selectInUse(versions, now);
+  // Only a run still working is "pending"; a finished investigation is simply used.
   const pendingV = versions
-    .filter((v) => !v.is_current && isInvestigation(v) && ["running", "awaiting_approval"].includes(authorityOf(v, now)))
+    .filter((v) => v !== cur && isInvestigation(v) && authorityOf(v, now) === "running")
     .filter((v) => !cur || when(v) > when(cur))
     .sort((a, b) => when(b).localeCompare(when(a)))[0] ?? null;
-  const inUse = cur ? { v: cur, approval: approvalOf(cur), quality: qualityOf(cur), authority: authorityOf(cur, now), label: "", open: openItems(cur) } : null;
-  if (inUse) inUse.label = isAuthoritative(inUse.authority) ? `${QUALITY_LABEL[inUse.quality]}, ${APPROVAL_LABEL[inUse.approval]}` : `${AUTHORITY_LABEL[inUse.authority]}: set automatically before approvals existed`;
+  const inUse = cur ? { v: cur, approval: approvalOf(cur), quality: qualityOf(cur), authority: effectiveAuthority(cur, now), label: "", open: openItems(cur) } : null;
+  if (inUse) inUse.label = isAuthoritative(inUse.authority) ? `${QUALITY_LABEL[inUse.quality]}, ${APPROVAL_LABEL[inUse.approval]}` : `${AUTHORITY_LABEL[inUse.authority]}: enough for monitoring and Hold or No Add, not for a buy range or new money`;
   const authoritative = !!inUse && isAuthoritative(inUse.authority);
   const pending = pendingV ? {
     v: pendingV, state: (conc(pendingV).review_state === "awaiting_approval" ? "awaiting_approval" : "running") as "running" | "awaiting_approval",
@@ -128,10 +163,9 @@ export function researchStanding(versions: V[], now: Date = new Date()): Standin
   } : null;
   const history = versions.filter((v) => v !== cur && v !== pendingV).sort((a, b) => when(b).localeCompare(when(a)));
   let decisions: string;
-  if (!inUse) decisions = "No research is in use, so the app makes no recommendation for new money here.";
-  else if (!authoritative) decisions = `No approved research. The record on file (${AUTHORITY_LABEL[inUse.authority].toLowerCase()}) is shown for context only: no new money, buy zones or research-based targets until you approve research.${pending?.state === "awaiting_approval" ? " A finished investigation is waiting for your decision." : ""}`;
-  else if (pending?.state === "awaiting_approval") decisions = "A newer investigation is waiting for your decision. Until you decide, decisions use the research in use, and no new money is suggested for this company.";
-  else if (inUse.approval === "provisional") decisions = `The research in use was approved provisionally with ${inUse.open.length} open item${inUse.open.length === 1 ? "" : "s"}; no new money is suggested until they are resolved.`;
+  if (!inUse) decisions = "No usable research on file, so the app makes no recommendation here; a research task is listed instead.";
+  else if (!authoritative) decisions = `Preliminary research only (${AUTHORITY_LABEL[inUse.authority].toLowerCase()}, ${inUse.v.research_as_of}). It supports monitoring and Hold or No Add; no buy range or new money until a targeted investigation is done.${pending ? " An investigation is running." : ""}`;
+  else if (inUse.approval === "provisional") decisions = `The completed investigation (${inUse.v.research_as_of}) has ${inUse.open.length} open question${inUse.open.length === 1 ? "" : "s"}; it supports Hold, No Add and Trim, but no new money until a targeted update resolves them.`;
   else if (inUse.quality === "preliminary_ai" || inUse.quality === "partial") decisions = "The research in use is preliminary: decisions use it for comparison only, with its open questions shown.";
   else decisions = "Decisions use the research in use.";
   return { inUse, authoritative, pending, history, decisions };
@@ -145,8 +179,8 @@ export function researchStanding(versions: V[], now: Date = new Date()): Standin
 export function updateFoundation<T extends V>(versions: T[], now: Date = new Date()): { v: T; authority: Authority } | null {
   const sorted = [...versions].sort((a, b) => String(b.created_at ?? b.research_as_of).localeCompare(String(a.created_at ?? a.research_as_of)));
   const isInv = (v: T) => { const t = conc(v).research_type; return t === "full_investigation" || t === "material_event_refresh"; };
-  const approved = sorted.find((v) => v.is_current && isAuthoritative(authorityOf(v, now)));
-  if (approved) return { v: approved, authority: authorityOf(approved, now) };
+  const used = selectInUse(versions, now);
+  if (used && evidenceTier(used, now) === 3) return { v: used, authority: effectiveAuthority(used, now) };
   const inv = sorted.find((v) => isInv(v) && ["awaiting_approval", "approved_full", "approved_provisional"].includes(authorityOf(v, now)));
   return inv ? { v: inv, authority: authorityOf(inv, now) } : null;
 }

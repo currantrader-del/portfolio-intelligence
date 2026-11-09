@@ -16,12 +16,12 @@ describe("research depth: six AI sections are not verified research", () => {
   it("labels automated research preliminary, with its open questions, even when stored as complete", () => {
     const r = rec({ notVerified: ["Q4 guidance", "share count after the convert"] });
     expect(researchDepth(r.current!, null)).toMatchObject({ level: "preliminary", label: "Automated research (preliminary)", openQuestions: ["Q4 guidance", "share count after the convert"] });
-    // An automated screen you never approved is context only, never a basis for decisions.
+    // An automated screen supports Hold or No Add, never new money.
     const c = coverage(r, 101, now, 120);
     expect(c.key).toBe("unapproved");
-    expect(c.label).toBe("Not approved");
+    expect(c.label).toBe("Preliminary");
     expect(c.tone).toBe("warn");
-    expect(c.detail).toMatch(/Preliminary screen you have not approved: context only, so no new money, buy zones or research-based targets/);
+    expect(c.detail).toMatch(/Preliminary screen: enough for monitoring and Hold or No Add, not for new money, buy ranges or research-based targets/);
   });
   it("keeps non-automated research with open questions preliminary too", () => {
     expect(researchDepth(rec({ origin: "chatgpt_original", notVerified: ["margin"] }).current!, null).level).toBe("preliminary");

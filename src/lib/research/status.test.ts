@@ -30,8 +30,8 @@ describe("research coverage label", () => {
   it("marks partial research incomplete, never current", () => {
     expect(coverage(rec({ completeness: "partial" }), 100, now, 120).key).toBe("incomplete");
   });
-  it("flags conflicting records with no current version", () => {
-    expect(coverage(rec({ current: false, versions: 2 }), 100, now, 120).key).toBe("conflict");
+  it("picks a record automatically when none is marked current (no conflict to resolve by hand)", () => {
+    expect(coverage(rec({ current: false, versions: 2 }), 100, now, 120).key).toBe("current");
   });
   it("reports no research when nothing is on file", () => {
     expect(coverage(undefined, 100, now, 120).key).toBe("none");

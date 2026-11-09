@@ -32,15 +32,21 @@ describe("research authority: only research you approved is an investment model"
     expect(isAuthoritative("approved_provisional")).toBe(true);
   });
 
-  it("IREN today: the Nov 7 screen is in use but not authoritative, and Nov 8 waits for you", () => {
+  it("IREN: the finished Nov 8 investigation is used automatically, ahead of the Nov 7 screen and the Sept archive", () => {
     const s = researchStanding([sept, nov6, nov7, nov8], now);
-    expect(s.inUse?.v.id).toBe("f8d5");
-    expect(s.authoritative).toBe(false);
-    expect(s.pending).toMatchObject({ state: "awaiting_approval" });
-    expect(s.decisions).toMatch(/^No approved research\. .*no new money, buy zones or research-based targets until you approve research\. A finished investigation is waiting for your decision\./);
+    expect(s.inUse?.v.id).toBe("13ee");
+    expect(s.authoritative).toBe(true);
+    expect(s.pending).toBeNull();
+    expect(s.decisions).toBe("Decisions use the research in use.");
     const r = toResearchRecord("IREN", "IREN", "held", [sept, nov6, nov7, nov8], undefined, null, now);
-    expect(r).toMatchObject({ authority: "preliminary_screen", authoritative: false, pendingReview: { id: "13ee" } });
-    expect(coverage(r, 21.64, now, 120)).toMatchObject({ key: "unapproved", label: "Not approved · review waiting" });
+    expect(r).toMatchObject({ authority: "approved_full", authoritative: true, pendingReview: null });
+  });
+
+  it("with only screens and archives, the record is preliminary", () => {
+    const r = toResearchRecord("IREN", "IREN", "held", [sept, nov6, nov7], undefined, null, now);
+    expect(r).toMatchObject({ authority: "preliminary_screen", authoritative: false });
+    expect(r.current?.id).toBe("f8d5");
+    expect(coverage(r, 21.64, now, 120)).toMatchObject({ key: "unapproved", label: "Preliminary" });
   });
 
   it("after approval, the investigation is the model and the screen becomes history", () => {
@@ -91,21 +97,21 @@ describe("decisions follow research authority", () => {
   it("a preliminary screen never does, says why, and does not block a diversified purchase", () => {
     const r = run(aaa({ generated_by: "ai-research@2" }));
     const o = r.options.find((x) => x.symbol === "AAA")!;
-    expect(o.label).toBe("Research not approved");
+    expect(o.label).toBe("Preliminary research");
     expect(o.eligible).toBe(false);
     expect(o.highConviction).toBe(false);
-    expect(o.verdicts!.research.detail).toMatch(/No approved research: the record on file is a preliminary screen you have not approved, so it is context only/);
+    expect(o.verdicts!.research.detail).toMatch(/Preliminary research only: the record on file is a preliminary screen, enough for Hold or No Add, not for new money/);
     expect(o.reassessment).toMatchObject({ status: "not_approved" });
-    expect(o.reassessment!.current).toMatch(/^No approved research\. .*Until you approve research: hold what you own, no new money\./);
+    expect(o.reassessment!.current).toMatch(/^Preliminary research only\. .*Until a targeted investigation is done: hold, no new money\./);
     expect(r.recommendation.allocations.some((a) => a.symbol === "AAA")).toBe(false);
-    expect(r.warnings.join(" ")).toMatch(/No approved research for AAA/);
+    expect(r.warnings.join(" ")).toMatch(/Only preliminary research for AAA/);
     expect(r.gates.find((g) => g.key === "research")!.ok).toBe(true);
   });
 
   it("imported (historical) research is context only too", () => {
     const o = run(aaa({}, "chatgpt_original")).options.find((x) => x.symbol === "AAA")!;
-    expect(o.label).toBe("Research not approved");
-    expect(o.verdicts!.research.detail).toMatch(/older research you have not approved/);
+    expect(o.label).toBe("Preliminary research");
+    expect(o.verdicts!.research.detail).toMatch(/older research, enough for Hold or No Add/);
   });
 
   it("no buy-zone alerts from unapproved bands", () => {
