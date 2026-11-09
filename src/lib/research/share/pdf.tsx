@@ -1,3 +1,4 @@
+/** @jsxRuntime automatic */
 /**
  * Renders a ShareReport as a PDF with @react-pdf/renderer (server side, no browser needed).
  * Layout only: every word comes from the report.
@@ -16,7 +17,8 @@ import type { Block, ShareReport } from "./report";
 // ---- Fonts ------------------------------------------------------------------------------------
 // Inter (SIL Open Font License, fonts/LICENSE-Inter.txt). Falls back to the built-in Helvetica if the
 // files are not deployed, so the export never fails on fonts.
-const FONT_DIR = [path.join(process.cwd(), "src/lib/research/share/fonts"), path.join(__dirname, "fonts")].find((d) => existsSync(path.join(d, "Inter-Regular.otf")));
+// `__dirname` does not exist when this runs as an ES module (the Netlify function), so it is optional.
+const FONT_DIR = [path.join(process.cwd(), "src/lib/research/share/fonts"), ...(typeof __dirname === "string" ? [path.join(__dirname, "fonts")] : [])].find((d) => existsSync(path.join(d, "Inter-Regular.otf")));
 const HAS_INTER = (() => {
   if (!FONT_DIR) return false;
   try {
