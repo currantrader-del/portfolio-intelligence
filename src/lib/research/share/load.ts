@@ -1,4 +1,3 @@
-import "server-only";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { loadReviews, withReviews } from "../review";
 import type { ValidationReport } from "../validate";

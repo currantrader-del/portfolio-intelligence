@@ -13,7 +13,7 @@ export function ShareResearchCard({ symbol, latest, approved }: { symbol: string
   return (
     <Card labelledBy="share-h" className="!gap-2">
       <CardHead id="share-h" cap="Share full research" />
-      <form action={`/api/research/${encodeURIComponent(symbol)}/share`} method="get" target="_blank" className="flex flex-col gap-2">
+      <form action={`/api/share-pdf/${encodeURIComponent(symbol)}`} method="get" target="_blank" className="flex flex-col gap-2">
         {same || !approved || !latest ? (
           <>
             <input type="hidden" name="version" value={latest ? "latest" : "approved"} />
