@@ -92,3 +92,18 @@ export async function confirmCash(formData: FormData): Promise<ActionResult> {
   await save(db, "cash_confirmation", "cash-confirmation@1", { account_id: accountId, at }, { account_id: accountId, cash: Math.round(cash * 100) / 100, at });
   revalidatePath("/", "layout");
 }
+
+/** Reads your Schwab balances and positions now (read-only) and saves them as a new snapshot. */
+export async function syncSchwabNow(): Promise<ActionResult> {
+  const { syncSchwab } = await import("@/lib/schwab/sync");
+  const r = await syncSchwab(await createClient());
+  revalidatePath("/", "layout");
+  if (!r.ok) return fail(`Schwab sync failed: ${r.error ?? "unknown error"}`);
+}
+
+/** Forgets the stored Schwab sign-in. Snapshots already saved stay. */
+export async function disconnectSchwab(): Promise<ActionResult> {
+  const { disconnect } = await import("@/lib/schwab/client");
+  await disconnect(await createClient());
+  revalidatePath("/portfolio");
+}
