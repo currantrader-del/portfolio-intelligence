@@ -4,7 +4,7 @@ import { FIXTURE, fixtureHistory } from "@/lib/dev/fixture";
  * Closes are split- and dividend-adjusted where the provider gives an adjusted close.
  */
 /** date YYYY-MM-DD. open/high/low are scaled like the adjusted close; volume is shares. Missing when the source has none. */
-export type Bar = { date: string; close: number; open?: number; high?: number; low?: number; volume?: number };
+export type Bar = { date: string; close: number; open?: number; high?: number; low?: number; volume?: number; /** the unadjusted close, when the provider gives both */ raw?: number };
 export type History = { symbol: string; bars: Bar[]; provider: "yahoo" | "stooq"; adjusted: boolean; fetchedAt: string };
 
 const UA = "Mozilla/5.0 (compatible; PortfolioIntelligence/1.0)";
@@ -28,7 +28,7 @@ export function parseYahooHistory(symbol: string, body: unknown): History | null
     // Scale the raw open/high/low by the same factor as the adjusted close, so levels line up with closes.
     const k = ok(raw?.[i]) ? c / raw![i]! : 1;
     const o = q.open?.[i], h = q.high?.[i], l = q.low?.[i], v = q.volume?.[i];
-    byDate.set(date, { date, close: c, ...(ok(o) ? { open: o * k } : {}), ...(ok(h) ? { high: h * k } : {}), ...(ok(l) ? { low: l * k } : {}), ...(v != null && v >= 0 ? { volume: v } : {}) });
+    byDate.set(date, { date, close: c, ...(adj && ok(raw?.[i]) ? { raw: raw![i]! } : {}), ...(ok(o) ? { open: o * k } : {}), ...(ok(h) ? { high: h * k } : {}), ...(ok(l) ? { low: l * k } : {}), ...(v != null && v >= 0 ? { volume: v } : {}) });
   });
   const bars = [...byDate.values()].sort((a, b) => a.date.localeCompare(b.date));
   return bars.length ? { symbol, bars, provider: "yahoo", adjusted: !!adj, fetchedAt: new Date().toISOString() } : null;

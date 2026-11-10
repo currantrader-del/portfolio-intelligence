@@ -10,6 +10,7 @@ import { runAgent } from "@/lib/assistant/agent";
 import { extractJson } from "@/lib/research/aiResearch";
 import { companyMax } from "@/lib/policy/limits";
 import { isEtf } from "@/lib/portfolio/classify";
+import { recordAssessments, runImprovement } from "@/lib/shadow/proposals";
 import { PLAN_LIMITS, PLAN_SYSTEM, PLAN_VERSION, planQuestion, validatePlan, type Plan } from "./plan";
 
 export type StoredPlan = { ok: boolean; error?: string; plan?: Plan; costUsd: number; ms: number; searches: number; model: string | null; trigger: string };
@@ -49,7 +50,11 @@ export async function runPlanJob(db: SupabaseClient, requestId: string): Promise
       deployable: ws.portfolio.cashDetail.spendableNow, // only the brokerage account's own cash; savings need a planned transfer
     });
     if ("error" in plan) return out({ ok: false, error: `${plan.error}${ans.stopped ? ` (stopped: ${ans.stopped})` : ""}`, ...meta });
-    return out({ ok: true, plan, ...meta });
+    const id = await out({ ok: true, plan, ...meta });
+    // The one improvement strategy (stock-to-ETF risk trim): a proposal when a trigger holds, then this week's assessments.
+    await runImprovement(db, ws, plan, ws.now.toISOString()).catch((e) => console.error(`plan: improvement proposal failed: ${(e as Error).message}`));
+    await recordAssessments(db, ws, plan).catch((e) => console.error(`plan: assessments not recorded: ${(e as Error).message}`));
+    return id;
   } catch (e) {
     return out({ ok: false, error: (e as Error).message.slice(0, 300), costUsd: 0, ms: 0, searches: 0, model: null });
   }

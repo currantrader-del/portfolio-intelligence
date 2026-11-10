@@ -7,7 +7,7 @@ it("reads Yahoo open/high/low/volume and scales them like the adjusted close", (
     adjclose: [{ adjclose: [50, 51] }],
   } }] } };
   const h = parseYahooHistory("AAA", body)!;
-  expect(h.bars[0]).toEqual({ date: "2026-01-01", close: 50, open: 49.5, high: 51, low: 49, volume: 5000 });
+  expect(h.bars[0]).toEqual({ date: "2026-01-01", close: 50, raw: 100, open: 49.5, high: 51, low: 49, volume: 5000 });
   expect(h.bars[1].high).toBeCloseTo(52);
 });
 

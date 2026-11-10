@@ -19,6 +19,8 @@ import { loadContextEvents } from "@/lib/freshness/contextEvents";
 import { outdatedVerdict } from "@/lib/freshness/outdated";
 import { currentDecisionFor } from "@/lib/decision/currentPortfolio";
 import { loadDecisionFilings } from "@/lib/alerts/events";
+import { ImprovementTeaser } from "@/components/ImprovementCard";
+import { improvementView } from "@/lib/shadow/proposals";
 
 const pts = (v: number) => `${v >= 0 ? "+" : "−"}${Math.abs(v).toFixed(2)}`;
 
@@ -53,6 +55,7 @@ export default async function TodayPage() {
   const session = ws.marketOpen ? "today" : "last session";
   const vsSpy = p.dayPct !== null && spy !== null ? p.dayPct - spy : null;
   const verified = p.quality.status === "verified";
+  const improve = await improvementView(db, ws).catch(() => null);
 
   if (!p.holdings.length && !ws.research.length) {
     return (
@@ -85,6 +88,8 @@ export default async function TodayPage() {
           </>
         ) : <p className="t-sm">Written automatically at 9:00 AM ET on weekdays, after the 8:30 economic data. It answers six questions, key recommendation first: what happened in the market, whether anything materially affected your investments, whether any action is needed, which researched stocks are approaching entry, which new opportunities are worth investigating, and what is coming up.</p>}
       </Card>
+
+      {improve && <ImprovementTeaser items={improve.active} />}
 
       <MarketsTeaser />
 

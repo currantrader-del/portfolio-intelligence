@@ -15,5 +15,7 @@ it("renders a long multi-page report quickly", async () => {
   const t = Date.now();
   const b = await renderSharePdf(r);
   expect(b.subarray(0, 5).toString()).toBe("%PDF-");
-  expect(Date.now() - t).toBeLessThan(20_000);
-}, 60_000);
+  // A guard against layout taking minutes again, not a benchmark: the same code takes 16-21 s on a shared
+  // CI runner depending on its load (20.3 s and 20.7 s on 2026-11-10 with the PDF code unchanged).
+  expect(Date.now() - t).toBeLessThan(45_000);
+}, 90_000);
