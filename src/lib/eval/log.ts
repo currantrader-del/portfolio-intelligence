@@ -58,7 +58,7 @@ export async function recordPaperDecisions(db: SupabaseClient, alerts: DecisionA
 export function paperResult(d: PaperDecision, price: number | null, vooPrice: number | null): { returnPct: number | null; vooPct: number | null; edgePct: number | null } {
   const r = price && d.price ? price / d.price - 1 : null;
   const v = vooPrice && d.vooPrice ? vooPrice / d.vooPrice - 1 : null;
-  // A trim "wins" when the stock does worse than VOO after it.
+  // A trim is judged as moving the money into VOO: its edge is VOO's return minus the stock's.
   const signed = r === null ? null : d.side === "buy" ? r : -r;
   const vooSigned = v === null ? null : d.side === "buy" ? v : -v;
   return { returnPct: r, vooPct: v, edgePct: signed !== null && vooSigned !== null ? signed - vooSigned : null };

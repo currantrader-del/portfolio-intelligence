@@ -11,7 +11,7 @@ describe("paper decisions against VOO over the same period", () => {
     expect(r.edgePct).toBeCloseTo(0.08, 6);
   });
   it("a trim is right when the stock then does worse than VOO", () => {
-    expect(paperResult(d("trim"), 90, 505).edgePct).toBeCloseTo(0.10 - 0.01, 6);
+    expect(paperResult(d("trim"), 90, 505).edgePct).toBeCloseTo(0.01 + 0.10, 6); // VOO +1% vs the stock −10%: trimming into VOO was 11 points better
   });
   it("no comparison without both prices", () => {
     expect(paperResult({ ...d("buy"), vooPrice: null }, 110, 510).edgePct).toBeNull();
