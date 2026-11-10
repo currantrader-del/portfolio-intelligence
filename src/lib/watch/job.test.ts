@@ -42,7 +42,7 @@ describe("runWatch", () => {
     const body = JSON.parse((fetchMock.mock.calls[0] as unknown as [string, RequestInit])[1].body as string);
     expect(body).toMatchObject({ topic: "pi-test", priority: 4, click: "https://app.test/decisions/review/ACME" });
     expect(body.title).toMatch(/^Urgent risk: ACME −12\.0% today, −12\.1% against the market/);
-    expect(body.message).toMatch(/What changed: .*\nWhy it matters: .*\nAction: Review now.*\nUncertain: The cause is not verified.*\nVerified: Delayed quote/s);
+    expect(body.message).toMatch(/What changed: [^\n]*\nWhy it matters: [^\n]*\nAction: Review now[^\n]*\nUncertain: The cause is not verified[^\n]*\nVerified: Delayed quote/);
     const second = await runWatch(db, "https://app.test", { now: new Date(open.getTime() + 30 * 60000) });
     expect("sent" in second && second.sent).toEqual([]);
     expect(fetchMock).toHaveBeenCalledTimes(1);
