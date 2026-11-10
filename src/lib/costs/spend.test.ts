@@ -68,20 +68,20 @@ describe("the 30-day test ceiling", () => {
   const s = summarizeSpend([...rows, { at: "2026-11-09T13:20:00Z", feature: "morning_answer", cost: 0.14, model: "claude-sonnet-5-5" }, { at: "2026-11-09T14:02:00Z", feature: "watch_run", cost: 0.004, model: "claude-haiku-5-5" }], now, settings);
   it("counts only spending since the start, in five categories, with the morning answer under briefings", () => {
     const e = s.evaluation!;
-    expect(e).toMatchObject({ active: true, day: 4, ceiling: 20, warnAt: 15, spent: 5.2, warn: false, over: false });
+    expect(e).toMatchObject({ active: true, day: 4, ceiling: 25, warnAt: 20, spent: 5.2, warn: false, over: false });
     const by = Object.fromEntries(e.byCategory.map((c) => [c.key, c.cost]));
     expect(by).toEqual({ briefings: 0.14, research_updates: 4.96, company_analysis: 0, questions: 0.1, monitoring: 0 });
   });
   it("automated jobs stop at the ceiling and say why; a manual job asks first", () => {
-    const near = summarizeSpend([...rows, { at: "2026-11-09T13:05:00Z", feature: "full_investigation", cost: 14.6, model: "claude-opus-5-5", runId: "r2" }], now, { ...settings, researchMonthly: 100 });
+    const near = summarizeSpend([...rows, { at: "2026-11-09T13:05:00Z", feature: "full_investigation", cost: 19.6, model: "claude-opus-5-5", runId: "r2" }], now, { ...settings, researchMonthly: 100 });
     expect(near.evaluation).toMatchObject({ warn: true, over: false });
-    expect(automatedGate(near, "market_briefing")).toMatchObject({ ok: false, reason: expect.stringMatching(/30-day test has \$0\.\d\d left of its \$20 AI ceiling/) });
+    expect(automatedGate(near, "market_briefing")).toMatchObject({ ok: false, reason: expect.stringMatching(/30-day test has \$0\.\d\d left of its \$25 AI ceiling/) });
     expect(automatedGate(near, "watch_run")).toEqual({ ok: true });
-    expect(budgetGate(near, "everyday", 0.6, false)).toMatchObject({ ok: false, needsConfirm: true, message: expect.stringMatching(/past its \$20 AI ceiling/) });
+    expect(budgetGate(near, "everyday", 0.6, false)).toMatchObject({ ok: false, needsConfirm: true, message: expect.stringMatching(/past its \$25 AI ceiling/) });
   });
   it("no test until a start date is saved; a bad date is ignored", () => {
     expect(summarizeSpend(rows, now).evaluation).toBeNull();
     expect(settingsFrom({ evalStart: "soon", evalCeiling: 20 }).evalStart).toBeNull();
-    expect(settingsFrom({ evalStart: "2026-11-11T14:00:00Z", everydayMonthly: 30 })).toMatchObject({ evalStart: "2026-11-11T14:00:00Z", everydayMonthly: 30, evalWarnAt: 15 });
+    expect(settingsFrom({ evalStart: "2026-11-11T14:00:00Z", everydayMonthly: 30 })).toMatchObject({ evalStart: "2026-11-11T14:00:00Z", everydayMonthly: 30, evalWarnAt: 20 });
   });
 });

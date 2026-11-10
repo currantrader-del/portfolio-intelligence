@@ -30,7 +30,7 @@ export type CostSettings = {
   evalStart: string | null; evalCeiling: number; evalWarnAt: number;
 };
 /** Everyday AI about $10-20 a month (the agreed target); research budgeted on its own; ask before any job above $3. */
-export const DEFAULT_COST_SETTINGS: CostSettings = { everydayMonthly: 20, researchMonthly: 25, approveAbove: 3, evalStart: null, evalCeiling: 20, evalWarnAt: 15 };
+export const DEFAULT_COST_SETTINGS: CostSettings = { everydayMonthly: 20, researchMonthly: 25, approveAbove: 3, evalStart: null, evalCeiling: 25, evalWarnAt: 20 };
 export const EVAL_DAYS = 30;
 
 /** The five cost categories the test reports. The morning answer counts as part of the briefing. */
