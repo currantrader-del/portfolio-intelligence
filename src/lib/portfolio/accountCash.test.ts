@@ -37,6 +37,15 @@ describe("a cash figure is checked, not assumed", () => {
     expect(r.funds.verified).toBe(false);
     expect(r.funds.detail).toMatch(/Check the cash and buying power in the broker's app/);
   });
+  it("your confirmation of the worked-out figure makes it confirmed; a different figure is flagged", () => {
+    const ok = buildPortfolio([oct, usaa(3000)], new Map(), policy, {}, ledger, now, [{ accountId: "schwab", cash: 221.24, at: now.toISOString() }]);
+    const s = ok.cashDetail.accounts.find((a) => a.id === "schwab")!;
+    expect(s.basis).toMatchObject({ confirmed: true, checks: [] });
+    expect(s.basis!.detail).toMatch(/confirmed by you on/);
+    const off = buildPortfolio([oct, usaa(3000)], new Map(), policy, {}, ledger, now, [{ accountId: "schwab", cash: 250, at: now.toISOString() }]);
+    expect(off.cashDetail.accounts.find((a) => a.id === "schwab")!.basis).toMatchObject({ confirmed: false });
+    expect(off.cashDetail.accounts.find((a) => a.id === "schwab")!.basis!.checks.join(" ")).toMatch(/You confirmed \$250\.00 .* records give \$221\.24/);
+  });
   it("flags records that spend more cash than the statement had", () => {
     const p = buildPortfolio([oct, usaa(3000)], new Map(), policy, {}, ledger.filter((t) => t.kind !== "deposit"), now);
     expect(p.cashDetail.accounts[0].basis!.checks[0]).toMatch(/spend \$1,028\.76 more than the cash on the 2026-10-31 statement: a deposit or trade is missing/);

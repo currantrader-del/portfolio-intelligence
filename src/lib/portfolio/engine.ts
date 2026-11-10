@@ -121,7 +121,10 @@ export type CashBasis = {
 /** A statement or your own entry older than this does not confirm today's cash. */
 export const CASH_CONFIRM_DAYS = 7;
 
-export function cashBasis(a: { cashValue: number | null; asOf: string; sourceKind?: string | null; after: { amount: number; tradeDate: string }[]; statementGap: number | null; now: Date }): CashBasis {
+/** A cash balance you confirmed (model_runs kind "cash_confirmation"): it confirms worked-out cash when it matches and nothing was recorded after it. */
+export type CashConfirmation = { accountId: string; cash: number; at: string };
+
+export function cashBasis(a: { cashValue: number | null; asOf: string; sourceKind?: string | null; after: { amount: number; tradeDate: string }[]; statementGap: number | null; now: Date; confirmation?: CashConfirmation | null }): CashBasis {
   const stmt = a.cashValue ?? 0;
   const net = Math.round(a.after.reduce((x, t) => x + t.amount, 0) * 100) / 100;
   const last = a.after.reduce<string | null>((m, t) => (!m || t.tradeDate > m ? t.tradeDate : m), null);
@@ -140,6 +143,15 @@ export function cashBasis(a: { cashValue: number | null; asOf: string; sourceKin
   const detail = derived
     ? `${money(stmt)} on the ${d(a.asOf)} statement ${net >= 0 ? "plus" : "less"} ${money(net)} from ${a.after.length} recorded transaction${a.after.length === 1 ? "" : "s"} through ${last} = ${money(cash)}. Worked out, not confirmed: nothing since ${d(a.asOf)} shows the actual balance or buying power.`
     : kind === "manual" ? `${money(stmt)} as you entered it on ${d(a.asOf)}.` : `${money(stmt)} on the ${d(a.asOf)} statement, with no recorded activity since.`;
+  const c = a.confirmation;
+  if (derived && c) {
+    const cAge = Math.max(0, Math.floor((a.now.getTime() - Date.parse(c.at)) / 86_400_000));
+    const after = !!last && last > c.at.slice(0, 10);
+    if (Math.abs(c.cash - cash) < 0.005 && !after && cAge <= CASH_CONFIRM_DAYS && cash >= -0.005) {
+      return { statementCash: stmt, statementAsOf: a.asOf, sourceKind: kind, ledgerNet: net, ledgerRows: a.after.length, lastActivity: last, confirmed: true, status, detail: `${money(cash)}: ${money(stmt)} on the ${d(a.asOf)} statement ${net >= 0 ? "plus" : "less"} ${money(net)} from ${a.after.length} recorded transaction${a.after.length === 1 ? "" : "s"}, confirmed by you on ${d(c.at)}.`, checks: [] };
+    }
+    if (!after && Math.abs(c.cash - cash) >= 0.005) checks.push(`You confirmed ${money(c.cash)} on ${d(c.at)}, but the records give ${money(cash)}: a transaction may be missing.`);
+  }
   return { statementCash: stmt, statementAsOf: a.asOf, sourceKind: kind, ledgerNet: net, ledgerRows: a.after.length, lastActivity: last, confirmed: !derived && checks.length === 0, status, detail, checks };
 }
 
@@ -232,6 +244,7 @@ export function buildPortfolio(
   classifications: Record<string, string | null | undefined> = {},
   ledger: LedgerEntry[] = [],
   now: Date = new Date(),
+  cashConfirmations: CashConfirmation[] = [],
 ): PortfolioView {
   const bySymbol = new Map<string, { quantity: number; stmtValue: number; stmtPrice: number | null; stmtQty: number; cost: number | null; costKnown: boolean; accounts: Set<string>; asOf: string }>();
   let brokerageCash = 0;
@@ -289,7 +302,8 @@ export function buildPortfolio(
       bySymbol.set(sym, cur);
     }
     const gap = s.totalValue === null ? null : round2(s.totalValue - stmtComputed);
-    acctCash.basis = cashBasis({ cashValue: s.cashValue, asOf: s.asOf, sourceKind: s.sourceKind, after, statementGap: gap, now });
+    const confirmation = cashConfirmations.filter((c) => c.accountId === s.accountId).sort((x, y) => y.at.localeCompare(x.at))[0] ?? null;
+    acctCash.basis = cashBasis({ cashValue: s.cashValue, asOf: s.asOf, sourceKind: s.sourceKind, after, statementGap: gap, now, confirmation });
     const knownThrough = after.reduce((m, t) => (t.tradeDate > m ? t.tradeDate : m), s.asOf.slice(0, 10));
     accounts.push({
       id: s.accountId, name: s.accountName, role: s.accountRole, asOf: s.asOf, sourceKind: s.sourceKind ?? "statement", value: round2(acctValue),

@@ -3,7 +3,7 @@ import { loadReviews, withReviews, type ReviewAnnotations } from "@/lib/research
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { BENCHMARKS, dayChangePct, getQuotes, type Quote } from "@/lib/market/quotes";
 import { isMarketOpen } from "@/lib/market/hours";
-import { buildPortfolio, type LedgerEntry, type PlannedTransfer, type PortfolioView, type SnapshotInput } from "@/lib/portfolio/engine";
+import { buildPortfolio, type CashConfirmation, type LedgerEntry, type PlannedTransfer, type PortfolioView, type SnapshotInput } from "@/lib/portfolio/engine";
 import { readPolicy, type Policy , AGE_REMINDER_DAYS } from "@/lib/policy/limits";
 import { policyFromRules, type PolicyRuleRow } from "@/lib/policy/rules";
 import { toResearchRecord, type FilingCheckInfo, type ResearchRecord, type VersionRow } from "@/lib/research/records";
@@ -149,6 +149,14 @@ export async function loadTransfers(db: SupabaseClient): Promise<PlannedTransfer
   })).filter((t) => t.amount > 0 && t.fromAccountId && t.toAccountId);
 }
 
+/** Cash balances you confirmed for an account (model_runs kind "cash_confirmation"), newest first. */
+export async function loadCashConfirmations(db: SupabaseClient): Promise<CashConfirmation[]> {
+  const { data } = await db.from("model_runs").select("outputs, computed_at").eq("kind", "cash_confirmation").order("computed_at", { ascending: false }).limit(50);
+  return ((data ?? []) as { outputs: { account_id?: string; cash?: number; at?: string }; computed_at: string }[])
+    .map((r) => ({ accountId: String(r.outputs?.account_id ?? ""), cash: Number(r.outputs?.cash), at: r.outputs?.at ?? r.computed_at }))
+    .filter((c) => c.accountId && Number.isFinite(c.cash));
+}
+
 /** The newest standing capital preference (model_runs kind "capital_preference"). */
 export async function loadCapitalPreference(db: SupabaseClient): Promise<CapitalPreference | null> {
   const { data } = await db.from("model_runs").select("outputs, computed_at").eq("kind", "capital_preference").order("computed_at", { ascending: false }).limit(1).maybeSingle();
@@ -156,12 +164,12 @@ export async function loadCapitalPreference(db: SupabaseClient): Promise<Capital
 }
 
 export async function buildWorkspace(db: SupabaseClient, now = new Date()): Promise<Workspace> {
-  const [{ data: auth }, snapshots, research, policy, ledger, yields, transfers, capitalPreference] = await Promise.all([db.auth.getClaims(), loadSnapshots(db), loadResearch(db), loadPolicy(db), loadLedger(db), loadYields(db).catch(() => ({ y2: null, y10: null })), loadTransfers(db).catch(() => []), loadCapitalPreference(db).catch(() => null)]);
+  const [{ data: auth }, snapshots, research, policy, ledger, yields, transfers, capitalPreference, cashConfirmations] = await Promise.all([db.auth.getClaims(), loadSnapshots(db), loadResearch(db), loadPolicy(db), loadLedger(db), loadYields(db).catch(() => ({ y2: null, y10: null })), loadTransfers(db).catch(() => []), loadCapitalPreference(db).catch(() => null), loadCashConfirmations(db).catch(() => [])]);
   const symbols = [...new Set([...snapshots.flatMap((s) => s.positions.map((p) => p.symbol.toUpperCase())), ...ledger.filter((t) => t.symbol).map((t) => t.symbol!.toUpperCase())])];
   const quotes = await getQuotes([...symbols, ...BENCHMARKS.map((b) => b.symbol)]);
   const roles: Record<string, string | null> = Object.fromEntries(Object.values(policy?.companies ?? {}).map((c) => [c.symbol, c.role]));
   const classifications = { ...roles, ...Object.fromEntries(research.filter((r) => r.current?.parsed.classification).map((r) => [r.symbol, r.current!.parsed.classification])) };
-  const portfolio = buildPortfolio(snapshots, quotes, policy, classifications, ledger, now);
+  const portfolio = buildPortfolio(snapshots, quotes, policy, classifications, ledger, now, cashConfirmations);
   const benchmarks = BENCHMARKS.map((b) => ({ ...b, dayPct: dayChangePct(quotes.get(b.symbol)) }));
   const exposure = computeExposure(portfolio.holdings.map((h) => ({ symbol: h.symbol, value: h.value })), portfolio.cash, now);
   const exposureLimits = checkLimits(exposure, policy?.audit?.subjects.flatMap((s) => [...(s.approvedRow ? [s.approvedRow] : []), ...s.candidates]) ?? []);
