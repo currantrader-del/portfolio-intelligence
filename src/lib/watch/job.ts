@@ -13,13 +13,14 @@ import { getQuotes } from "@/lib/market/quotes";
 import { buildWorkspace } from "@/lib/workspace-core";
 import { save } from "@/lib/intel/jobs";
 import { DAILY_CAP, spentToday } from "@/lib/intel/start";
-import { WATCH_VERSION, formatPush, ideaAlerts, selectNew } from "./watch";
+import { WATCH_VERSION } from "./watch";
+import { CATEGORY_LABEL, decisionAlerts, formatDecisionPush, selectDecisionAlerts, type DecisionAlert } from "./decisionAlerts";
 import { checkTrades, describeIdea, type Trade } from "@/lib/trades/job";
 
 export type WatchSettings = { topic: string | null; enabled: boolean };
 export type WatchRun = {
   version: string; at: string; trigger: "schedule" | "manual" | "test";
-  checked: number; sent: { key: string; alert: Alert }[]; summary: string | null;
+  checked: number; sent: { key: string; alert: Alert; decision?: DecisionAlert }[]; summary: string | null;
   pushed: boolean; error: string | null; costUsd: number; skipped?: string;
 };
 
@@ -89,9 +90,20 @@ export async function runWatch(db: SupabaseClient, origin: string, opts: { force
     ideas.length ? getQuotes(ideas) : Promise.resolve(new Map()),
     watchRuns(db),
   ]);
-  const all = [...ws.alerts, ...events.alerts, ...ideaAlerts(ws.research, held, ideaQuotes)];
-  const sentKeys = new Set(past.flatMap((r) => (r.pushed ? r.sent.map((s) => s.key) : [])));
-  const fresh = selectNew(all, sentKeys, etDay(now));
+  // Only what matters to a decision is pushed (decisionAlerts); plain moves and reminders wait for the brief.
+  const quotes = new Map<string, { price: number; prevClose: number | null; asOf: string }>();
+  for (const [s, q] of ws.quotes ?? new Map()) quotes.set(s, q);
+  for (const [s, q] of ideaQuotes as Map<string, { price: number; prevClose: number | null; asOf: string }>) quotes.set(s, q);
+  const all = decisionAlerts({
+    research: ws.research,
+    holdings: ws.portfolio.holdings.map((h) => ({ symbol: h.symbol, price: h.price, priceSource: h.priceSource, dayPct: h.dayPct, weight: h.weight })),
+    quotes, headroom: new Map(ws.portfolio.exposures.filter((e) => e.hasLimit).map((e) => [e.symbol, e.headroomDollars])),
+    marketDayPct: ws.benchmarks?.[0]?.dayPct ?? null, events: events.alerts, now,
+  });
+  const lastSent = new Map<string, string>();
+  for (const r of [...past].reverse()) if (r.pushed) for (const s of r.sent) if (s.decision) lastSent.set(s.decision.id, r.at);
+  const freshAlerts = selectDecisionAlerts(all, lastSent, now);
+  const fresh = freshAlerts.map((d) => ({ key: d.id, decision: d, alert: toAlert(d) }));
 
   const run: WatchRun = { version: WATCH_VERSION, at: now.toISOString(), trigger: opts.force ? "manual" : "schedule", checked: all.length, sent: fresh, summary: null, pushed: false, error: null, costUsd: 0 };
   if (fresh.length) {
@@ -103,7 +115,7 @@ export async function runWatch(db: SupabaseClient, origin: string, opts: { force
       const s = await summarize(items, theses).catch((e) => { console.error(`watch: summary failed: ${(e as Error).message}`); return { text: null, costUsd: 0 }; });
       run.summary = s.text; run.costUsd = s.costUsd;
     }
-    const msg = formatPush(items, run.summary);
+    const msg = formatDecisionPush(freshAlerts, run.summary);
     const click = items.length === 1 ? `${origin}${items[0].href}` : `${origin}/alerts`;
     try { await pushNtfy(settings.topic, { ...msg, click }); run.pushed = true; } catch (e) { run.error = (e as Error).message; }
   }
@@ -129,4 +141,15 @@ export async function pushTradeNews(topic: string, origin: string, trades: Trade
     const body = what === "new" ? `${describeIdea(t.idea)}. ${t.idea.whyNow}`.slice(0, 600) : `${describeIdea(t.idea)}. ${r!.edgePct !== null ? `${r!.edgePct >= 0 ? "Beat" : "Trailed"} VOO by ${pct(Math.abs(r!.edgePct)).replace("+", "")}.` : ""}`;
     await pushNtfy(topic, { title, body, priority: what === "new" ? "high" : "default", click: `${origin}/trades` });
   }
+}
+
+/** The Alerts page's shape for a pushed decision alert (it lists what was sent). */
+function toAlert(d: DecisionAlert): Alert {
+  return {
+    id: d.id, severity: d.priority === "high" ? "high" : "medium", symbol: d.symbol,
+    kind: d.category === "thesis_change" ? "event" : d.category === "urgent_risk" ? "big_move" : "price_zone",
+    title: `${CATEGORY_LABEL[d.category]}: ${d.title}`,
+    detail: `${d.changed} Why it matters: ${d.why} Action: ${d.action} Uncertain: ${d.uncertain} Verified: ${d.verified}.`,
+    href: d.href,
+  };
 }
