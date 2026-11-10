@@ -3,7 +3,7 @@
  * Markets page (signed-in user) and by the morning schedule (intel-cron), so both run the same steps.
  */
 import { startPlan } from "@/lib/plan/job";
-import { automatedAllowed } from "@/lib/costs/spend";
+import { automatedAllowed, evaluationActive } from "@/lib/costs/spend";
 import { startTradeScan } from "@/lib/trades/job";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { buildWorkspace } from "@/lib/workspace-core";
@@ -81,8 +81,12 @@ export async function runMorning(db: SupabaseClient, token: string, origin: stri
     plan = await startPlan(db, origin, token, "weekly").catch((e) => { console.error(`morning: plan did not start: ${(e as Error).message}`); return null; });
   }
   // A weekly look for a short-term trade (Wednesdays), so ideas come without being asked; "none" is the usual answer.
+  // Paused during the 30-day test to keep the AI cost inside its ceiling (you can still run one from Trades).
   let trades: string | null = null;
-  if (new Intl.DateTimeFormat("en-US", { timeZone: "America/New_York", weekday: "short" }).format(new Date()) === "Wed" && (await room("trade_scan"))) {
+  const wed = new Intl.DateTimeFormat("en-US", { timeZone: "America/New_York", weekday: "short" }).format(new Date()) === "Wed";
+  const testing = wed && (await evaluationActive(db).catch(() => false));
+  if (testing) skipped.push("trade_scan paused during the 30-day test");
+  if (wed && !testing && (await room("trade_scan"))) {
     trades = await startTradeScan(db, origin, token, "weekly").catch((e) => { console.error(`morning: trade scan did not start: ${(e as Error).message}`); return null; });
   }
   // Evaluation log: the morning's recommendation and the data behind it (code only, no AI cost).

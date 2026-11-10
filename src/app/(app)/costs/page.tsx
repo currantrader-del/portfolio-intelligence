@@ -4,7 +4,7 @@ import { measuredEstimates } from "@/lib/research/costEstimates";
 import { DAILY_CAP, spentToday } from "@/lib/intel/start";
 import { ActionForm, SubmitButton } from "@/components/forms";
 import { Card, CardHead, Pill } from "@/components/ui";
-import { saveCostSettings } from "./actions";
+import { saveCostSettings, startEvaluation } from "./actions";
 
 const usd = (n: number) => `$${n.toFixed(2)}`;
 const CLASS: Record<BudgetClass, { title: string; what: string }> = {
@@ -26,6 +26,42 @@ export default async function CostsPage() {
         <p className="t-sm">What the app&apos;s AI has cost in {monthName}, by feature and by model, against your two monthly budgets. Code-only work (prices, filing checks, re-pricing research, validation) costs nothing and is not listed.</p>
         <p className="t-sm">How the budgets are enforced: a <b className="text-ink">scheduled job</b> (morning briefing and answer, weekly plan, weekly trade scan, alert summaries, restarting a stopped investigation, the plan rebuild after research) starts only if its budget has room for its usual cost; otherwise it is skipped. A job <b className="text-ink">you start</b> that could take a budget past its limit shows a warning first and runs only if you confirm.</p>
       </div>
+
+      {s.evaluation ? (() => {
+        const e = s.evaluation!;
+        const pct = Math.min(100, (e.spent / Math.max(0.01, e.ceiling)) * 100);
+        const fmt = (iso: string) => new Date(iso).toLocaleDateString("en-US", { month: "short", day: "numeric", timeZone: "America/New_York" });
+        return (
+          <Card className="!gap-1.5">
+            <CardHead title={e.active ? `30-day test · day ${e.day} of 30` : "30-day test · finished"} right={e.over ? <Pill small tone="alert">Ceiling reached</Pill> : e.warn ? <Pill small tone="warn">Warning level reached</Pill> : e.projected > e.ceiling ? <Pill small tone="warn">On pace to exceed</Pill> : <Pill small tone="gain">Within ceiling</Pill>} />
+            <span className="t-xs">{fmt(e.start)} to {fmt(e.end)} · all AI counts against one ceiling; a phone warning at {usd(e.warnAt)}; at {usd(e.ceiling)} scheduled paid jobs stop and say so (price and filing checks continue at no cost).</span>
+            <span className="text-ink text-xl tabular-nums">{usd(e.spent)} <span className="t-sm">of {usd(e.ceiling)}</span></span>
+            <div className="h-1.5 rounded-full bg-surface-2 overflow-hidden" aria-hidden="true"><div className="h-full" style={{ width: `${pct}%`, background: e.over ? "var(--loss)" : e.warn ? "var(--warn, var(--accent))" : "var(--accent)" }} /></div>
+            <span className="t-xs">At this pace about {usd(e.projected)} by day 30. {usd(Math.max(0, e.left))} left.</span>
+            <table className="t-sm w-full"><tbody>
+              {e.byCategory.map((c) => (
+                <tr key={c.key} className="border-b border-line last:border-b-0">
+                  <td className="py-1.5 pr-2">{c.label}</td>
+                  <td className="py-1.5 pr-2 text-right t-xs">{c.runs} run{c.runs === 1 ? "" : "s"}</td>
+                  <td className="py-1.5 text-right tabular-nums">{usd(c.cost)}</td>
+                </tr>
+              ))}
+            </tbody></table>
+          </Card>
+        );
+      })() : (
+        <Card className="!gap-2">
+          <CardHead title="30-day test" right={<Pill small>Not started</Pill>} />
+          <p className="t-sm">When you start the test, all AI spending from that moment counts against one ceiling, reported as market briefings, research updates, company analysis, your questions and background monitoring. You get one phone warning at the warning level; at the ceiling, scheduled paid jobs stop and the app says what it skipped. The weekly trade scan is paused during the test.</p>
+          <ActionForm action={startEvaluation} success="30-day test started" className="flex flex-col gap-2">
+            <div className="grid grid-cols-2 gap-2">
+              <label className="field">Ceiling ($)<input name="ceiling" inputMode="decimal" defaultValue={s.settings.evalCeiling} className="input" required /></label>
+              <label className="field">Warn me at ($)<input name="warn" inputMode="decimal" defaultValue={s.settings.evalWarnAt} className="input" required /></label>
+            </div>
+            <SubmitButton className="btn btn-sm self-start" pendingText="Starting…">Start the 30-day test now</SubmitButton>
+          </ActionForm>
+        </Card>
+      )}
 
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
         {(["everyday", "research"] as const).map((c) => {

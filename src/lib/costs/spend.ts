@@ -2,6 +2,8 @@
  * What the AI costs, by feature and by model, against two monthly budgets:
  *   everyday  scheduled briefings, the weekly plan and trade scan, and your questions
  *   research  quick screens, full investigations and updates (budgeted separately, as agreed)
+ * plus, once started, the 30-day proof-of-value test: one ceiling for all AI ($20), a warning at $15,
+ * reported in five categories (2026-11-09 direction).
  * Costs come from what each run recorded (model_runs outputs.costUsd). Pure functions here; the loader
  * reads only the small fields it needs.
  */
@@ -10,6 +12,7 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 export type BudgetClass = "everyday" | "research";
 export const FEATURES: Record<string, { label: string; cls: BudgetClass }> = {
   market_briefing: { label: "Morning briefing", cls: "everyday" },
+  morning_answer: { label: "Morning answer", cls: "everyday" },
   assistant_answer: { label: "Your questions (Ask)", cls: "everyday" },
   portfolio_plan: { label: "Portfolio plan", cls: "everyday" },
   trade_scan: { label: "Trade ideas scan", cls: "everyday" },
@@ -21,9 +24,36 @@ export const FEATURES: Record<string, { label: string; cls: BudgetClass }> = {
 };
 export const COST_KINDS = ["market_briefing", "assistant_answer", "portfolio_plan", "trade_scan", "watch_run", "exposure_review", "research_result", "investigation_step"];
 
-export type CostSettings = { everydayMonthly: number; researchMonthly: number; approveAbove: number };
+export type CostSettings = {
+  everydayMonthly: number; researchMonthly: number; approveAbove: number;
+  /** The 30-day test: one ceiling for all AI from evalStart, a warning at evalWarnAt. Null until you start the test. */
+  evalStart: string | null; evalCeiling: number; evalWarnAt: number;
+};
 /** Everyday AI about $10-20 a month (the agreed target); research budgeted on its own; ask before any job above $3. */
-export const DEFAULT_COST_SETTINGS: CostSettings = { everydayMonthly: 20, researchMonthly: 25, approveAbove: 3 };
+export const DEFAULT_COST_SETTINGS: CostSettings = { everydayMonthly: 20, researchMonthly: 25, approveAbove: 3, evalStart: null, evalCeiling: 20, evalWarnAt: 15 };
+export const EVAL_DAYS = 30;
+
+/** The five cost categories the test reports. The morning answer counts as part of the briefing. */
+export type EvalCategory = "briefings" | "research_updates" | "company_analysis" | "questions" | "monitoring";
+export const EVAL_CATEGORY_LABEL: Record<EvalCategory, string> = {
+  briefings: "Market briefings (with the morning answer)",
+  research_updates: "Research updates and investigations",
+  company_analysis: "Company and portfolio analysis",
+  questions: "Your questions",
+  monitoring: "Background monitoring and alerts",
+};
+export const EVAL_CATEGORY: Record<string, EvalCategory> = {
+  market_briefing: "briefings", morning_answer: "briefings",
+  material_event_refresh: "research_updates", full_investigation: "research_updates", research_result: "research_updates",
+  portfolio_plan: "company_analysis", exposure_review: "company_analysis", trade_scan: "company_analysis",
+  assistant_answer: "questions", watch_run: "monitoring",
+};
+
+export type EvalSummary = {
+  start: string; end: string; day: number; active: boolean; ceiling: number; warnAt: number;
+  spent: number; left: number; warn: boolean; over: boolean; projected: number;
+  byCategory: { key: EvalCategory; label: string; cost: number; runs: number }[];
+};
 
 export type CostRow = { at: string; feature: string; cost: number; model: string | null; runId?: string | null };
 export type SpendSummary = {
@@ -32,6 +62,8 @@ export type SpendSummary = {
   byModel: { model: string; cost: number }[];
   classes: Record<BudgetClass, { spent: number; budget: number; projected: number; left: number; over: boolean }>;
   total: number; last7: number; settings: CostSettings;
+  /** The 30-day test window, once it has been started. */
+  evaluation: EvalSummary | null;
 };
 
 const r2 = (n: number) => Math.round(n * 100) / 100;
@@ -72,41 +104,76 @@ export function summarizeSpend(rows: CostRow[], now: Date, settings: CostSetting
     classes: { everyday: cls("everyday"), research: cls("research") },
     total: r2(inMonth.reduce((s, r) => s + r.cost, 0)),
     last7: r2(rows.filter((r) => Date.parse(r.at) >= since7).reduce((s, r) => s + r.cost, 0)),
-    settings,
+    settings, evaluation: summarizeEvaluation(rows, now, settings),
+  };
+}
+
+/** Spending inside the 30-day test window, in the five categories, against the single test ceiling. Pure. */
+export function summarizeEvaluation(rows: CostRow[], now: Date, settings: CostSettings): EvalSummary | null {
+  if (!settings.evalStart || Number.isNaN(Date.parse(settings.evalStart))) return null;
+  const startMs = Date.parse(settings.evalStart);
+  const endMs = startMs + EVAL_DAYS * 86_400_000;
+  const inWin = rows.filter((r) => { const t = Date.parse(r.at); return t >= startMs && t < endMs; });
+  const cat = new Map<EvalCategory, { cost: number; runs: Set<string> }>();
+  inWin.forEach((r, i) => {
+    const k = EVAL_CATEGORY[r.feature] ?? "company_analysis";
+    const c = cat.get(k) ?? { cost: 0, runs: new Set<string>() };
+    c.cost += r.cost; c.runs.add(r.runId ?? `row${i}`); cat.set(k, c);
+  });
+  const spent = r2(inWin.reduce((a, r) => a + r.cost, 0));
+  const t = now.getTime();
+  const elapsed = Math.min(EVAL_DAYS, Math.max(1, (t - startMs) / 86_400_000));
+  return {
+    start: new Date(startMs).toISOString(), end: new Date(endMs).toISOString(),
+    day: Math.min(EVAL_DAYS, Math.max(0, Math.ceil((t - startMs) / 86_400_000))),
+    active: t >= startMs && t < endMs, ceiling: settings.evalCeiling, warnAt: settings.evalWarnAt,
+    spent, left: r2(settings.evalCeiling - spent), warn: spent >= settings.evalWarnAt, over: spent >= settings.evalCeiling,
+    projected: r2((spent / elapsed) * EVAL_DAYS),
+    byCategory: (Object.keys(EVAL_CATEGORY_LABEL) as EvalCategory[]).map((key) => ({ key, label: EVAL_CATEGORY_LABEL[key], cost: r2(cat.get(key)?.cost ?? 0), runs: cat.get(key)?.runs.size ?? 0 })),
   };
 }
 
 /**
- * Whether a manual job may start: refused when it would take its budget past the limit, and it needs your
- * explicit OK when its estimate is above the approval threshold. The $20/day cap still applies separately.
- */
-/**
  * Whether a manual paid job may start. `confirmed` is your "Start anyway" after seeing the warning;
  * `costAcknowledged` is a cost you already accepted on the page (the full-investigation checkbox), which
- * covers the approval threshold but never the monthly budget: going over it always asks separately.
+ * covers the approval threshold but never a budget: going over the month's budget or the test ceiling always asks separately.
  */
 export function budgetGate(s: SpendSummary, cls: BudgetClass, estimateHigh: number, confirmed: boolean, costAcknowledged = false): { ok: true } | { ok: false; needsConfirm: boolean; message: string } {
   const c = s.classes[cls];
   const name = cls === "research" ? "research" : "everyday AI";
+  const e = s.evaluation;
+  if (e?.active && e.spent + estimateHigh > e.ceiling && !confirmed) return { ok: false, needsConfirm: true, message: `This could take the 30-day test past its $${e.ceiling} AI ceiling ($${e.spent.toFixed(2)} spent, up to $${estimateHigh.toFixed(2)} more). Confirm to go ahead anyway.` };
   if (c.spent + estimateHigh > c.budget && !confirmed) return { ok: false, needsConfirm: true, message: `This could take the ${name} budget over its $${c.budget} for the month ($${c.spent.toFixed(2)} spent, up to $${estimateHigh.toFixed(2)} more). Confirm to go ahead anyway.` };
   if (estimateHigh > s.settings.approveAbove && !confirmed && !costAcknowledged) return { ok: false, needsConfirm: true, message: `This may cost up to $${estimateHigh.toFixed(2)}, above your $${s.settings.approveAbove} approval threshold. Confirm to start it.` };
   return { ok: true };
 }
 
-/** Reads this month's costs (and the last 7 days) without loading large run states. */
+/** The saved settings over the defaults: numbers must be zero or more; the test start must be a date. */
+export function settingsFrom(saved: unknown): CostSettings {
+  const o = (saved ?? {}) as Record<string, unknown>;
+  const nums = Object.fromEntries(Object.entries(o).filter(([k, v]) => k !== "evalStart" && typeof v === "number" && v >= 0));
+  const evalStart = typeof o.evalStart === "string" && !Number.isNaN(Date.parse(o.evalStart)) ? o.evalStart : null;
+  return { ...DEFAULT_COST_SETTINGS, ...nums, evalStart };
+}
+
+/** Reads this month's costs (and the last 7 days, and the test window) without loading large run states. */
 export async function loadSpend(db: SupabaseClient, now = new Date()): Promise<SpendSummary> {
+  const { data: set } = await db.from("model_runs").select("outputs").eq("kind", "cost_settings").order("computed_at", { ascending: false }).limit(1).maybeSingle();
+  const settings = settingsFrom(set?.outputs ?? null);
   const monthStart = `${now.toISOString().slice(0, 7)}-01T00:00:00Z`;
-  const since = new Date(Math.min(Date.parse(monthStart), now.getTime() - 7 * 86_400_000)).toISOString();
-  const [{ data: simple }, { data: steps }, { data: reqs }, { data: set }] = await Promise.all([
-    db.from("model_runs").select("id, kind, computed_at, cost:outputs->>costUsd, model:outputs->>model").in("kind", COST_KINDS.filter((k) => k !== "investigation_step")).gte("computed_at", since).limit(5000),
+  const evalStart = settings.evalStart ? Date.parse(settings.evalStart) : Infinity;
+  const since = new Date(Math.min(Date.parse(monthStart), now.getTime() - 7 * 86_400_000, evalStart)).toISOString();
+  const [{ data: simple }, { data: steps }, { data: reqs }] = await Promise.all([
+    db.from("model_runs").select("id, kind, computed_at, cost:outputs->>costUsd, model:outputs->>model, purpose:inputs->>purpose").in("kind", COST_KINDS.filter((k) => k !== "investigation_step")).gte("computed_at", since).limit(5000),
     db.from("model_runs").select("computed_at, req:inputs->>request_id, cost:outputs->>costUsd, byModel:outputs->state->usage->byModel").eq("kind", "investigation_step").gte("computed_at", since).limit(5000),
     db.from("model_runs").select("id, type:inputs->>type").eq("kind", "investigation_request").gte("computed_at", new Date(Date.parse(since) - 7 * 86_400_000).toISOString()).limit(500),
-    db.from("model_runs").select("outputs").eq("kind", "cost_settings").order("computed_at", { ascending: false }).limit(1).maybeSingle(),
   ]);
   const rows: CostRow[] = [];
-  for (const r of (simple ?? []) as { id: string; kind: string; computed_at: string; cost: string | null; model: string | null }[]) {
+  for (const r of (simple ?? []) as { id: string; kind: string; computed_at: string; cost: string | null; model: string | null; purpose?: string | null }[]) {
     const c = Number(r.cost) || 0;
-    if (c > 0) rows.push({ at: r.computed_at, feature: r.kind, cost: c, model: r.model, runId: r.id });
+    // The scheduled morning answer is reported with the briefing, not as one of your questions.
+    const feature = r.kind === "assistant_answer" && r.purpose === "morning" ? "morning_answer" : r.kind;
+    if (c > 0) rows.push({ at: r.computed_at, feature, cost: c, model: r.model, runId: r.id });
   }
   const typeOf = new Map(((reqs ?? []) as { id: string; type: string | null }[]).map((r) => [r.id, r.type === "material_event_refresh" ? "material_event_refresh" : "full_investigation"]));
   // Investigation steps record cost per step; the model split comes from each run's latest cumulative usage.
@@ -130,14 +197,12 @@ export async function loadSpend(db: SupabaseClient, now = new Date()): Promise<S
     for (const r of mine) rows.splice(rows.indexOf(r), 1);
     rows.push(...out);
   }
-  const saved = (set?.outputs ?? null) as Partial<CostSettings> | null;
-  const settings: CostSettings = { ...DEFAULT_COST_SETTINGS, ...Object.fromEntries(Object.entries(saved ?? {}).filter(([, v]) => typeof v === "number" && v >= 0)) };
   return summarizeSpend(rows, now, settings);
 }
 
 /** What one run of a feature usually costs, until the month has enough runs of it to measure. */
 export const DEFAULT_RUN_COST: Record<string, number> = {
-  market_briefing: 0.6, assistant_answer: 0.15, portfolio_plan: 0.5, trade_scan: 0.6, watch_run: 0.05, exposure_review: 0.3, research_result: 0.35,
+  market_briefing: 0.6, morning_answer: 0.15, assistant_answer: 0.15, portfolio_plan: 0.5, trade_scan: 0.6, watch_run: 0.05, exposure_review: 0.3, research_result: 0.35,
 };
 
 /** The expected cost of one more run: this month's average once there are two runs, never below half the default. */
@@ -148,13 +213,15 @@ export function runEstimate(s: SpendSummary, feature: string): number {
 }
 
 /**
- * Automated jobs never ask and never go over: one starts only when its budget has room for its expected cost,
- * otherwise it is skipped and the reason is recorded. Manual jobs use manualGate (a warning, then your OK).
+ * Automated jobs never ask and never go over: one starts only when its budget (and, during the test, the
+ * test ceiling) has room for its expected cost; otherwise it is skipped and the reason is recorded.
  */
 export function automatedGate(s: SpendSummary, feature: string): { ok: true } | { ok: false; reason: string } {
   const cls = FEATURES[feature]?.cls ?? "everyday";
   const c = s.classes[cls];
   const est = runEstimate(s, feature);
+  const e = s.evaluation;
+  if (e?.active && e.spent + est > e.ceiling) return { ok: false, reason: `skipped: the 30-day test has $${Math.max(0, e.left).toFixed(2)} left of its $${e.ceiling} AI ceiling, and ${FEATURES[feature]?.label ?? feature} usually costs about $${est.toFixed(2)}` };
   if (c.spent + est > c.budget) return { ok: false, reason: `skipped: the monthly ${cls === "research" ? "research" : "everyday AI"} budget has $${Math.max(0, c.left).toFixed(2)} left of $${c.budget}, and ${FEATURES[feature]?.label ?? feature} usually costs about $${est.toFixed(2)}` };
   return { ok: true };
 }
@@ -169,4 +236,13 @@ export async function automatedAllowed(db: SupabaseClient, feature: string, now 
   const s = await loadSpend(db, now).catch(() => null);
   if (!s) return { ok: false, reason: "skipped: this month's AI spending could not be read, so no paid job was started" };
   return automatedGate(s, feature);
+}
+
+/** Whether the 30-day test is running now (for pausing optional jobs during it). */
+export async function evaluationActive(db: SupabaseClient, now = new Date()): Promise<boolean> {
+  const { data } = await db.from("model_runs").select("outputs").eq("kind", "cost_settings").order("computed_at", { ascending: false }).limit(1).maybeSingle();
+  const s = settingsFrom(data?.outputs ?? null);
+  if (!s.evalStart) return false;
+  const t = now.getTime(), start = Date.parse(s.evalStart);
+  return t >= start && t < start + EVAL_DAYS * 86_400_000;
 }

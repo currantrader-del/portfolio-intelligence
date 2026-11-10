@@ -3,7 +3,7 @@
  * bands for researched ideas); the AI is only asked for a one-line "why it matters" when something new
  * fires, so a quiet day costs nothing. Every run is stored, so the Alerts page shows what was sent.
  */
-import { automatedAllowed } from "@/lib/costs/spend";
+import { automatedAllowed, loadSpend } from "@/lib/costs/spend";
 import Anthropic from "@anthropic-ai/sdk";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { Alert } from "@/lib/alerts/rules";
@@ -122,6 +122,7 @@ export async function runWatch(db: SupabaseClient, origin: string, opts: { force
     // Evaluation log: a paper decision whenever an action plan's entry (or trim) criteria are met.
     await recordPaperDecisions(db, freshAlerts, { vooPrice: quotes.get("VOO")?.price ?? null, now }).catch((e) => console.error(`watch: paper decision failed: ${(e as Error).message}`));
   }
+  await warnCost(db, settings.topic, origin, now).catch((e) => console.error(`watch: cost warning failed: ${(e as Error).message}`));
   // Quiet runs are stored too (they are small), so the page can say when the last check ran.
   await save(db, "watch_run", WATCH_VERSION, { day: etDay(now), force: !!opts.force }, run);
   return run;
@@ -155,4 +156,24 @@ function toAlert(d: DecisionAlert): Alert {
     detail: `${d.changed} Why it matters: ${d.why} Action: ${d.action} Uncertain: ${d.uncertain} Verified: ${d.verified}.`,
     href: d.href,
   };
+}
+
+/**
+ * During the 30-day test: one phone warning when AI spending reaches the warning level ($15), and one
+ * when it reaches the ceiling ($20, after which automated paid jobs stop). Each is sent once per test.
+ */
+export async function warnCost(db: SupabaseClient, topic: string, origin: string, now: Date): Promise<"warn" | "over" | null> {
+  const s = await loadSpend(db, now);
+  const e = s.evaluation;
+  if (!e?.active || !e.warn) return null;
+  const level = e.over ? "over" : "warn";
+  const { data } = await db.from("model_runs").select("id").eq("kind", "cost_warning").eq("inputs->>start", e.start).eq("inputs->>level", level).limit(1);
+  if ((data ?? []).length) return null;
+  const top = [...e.byCategory].sort((a, b) => b.cost - a.cost).filter((c) => c.cost > 0).slice(0, 2).map((c) => `${c.label} $${c.cost.toFixed(2)}`).join(", ");
+  const body = level === "over"
+    ? `$${e.spent.toFixed(2)} spent on AI in the 30-day test (day ${e.day}), reaching the $${e.ceiling} ceiling. Scheduled paid jobs (briefing, morning answer, plan) now stop and say so; price and filing checks and alerts continue at no cost. Largest: ${top}.`
+    : `$${e.spent.toFixed(2)} of the $${e.ceiling} test ceiling spent (day ${e.day}); at this pace about $${e.projected.toFixed(2)} by day 30. Largest: ${top}. Scheduled paid jobs stop at $${e.ceiling}.`;
+  await pushNtfy(topic, { title: level === "over" ? "AI cost ceiling reached" : `AI cost warning: $${e.spent.toFixed(2)} of $${e.ceiling}`, body, priority: "default", click: `${origin}/costs` });
+  await save(db, "cost_warning", WATCH_VERSION, { start: e.start, level }, { at: now.toISOString(), spent: e.spent, ceiling: e.ceiling, level });
+  return level;
 }

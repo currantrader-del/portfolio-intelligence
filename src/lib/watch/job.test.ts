@@ -18,7 +18,7 @@ const db = {
   from: () => {
     let kind = "";
     const q = {
-      select: () => q, gte: () => q, order: () => q, limit: () => q,
+      select: () => q, gte: () => q, order: () => q, limit: () => q, in: () => q,
       eq: (_k: string, v: string) => { kind = v; return q; },
       maybeSingle: () => Promise.resolve({ data: kind === "watch_settings" ? { outputs: { topic: "pi-test", enabled: true } } : null }),
       then: (ok: (v: unknown) => unknown) => Promise.resolve({ data: saved.filter((s) => s.kind === kind).reverse().map((s) => ({ id: "r", outputs: s.outputs })) }).then(ok),
