@@ -27,11 +27,7 @@ jobs:
       - name: Lint
         run: npm run lint
       - name: Tests
-        run: npm test -- --exclude src/lib/research/share/pdf.test.ts
-      # The PDF speed check measures render time, so it runs on its own: in the parallel suite other test
-      # files compete for the CPU and its timing measured the runner's load, not the renderer (20.7s on 2026-11-10).
-      - name: PDF render speed
-        run: npx vitest run src/lib/research/share/pdf.test.ts
+        run: npm test
       - name: Production build (the same command Netlify runs)
         run: npm run build
         env:
