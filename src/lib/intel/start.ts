@@ -54,7 +54,13 @@ export const DAILY_CAP = { answers: 15, total: 20 };
  */
 export async function runMorning(db: SupabaseClient, token: string, origin: string, ask: (requestId: string) => Promise<string>) {
   const spent = await spentToday(db);
-  if (spent.total >= DAILY_CAP.total) return { skipped: `cost limit reached ($${spent.total.toFixed(2)} spent today)` };
+  // Every morning run is recorded with what it skipped, so Today can say what is missing instead of leaving it out.
+  const record = (o: Record<string, unknown>) => save(db, "morning_run", AGENT_VERSION, { day: new Date().toISOString().slice(0, 10) }, { at: new Date().toISOString(), ...o }).catch(() => null);
+  if (spent.total >= DAILY_CAP.total) {
+    const why = `the daily safety limit was reached ($${spent.total.toFixed(2)} spent today)`;
+    await record({ skipped: [`market_briefing skipped: ${why}`] });
+    return { skipped: `cost limit reached: ${why}` };
+  }
   // Each paid step checks the monthly budget before it starts, against what has been spent so far
   // (including the steps before it); a step without room is skipped, never run over the limit.
   const skipped: string[] = [];
@@ -63,7 +69,7 @@ export async function runMorning(db: SupabaseClient, token: string, origin: stri
     if (!g.ok) skipped.push(`${feature} ${g.reason}`);
     return g.ok;
   };
-  if (!(await room("market_briefing"))) return { skipped: skipped.join("; ") };
+  if (!(await room("market_briefing"))) { await record({ skipped }); return { skipped: skipped.join("; ") }; }
   const b = await startBriefing(db, token, origin);
   if ("error" in b) console.error(`morning: briefing did not start: ${b.error}`);
   else {
@@ -91,7 +97,9 @@ export async function runMorning(db: SupabaseClient, token: string, origin: stri
   }
   // Evaluation log: the morning's recommendation and the data behind it (code only, no AI cost).
   const logged = await logRecommendation(db, { trigger: "morning", answerId, briefingId: "error" in b ? null : b.snapshotId ?? null }).catch((e) => { console.error(`morning: recommendation log failed: ${(e as Error).message}`); return null; });
+  if ("error" in b) skipped.push(`market_briefing failed: ${b.error}`);
+  await record({ skipped, briefing: "error" in b ? null : b.snapshotId, answerId, plan, trades });
   return { briefing: "error" in b ? null : b.snapshotId, requestId, answerId, plan, trades, skipped, logged };
 }
 
-export const MORNING_QUESTION ="Morning briefing. Using today's market briefing and my portfolio: what happened in markets and the world, and why it matters; where short-term and long-term conditions appear to be heading and what changed in that view; what changed for my specific holdings (filings, results, research that needs reassessment); what deserves my attention; what actions, if any, are justified (including holding cash); and which opportunities warrant more research. Lead with the conclusions in a few lines, then the explanation.";
+export const MORNING_QUESTION = "Morning briefing. Using today's market briefing, my portfolio, the research and action plans on file and the alerts, answer these six questions in this order, each under its own short bold heading, in one to three sentences each: 1. What happened in the market? 2. Did anything materially affect my investments? 3. Is any action needed? (Holding, and holding cash, are valid answers; name a buy or trim only when the action plan's conditions are met with current, verified data.) 4. Are any researched stocks approaching their entry criteria? 5. Are any new opportunities worth investigating? 6. Are there important upcoming events? Start with one line giving the key recommendation. Say plainly when nothing changed; do not fill space. Mark anything unverified or stale as such.";
