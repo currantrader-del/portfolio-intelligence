@@ -14,6 +14,7 @@ import { briefingFor, dispatchJob, planDesks, recentMacro, save, type SnapshotIn
 import { AGENT_VERSION } from "@/lib/assistant/agent";
 import { logRecommendation } from "@/lib/eval/recommendation";
 import { settleShadowStarts } from "@/lib/shadow/store";
+import { morningSchwab } from "@/lib/schwab/morning";
 
 export async function startBriefing(db: SupabaseClient, token: string, origin: string, force = false) {
   const now = new Date();
@@ -59,6 +60,9 @@ export async function runMorning(db: SupabaseClient, token: string, origin: stri
   const record = (o: Record<string, unknown>) => save(db, "morning_run", AGENT_VERSION, { day: new Date().toISOString().slice(0, 10) }, { at: new Date().toISOString(), ...o }).catch(() => null);
   // Shadow tests: record yesterday's start-close prices (code only, no AI cost; runs even when the AI budget is spent).
   await settleShadowStarts(db).catch((e) => console.error(`morning: shadow starts not recorded: ${(e as Error).message}`));
+  // Schwab (read-only): fresh balances and positions before anything reads the portfolio (code only).
+  const schwab = await morningSchwab(db, origin).catch((e) => `schwab step failed: ${(e as Error).message}`);
+  console.log(`morning: ${schwab}`);
   if (spent.total >= DAILY_CAP.total) {
     const why = `the daily safety limit was reached ($${spent.total.toFixed(2)} spent today)`;
     await record({ skipped: [`market_briefing skipped: ${why}`] });
