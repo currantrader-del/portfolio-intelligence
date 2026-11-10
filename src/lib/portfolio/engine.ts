@@ -181,7 +181,7 @@ export type CashView = {
   savingsAsOf: string | null;
   protectedReserve: number; // policy floor, excluded from every percentage
   reserveShortfall: number; // reserve not covered by savings
-  deployableSavings: number; // savings above the reserve
+  deployableSavings: number; // savings you would move to the brokerage: the balance, capped at your transfer limit
   deployable: number; // brokerage + deployable savings (capital accounting; not all of it can buy anything today)
   /** Cash that can buy a chosen stock or ETF today, without any transfer: the self-directed brokerage cash. */
   spendableNow: number;
@@ -221,7 +221,7 @@ export type PortfolioView = {
   total: number; // invested portfolio (holdings + cash inside investment accounts): the denominator for every weight and limit
   /** Invested portfolio plus savings: for capital planning and liquidity, never a limit denominator. */
   investableCapital: number;
-  netWorthTracked: number; // investable capital + protected reserve
+  netWorthTracked: number; // invested portfolio + all savings
   cash: number; // cash inside investment accounts (savings excluded; see cashDetail)
   cashDetail: CashView;
   quality: DataQuality;
@@ -245,6 +245,8 @@ export function buildPortfolio(
   ledger: LedgerEntry[] = [],
   now: Date = new Date(),
   cashConfirmations: CashConfirmation[] = [],
+  /** Your standing limit on moving savings to the brokerage (capital preference); null = no limit saved. */
+  maxTransfer: number | null = null,
 ): PortfolioView {
   const bySymbol = new Map<string, { quantity: number; stmtValue: number; stmtPrice: number | null; stmtQty: number; cost: number | null; costKnown: boolean; accounts: Set<string>; asOf: string }>();
   let brokerageCash = 0;
@@ -316,7 +318,9 @@ export function buildPortfolio(
 
   // No protected reserve (2026-11-09 direction); the old policy row is kept on file but no longer applied.
   const reserve = 0;
-  const deployableSavings = savings === null ? 0 : Math.max(0, savings - reserve);
+  // Savings count as investable only up to the amount you said you would transfer ($10,000), never the whole balance.
+  const aboveReserve = savings === null ? 0 : Math.max(0, savings - reserve);
+  const deployableSavings = maxTransfer === null ? aboveReserve : Math.min(aboveReserve, Math.max(0, maxTransfer));
   const selfDirected = accountCash.filter((a) => a.use === "self_directed").sort((a, b) => b.cash - a.cash);
   const investingAccount = selfDirected[0] ? { id: selfDirected[0].id, name: selfDirected[0].name, cash: Math.max(0, selfDirected[0].cash), confirmed: selfDirected[0].basis?.confirmed ?? false, basis: selfDirected[0].basis } : null;
   const cashDetail: CashView = {
@@ -442,7 +446,7 @@ export function buildPortfolio(
   return {
     total: round2(total),
     investableCapital: round2(total + deployableSavings),
-    netWorthTracked: round2(total + deployableSavings + Math.min(reserve, savings ?? 0)),
+    netWorthTracked: round2(total + (savings ?? 0)),
     cash: round2(cash),
     cashDetail,
     quality,

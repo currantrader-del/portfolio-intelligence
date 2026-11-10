@@ -15,7 +15,7 @@ const rng = (lo: number | string | null, hi: number | string | null) => (lo === 
 
 /** One line of numbers for a rule, in plain words. */
 function numbers(r: PolicyRuleRow): string {
-  if (r.scope === "portfolio" && r.subject === "protected_reserve") return `$${Number(r.value).toLocaleString()} kept in savings, never invested`;
+  if (r.scope === "portfolio" && r.subject === "protected_reserve") return `$${Number(r.value).toLocaleString()}: no longer applied (since Nov 9 there is no protected reserve; savings count up to your transfer limit)`;
   if (r.scope === "assumption" && r.subject === "benchmark_return") return `U.S. stocks ${rng(r.normal_low, r.normal_high)} a year (shown middle ${p(r.value, 1)}: the average of Vanguard's 5.8% midpoint and J.P. Morgan's 7.5%, not the middle of the range)`;
   if (r.scope === "assumption" && r.subject === "risk_margin_factor") return `${Number(r.value)} x each stock's scenario spread`;
   if (r.scope === "assumption") return String(r.value);
@@ -24,7 +24,7 @@ function numbers(r: PolicyRuleRow): string {
 }
 
 const SUBJECT: Record<string, string> = {
-  protected_reserve: "Protected savings reserve",
+  protected_reserve: "Protected savings reserve (retired)",
   benchmark_return: "Index return to beat",
   risk_margin_factor: "Extra return for a riskier stock",
   generic: "Any company without its own limit",
@@ -158,7 +158,7 @@ export default async function PolicyPage({ searchParams }: { searchParams: Promi
         <Link href="/portfolio" className="text-sm no-underline max-lg:hidden">← Portfolio</Link>
         <h1 className="h1 mt-1">Policy</h1>
         <p className="text-muted text-sm">What controls your decisions, what needs your call, and why. Nothing is ever deleted: older versions stay in history with their sources.</p>
-        <p className="text-muted text-sm">Every percentage limit here (company, bucket, exposure and cash ranges) is a share of your <span className="text-ink">invested portfolio</span>: Schwab, Acorns and Roth holdings plus their cash, after any purchase. Savings outside the brokerage are not in it, so they never create room under a limit; only money you actually move in does. The protected reserve is in neither view.</p>
+        <p className="text-muted text-sm">Every percentage limit here (company, bucket, exposure and cash ranges) is a share of your <span className="text-ink">invested portfolio</span>: Schwab, Acorns and Roth holdings plus their cash, after any purchase. Savings outside the brokerage are not in it, so they never create room under a limit; only money you actually move in does. Savings count toward total investable capital only up to the amount you said you would transfer.</p>
       </div>
       {saved && <p className="rounded-xl bg-accent-soft px-4 py-2 text-sm">{saved[0] === "profile" ? "Saved. Every AI answer, research and plan now reads your updated profile." : saved[0] === "approved" ? `Approved. ${saved[1]} now uses the rule you chose.` : saved[0] === "rejected" ? `Rejected. ${saved[1]} keeps the rule that was in control.` : `Confirmed ${saved[1]} imported rules as yours.`}</p>}
 
@@ -195,7 +195,7 @@ export default async function PolicyPage({ searchParams }: { searchParams: Promi
           <li><span className="font-medium">Valuation against the alternatives.</span> The research&apos;s own price zone must allow adding. Its scenarios at today&apos;s price are compared with VOO&apos;s published forecasts (each shown separately, never averaged), a Treasury for the same horizon, the odds of a loss, the spread of outcomes and concentration. A 2-4 year stock case and a 10-15 year forecast are not like for like, so that comparison is shown as context, not a pass/fail. No fixed hurdle or premium.</li>
           <li><span className="font-medium">Research is current.</span> Refresh is triggered by events: new results, a financing or share issuance, another material filing, or the price moving into a different action zone of the research. Age alone only prompts a filings check.</li>
         </ol>
-        <p className="text-xs text-muted">The three are assessed and shown separately. The app always gives its best recommendation on the evidence. A dollar amount is &quot;ready to execute&quot; only when the money is verified, your holdings are confirmed and nothing material is unresolved; otherwise it is conditional. The protected savings reserve is never invested, and keeping cash is always an option.</p>
+        <p className="text-xs text-muted">The three are assessed and shown separately. The app always gives its best recommendation on the evidence. A dollar amount is &quot;ready to execute&quot; only when the money is verified, your holdings are confirmed and nothing material is unresolved; otherwise it is conditional. Savings are used only through a transfer you plan, and keeping cash is always an option.</p>
         <Disclose summary="The alternatives and their published forecasts">
           <ul className="text-sm flex flex-col gap-2">
             {ALTERNATIVES.map((alt) => (

@@ -169,7 +169,7 @@ export async function buildWorkspace(db: SupabaseClient, now = new Date()): Prom
   const quotes = await getQuotes([...symbols, ...BENCHMARKS.map((b) => b.symbol)]);
   const roles: Record<string, string | null> = Object.fromEntries(Object.values(policy?.companies ?? {}).map((c) => [c.symbol, c.role]));
   const classifications = { ...roles, ...Object.fromEntries(research.filter((r) => r.current?.parsed.classification).map((r) => [r.symbol, r.current!.parsed.classification])) };
-  const portfolio = buildPortfolio(snapshots, quotes, policy, classifications, ledger, now, cashConfirmations);
+  const portfolio = buildPortfolio(snapshots, quotes, policy, classifications, ledger, now, cashConfirmations, capitalPreference?.maxTransfer ?? null);
   const benchmarks = BENCHMARKS.map((b) => ({ ...b, dayPct: dayChangePct(quotes.get(b.symbol)) }));
   const exposure = computeExposure(portfolio.holdings.map((h) => ({ symbol: h.symbol, value: h.value })), portfolio.cash, now);
   const exposureLimits = checkLimits(exposure, policy?.audit?.subjects.flatMap((s) => [...(s.approvedRow ? [s.approvedRow] : []), ...s.candidates]) ?? []);

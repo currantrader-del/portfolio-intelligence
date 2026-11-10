@@ -46,6 +46,12 @@ describe("a cash figure is checked, not assumed", () => {
     expect(off.cashDetail.accounts.find((a) => a.id === "schwab")!.basis).toMatchObject({ confirmed: false });
     expect(off.cashDetail.accounts.find((a) => a.id === "schwab")!.basis!.checks.join(" ")).toMatch(/You confirmed \$250\.00 .* records give \$221\.24/);
   });
+  it("counts savings as investable only up to your transfer limit", () => {
+    const p = buildPortfolio([oct, usaa(13000)], new Map(), policy, {}, ledger, now, [], 10000);
+    expect(p.cashDetail.deployableSavings).toBe(10000);
+    expect(p.investableCapital).toBe(Math.round((p.total + 10000) * 100) / 100);
+    expect(buildPortfolio([oct, usaa(6000)], new Map(), policy, {}, ledger, now, [], 10000).cashDetail.deployableSavings).toBe(6000);
+  });
   it("flags records that spend more cash than the statement had", () => {
     const p = buildPortfolio([oct, usaa(3000)], new Map(), policy, {}, ledger.filter((t) => t.kind !== "deposit"), now);
     expect(p.cashDetail.accounts[0].basis!.checks[0]).toMatch(/spend \$1,028\.76 more than the cash on the 2026-10-31 statement: a deposit or trade is missing/);
