@@ -5,13 +5,14 @@ import type { Workspace } from "@/lib/workspace";
 import { newCapital, ruleRowsOf, type MoneySource, type NewCapitalResult, type OptionLabel } from "@/lib/decision/newCapital";
 import { WATCHED } from "@/lib/decision/exposureImpact";
 import { cancelTransfer, planTransfer, recordNewCapital } from "@/app/(app)/decisions/actions";
+import { confirmCash } from "@/app/(app)/portfolio/actions";
 import { loadDecisionFilings } from "@/lib/alerts/events";
 import { AskButton } from "@/components/AskPanel";
 import { pctStr, usd } from "@/lib/format";
 import { Card, CardHead, DataLabel, Disclose, Dot, Pill } from "@/components/ui";
 
 const LABEL_TONE: Record<OptionLabel, "gain" | "warn" | "neutral" | "solid" | "alert"> = {
-  Candidate: "solid", "Valid option": "neutral", "Refresh required": "warn", "Research needed": "warn", "Research not approved": "warn", "No limit set": "warn", "At limit": "warn", "Not ahead of VOO": "neutral", "Research says hold": "neutral", "Condition not met": "warn", "Limit not approved": "warn", "Trim review": "alert",
+  Candidate: "solid", "Valid option": "neutral", "Refresh required": "warn", "Research needed": "warn", "Preliminary research": "warn", "No limit set": "warn", "At limit": "warn", "Not ahead of VOO": "neutral", "Research says hold": "neutral", "Condition not met": "warn", "Limit not approved": "warn", "Trim review": "alert",
 };
 const KIND: Record<string, string> = { stock: "Existing position", new_stock: "New position", etf: "Diversified ETF", cash: "Always available", trim: "Reduce exposure" };
 const GATE_LINK: Record<string, { href: string; label: string }> = {
@@ -115,7 +116,7 @@ export async function NewCapitalView({ ws, amount, source, confirmed, action }: 
 
 /**
  * Each account's own cash and what it can do. Cash never moves between accounts on its own; savings can fund the
- * brokerage only through a transfer you plan here (recorded only, nothing is moved), and the reserve never can.
+ * brokerage only through a transfer you plan here (recorded only, nothing is moved).
  */
 export function AccountCashCard({ ws }: { ws: Workspace }) {
   const cd = ws.portfolio.cashDetail;
@@ -129,8 +130,15 @@ export function AccountCashCard({ ws }: { ws: Workspace }) {
       <ul className="flex flex-col">
         {accounts.map((a) => (
           <li key={a.id} className="flex items-start justify-between gap-3 py-1.5 border-t border-line first:border-t-0">
-            <span className="flex flex-col min-w-0"><span className="t-sm text-ink">{a.name}</span><span className="t-xs">{a.use === "savings" ? `${a.note}. ${usd(cd.protectedReserve)} is your protected reserve; ${usd(cd.deployableSavings)} is above it.` : a.note}</span>
-              {a.basis && <span className={`t-xs ${a.basis.confirmed ? "" : "warn"}`}>{a.basis.detail}{a.basis.checks.length ? ` ${a.basis.checks.join(" ")}` : ""}</span>}</span>
+            <span className="flex flex-col min-w-0"><span className="t-sm text-ink">{a.name}</span><span className="t-xs">{a.use === "savings" ? `${a.note}. ${usd(cd.deployableSavings)} could be transferred.` : a.note}</span>
+              {a.basis && <span className={`t-xs ${a.basis.confirmed ? "" : "warn"}`}>{a.basis.detail}{a.basis.checks.length ? ` ${a.basis.checks.join(" ")}` : ""}</span>}
+              {a.basis && !a.basis.confirmed && a.canBuyChosen && (
+                <ActionForm action={confirmCash} success="Cash confirmed" className="flex items-end gap-2 pt-1">
+                  <input type="hidden" name="account_id" value={a.id} />
+                  <label className="field t-xs">Cash in the broker&apos;s app ($)<input name="cash" inputMode="decimal" defaultValue={a.cash.toFixed(2)} className="input" required /></label>
+                  <SubmitButton className="btn btn-sm" pendingText="Saving…">Confirm</SubmitButton>
+                </ActionForm>
+              )}</span>
             <span className="flex flex-col items-end shrink-0"><span className="t-sm num text-ink">{usd(a.cash, 2)}</span>{a.basis && <Pill small tone={a.basis.confirmed ? "gain" : "warn"}>{a.basis.confirmed ? (a.basis.status === "manual" ? "Your entry" : "Statement") : a.basis.status === "derived" ? "Worked out" : "Check"}</Pill>}</span>
           </li>
         ))}
@@ -157,7 +165,7 @@ export function AccountCashCard({ ws }: { ws: Workspace }) {
                 <label className="field">Amount<input name="amount" inputMode="decimal" className="input" placeholder={cd.deployableSavings >= 1 ? String(Math.floor(cd.deployableSavings)) : "0"} /></label>
                 <label className="field">Date<input name="date" type="date" className="input" defaultValue={ws.now.toISOString().slice(0, 10)} /></label>
               </div>
-              <span className="t-xs">This only records your plan; it moves no money. The protected reserve cannot be planned out.</span>
+              <span className="t-xs">This only records your plan; it moves no money.</span>
               <SubmitButton className="btn self-start" pendingText="Saving…">Record planned transfer</SubmitButton>
             </ActionForm>
           </Disclose>

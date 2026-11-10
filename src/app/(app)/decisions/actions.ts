@@ -118,7 +118,7 @@ export async function recordReview(formData: FormData): Promise<ActionResult> {
 
 /**
  * Records a transfer between your own accounts as planned (it moves no money). New-money decisions may then use it,
- * as conditional money, until the receiving account's records show it. Never from the protected reserve.
+ * as conditional money, until the receiving account's records show it.
  */
 export async function planTransfer(formData: FormData): Promise<ActionResult> {
   const amount = Math.round(Number(String(formData.get("amount") ?? "").replace(/[$,\s]/g, "")) * 100) / 100;
@@ -135,7 +135,7 @@ export async function planTransfer(formData: FormData): Promise<ActionResult> {
   if (src.use === "retirement_managed") return fail("Money cannot be taken out of a retirement account for this.");
   const already = ws.transfers.filter((t) => t.fromAccountId === from).reduce((a, t) => a + t.amount, 0);
   const available = src.use === "savings" ? ws.portfolio.cashDetail.deployableSavings - already : src.cash - already;
-  if (amount > available + 0.005) return fail(src.use === "savings" ? `Only $${Math.max(0, available).toLocaleString()} of ${src.name} is above your $${ws.portfolio.cashDetail.protectedReserve.toLocaleString()} protected reserve (after transfers already planned).` : `${src.name} holds only $${Math.max(0, available).toLocaleString()} of cash.`);
+  if (amount > available + 0.005) return fail(src.use === "savings" ? `Only $${Math.max(0, available).toLocaleString()} of ${src.name} is left (after transfers already planned).` : `${src.name} holds only $${Math.max(0, available).toLocaleString()} of cash.`);
   const db = await createClient();
   await saveRun(db, "planned_transfer", "transfer@1", { from_account_id: from, to_account_id: to, amount, date, note: String(formData.get("note") ?? "").slice(0, 200) || null }, { from: src.name, to: dst.name });
   revalidatePath("/decisions");

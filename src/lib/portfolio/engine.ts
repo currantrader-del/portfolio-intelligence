@@ -10,9 +10,10 @@
  *  - Invested portfolio (`total`): holdings in the brokerage, Acorns and retirement accounts plus the cash inside
  *    them. Every holding weight, bucket weight, company exposure and allocation limit uses this. Savings outside
  *    the brokerage never change it.
- *  - Total investable capital (`investableCapital`): the invested portfolio plus savings above the protected
- *    reserve. Used for capital planning, liquidity and "share of everything I could invest" views.
- * The protected reserve is tracked but excluded from both (policy rule).
+ *  - Total investable capital (`investableCapital`): the invested portfolio plus savings. Used for capital
+ *    planning, liquidity and "share of everything I could invest" views.
+ * There is no protected savings reserve (investor's direction, 2026-11-09): brokerage cash and transferable
+ * savings both count as available, shown separately. `protectedReserve` stays in the shape as 0.
  */
 import type { Quote } from "@/lib/market/quotes";
 import { companyLimit, type Policy, type Range } from "@/lib/policy/limits";
@@ -120,7 +121,10 @@ export type CashBasis = {
 /** A statement or your own entry older than this does not confirm today's cash. */
 export const CASH_CONFIRM_DAYS = 7;
 
-export function cashBasis(a: { cashValue: number | null; asOf: string; sourceKind?: string | null; after: { amount: number; tradeDate: string }[]; statementGap: number | null; now: Date }): CashBasis {
+/** A cash balance you confirmed (model_runs kind "cash_confirmation"): it confirms worked-out cash when it matches and nothing was recorded after it. */
+export type CashConfirmation = { accountId: string; cash: number; at: string };
+
+export function cashBasis(a: { cashValue: number | null; asOf: string; sourceKind?: string | null; after: { amount: number; tradeDate: string }[]; statementGap: number | null; now: Date; confirmation?: CashConfirmation | null }): CashBasis {
   const stmt = a.cashValue ?? 0;
   const net = Math.round(a.after.reduce((x, t) => x + t.amount, 0) * 100) / 100;
   const last = a.after.reduce<string | null>((m, t) => (!m || t.tradeDate > m ? t.tradeDate : m), null);
@@ -139,6 +143,15 @@ export function cashBasis(a: { cashValue: number | null; asOf: string; sourceKin
   const detail = derived
     ? `${money(stmt)} on the ${d(a.asOf)} statement ${net >= 0 ? "plus" : "less"} ${money(net)} from ${a.after.length} recorded transaction${a.after.length === 1 ? "" : "s"} through ${last} = ${money(cash)}. Worked out, not confirmed: nothing since ${d(a.asOf)} shows the actual balance or buying power.`
     : kind === "manual" ? `${money(stmt)} as you entered it on ${d(a.asOf)}.` : `${money(stmt)} on the ${d(a.asOf)} statement, with no recorded activity since.`;
+  const c = a.confirmation;
+  if (derived && c) {
+    const cAge = Math.max(0, Math.floor((a.now.getTime() - Date.parse(c.at)) / 86_400_000));
+    const after = !!last && last > c.at.slice(0, 10);
+    if (Math.abs(c.cash - cash) < 0.005 && !after && cAge <= CASH_CONFIRM_DAYS && cash >= -0.005) {
+      return { statementCash: stmt, statementAsOf: a.asOf, sourceKind: kind, ledgerNet: net, ledgerRows: a.after.length, lastActivity: last, confirmed: true, status, detail: `${money(cash)}: ${money(stmt)} on the ${d(a.asOf)} statement ${net >= 0 ? "plus" : "less"} ${money(net)} from ${a.after.length} recorded transaction${a.after.length === 1 ? "" : "s"}, confirmed by you on ${d(c.at)}.`, checks: [] };
+    }
+    if (!after && Math.abs(c.cash - cash) >= 0.005) checks.push(`You confirmed ${money(c.cash)} on ${d(c.at)}, but the records give ${money(cash)}: a transaction may be missing.`);
+  }
   return { statementCash: stmt, statementAsOf: a.asOf, sourceKind: kind, ledgerNet: net, ledgerRows: a.after.length, lastActivity: last, confirmed: !derived && checks.length === 0, status, detail, checks };
 }
 
@@ -168,7 +181,7 @@ export type CashView = {
   savingsAsOf: string | null;
   protectedReserve: number; // policy floor, excluded from every percentage
   reserveShortfall: number; // reserve not covered by savings
-  deployableSavings: number; // savings above the reserve
+  deployableSavings: number; // savings you would move to the brokerage: the balance, capped at your transfer limit
   deployable: number; // brokerage + deployable savings (capital accounting; not all of it can buy anything today)
   /** Cash that can buy a chosen stock or ETF today, without any transfer: the self-directed brokerage cash. */
   spendableNow: number;
@@ -206,9 +219,9 @@ export type CompanyExposure = {
 
 export type PortfolioView = {
   total: number; // invested portfolio (holdings + cash inside investment accounts): the denominator for every weight and limit
-  /** Invested portfolio plus savings above the protected reserve: for capital planning and liquidity, never a limit denominator. */
+  /** Invested portfolio plus savings: for capital planning and liquidity, never a limit denominator. */
   investableCapital: number;
-  netWorthTracked: number; // investable capital + protected reserve
+  netWorthTracked: number; // invested portfolio + all savings
   cash: number; // cash inside investment accounts (savings excluded; see cashDetail)
   cashDetail: CashView;
   quality: DataQuality;
@@ -231,6 +244,9 @@ export function buildPortfolio(
   classifications: Record<string, string | null | undefined> = {},
   ledger: LedgerEntry[] = [],
   now: Date = new Date(),
+  cashConfirmations: CashConfirmation[] = [],
+  /** Your standing limit on moving savings to the brokerage (capital preference); null = no limit saved. */
+  maxTransfer: number | null = null,
 ): PortfolioView {
   const bySymbol = new Map<string, { quantity: number; stmtValue: number; stmtPrice: number | null; stmtQty: number; cost: number | null; costKnown: boolean; accounts: Set<string>; asOf: string }>();
   let brokerageCash = 0;
@@ -288,7 +304,8 @@ export function buildPortfolio(
       bySymbol.set(sym, cur);
     }
     const gap = s.totalValue === null ? null : round2(s.totalValue - stmtComputed);
-    acctCash.basis = cashBasis({ cashValue: s.cashValue, asOf: s.asOf, sourceKind: s.sourceKind, after, statementGap: gap, now });
+    const confirmation = cashConfirmations.filter((c) => c.accountId === s.accountId).sort((x, y) => y.at.localeCompare(x.at))[0] ?? null;
+    acctCash.basis = cashBasis({ cashValue: s.cashValue, asOf: s.asOf, sourceKind: s.sourceKind, after, statementGap: gap, now, confirmation });
     const knownThrough = after.reduce((m, t) => (t.tradeDate > m ? t.tradeDate : m), s.asOf.slice(0, 10));
     accounts.push({
       id: s.accountId, name: s.accountName, role: s.accountRole, asOf: s.asOf, sourceKind: s.sourceKind ?? "statement", value: round2(acctValue),
@@ -299,8 +316,11 @@ export function buildPortfolio(
     if (gap !== null && Math.abs(gap) > 1) missing.push(`${s.accountName}: statement total differs from its positions plus cash by ${gap > 0 ? "" : "-"}$${Math.abs(gap).toFixed(2)}`);
   }
 
-  const reserve = policy?.protectedSavingsFloor ?? 3000;
-  const deployableSavings = savings === null ? 0 : Math.max(0, savings - reserve);
+  // No protected reserve (2026-11-09 direction); the old policy row is kept on file but no longer applied.
+  const reserve = 0;
+  // Savings count as investable only up to the amount you said you would transfer ($10,000), never the whole balance.
+  const aboveReserve = savings === null ? 0 : Math.max(0, savings - reserve);
+  const deployableSavings = maxTransfer === null ? aboveReserve : Math.min(aboveReserve, Math.max(0, maxTransfer));
   const selfDirected = accountCash.filter((a) => a.use === "self_directed").sort((a, b) => b.cash - a.cash);
   const investingAccount = selfDirected[0] ? { id: selfDirected[0].id, name: selfDirected[0].name, cash: Math.max(0, selfDirected[0].cash), confirmed: selfDirected[0].basis?.confirmed ?? false, basis: selfDirected[0].basis } : null;
   const cashDetail: CashView = {
@@ -317,7 +337,7 @@ export function buildPortfolio(
   };
   // Savings stay outside the invested portfolio: entering a savings balance never changes a holding's weight.
   const cash = brokerageCash;
-  if (savings === null) missing.push("Savings balance not entered, so deployable savings and the protected reserve are not counted");
+  if (savings === null) missing.push("Savings balance not entered, so transferable savings are not counted");
 
   const rows = [...bySymbol.entries()].map(([symbol, h]) => {
     const q = quotes.get(symbol);
@@ -416,7 +436,7 @@ export function buildPortfolio(
   const reconciliation = reconciliationGaps({
     brokerAsOfs: brokerAccounts.map((a) => a.asOf),
     savingsEntered: savings !== null,
-    reserveApproved: policy?.audit?.protectedReserve.status === "approved",
+    reserveApproved: true,
     ledgerRows: ledger.length,
     positionsWithoutBasis: noBasis.length,
   });
@@ -426,7 +446,7 @@ export function buildPortfolio(
   return {
     total: round2(total),
     investableCapital: round2(total + deployableSavings),
-    netWorthTracked: round2(total + deployableSavings + Math.min(reserve, savings ?? 0)),
+    netWorthTracked: round2(total + (savings ?? 0)),
     cash: round2(cash),
     cashDetail,
     quality,

@@ -3,7 +3,7 @@
  * bands for researched ideas); the AI is only asked for a one-line "why it matters" when something new
  * fires, so a quiet day costs nothing. Every run is stored, so the Alerts page shows what was sent.
  */
-import { automatedAllowed } from "@/lib/costs/spend";
+import { automatedAllowed, loadSpend } from "@/lib/costs/spend";
 import Anthropic from "@anthropic-ai/sdk";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { Alert } from "@/lib/alerts/rules";
@@ -13,13 +13,22 @@ import { getQuotes } from "@/lib/market/quotes";
 import { buildWorkspace } from "@/lib/workspace-core";
 import { save } from "@/lib/intel/jobs";
 import { DAILY_CAP, spentToday } from "@/lib/intel/start";
-import { WATCH_VERSION, formatPush, ideaAlerts, selectNew } from "./watch";
+import { WATCH_VERSION } from "./watch";
+import { recordPaperDecisions } from "@/lib/eval/log";
+import { CATEGORY_LABEL, decisionAlerts, formatDecisionPush, selectDecisionAlerts, type DecisionAlert } from "./decisionAlerts";
 import { checkTrades, describeIdea, type Trade } from "@/lib/trades/job";
+import { DAILY_SUMMARY_AT_MIN, DEFAULT_ALERT_PREFS, bucketOf, formatMovePush, loadAlertPrefs, priceMoveAlerts, type AlertPrefs, type MoveAlert, type MoveItem } from "./priceMoves";
 
 export type WatchSettings = { topic: string | null; enabled: boolean };
 export type WatchRun = {
   version: string; at: string; trigger: "schedule" | "manual" | "test";
-  checked: number; sent: { key: string; alert: Alert }[]; summary: string | null;
+  checked: number; sent: { key: string; alert: Alert; decision?: DecisionAlert }[]; summary: string | null;
+  /** Price-movement alerts found this run: pushed now, queued for the daily summary, or covered by an urgent-risk alert. */
+  moves?: { alert: MoveAlert; covered: boolean; pushed: boolean; queued: boolean }[];
+  /** Investment-intelligence alerts held for the daily summary instead of pushed now. */
+  queued?: boolean;
+  /** This run sent the end-of-day summary. */
+  dailySummary?: boolean;
   pushed: boolean; error: string | null; costUsd: number; skipped?: string;
 };
 
@@ -74,7 +83,8 @@ async function summarize(items: Alert[], theses: Map<string, string>): Promise<{
  */
 export async function runWatch(db: SupabaseClient, origin: string, opts: { force?: boolean; now?: Date } = {}): Promise<WatchRun | { skipped: string }> {
   const now = opts.now ?? new Date();
-  if (!opts.force && !isMarketOpen(now)) return { skipped: "market closed" };
+  // One closing check is allowed up to 4:10 PM ET, so the day's final moves and the daily summary are not missed.
+  if (!opts.force && !isMarketOpen(now) && !isClosingCheck(now)) return { skipped: "market closed" };
   // Paper trades are tracked whether or not phone alerts are on.
   const closed = await checkTrades(db, now).catch((e) => { console.error(`watch: trade check failed: ${(e as Error).message}`); return []; });
   const settings = await watchSettings(db);
@@ -89,12 +99,58 @@ export async function runWatch(db: SupabaseClient, origin: string, opts: { force
     ideas.length ? getQuotes(ideas) : Promise.resolve(new Map()),
     watchRuns(db),
   ]);
-  const all = [...ws.alerts, ...events.alerts, ...ideaAlerts(ws.research, held, ideaQuotes)];
-  const sentKeys = new Set(past.flatMap((r) => (r.pushed ? r.sent.map((s) => s.key) : [])));
-  const fresh = selectNew(all, sentKeys, etDay(now));
+  // Only what matters to a decision is pushed (decisionAlerts); plain moves and reminders wait for the brief.
+  const quotes = new Map<string, { price: number; prevClose: number | null; asOf: string }>();
+  for (const [s, q] of ws.quotes ?? new Map()) quotes.set(s, q);
+  for (const [s, q] of ideaQuotes as Map<string, { price: number; prevClose: number | null; asOf: string }>) quotes.set(s, q);
+  const all = decisionAlerts({
+    research: ws.research,
+    holdings: ws.portfolio.holdings.map((h) => ({ symbol: h.symbol, price: h.price, priceSource: h.priceSource, dayPct: h.dayPct, weight: h.weight })),
+    quotes, headroom: new Map(ws.portfolio.exposures.filter((e) => e.hasLimit).map((e) => [e.symbol, e.headroomDollars])),
+    marketDayPct: ws.benchmarks?.[0]?.dayPct ?? null, events: events.alerts, now,
+  });
+  const prefs = await loadAlertPrefs(db).catch(() => DEFAULT_ALERT_PREFS);
+  const lastSent = new Map<string, string>();
+  for (const r of [...past].reverse()) if (r.pushed || r.queued) for (const s of r.sent) if (s.decision) lastSent.set(s.decision.id, r.at);
+  const freshAlerts = prefs.intelligence ? selectDecisionAlerts(all, lastSent, now) : [];
+  const fresh = freshAlerts.map((d) => ({ key: d.id, decision: d, alert: toAlert(d) }));
 
-  const run: WatchRun = { version: WATCH_VERSION, at: now.toISOString(), trigger: opts.force ? "manual" : "schedule", checked: all.length, sent: fresh, summary: null, pushed: false, error: null, costUsd: 0 };
-  if (fresh.length) {
+  // Price-movement alerts: code only, independent of research, one per threshold crossing per session.
+  const today = etDay(now);
+  const sentToday = new Map<string, number>();
+  for (const r of past) if (r.at && etDay(new Date(r.at)) === today) for (const m of r.moves ?? []) {
+    const k = `${m.alert.symbol}|${m.alert.dir}`;
+    sentToday.set(k, Math.max(sentToday.get(k) ?? 0, m.alert.level));
+  }
+  const moveItems: MoveItem[] = [
+    ...ws.portfolio.holdings.map((h) => ({ symbol: h.symbol, dayPct: h.dayPct, price: h.price, quoteAt: h.priceSource === "quote" ? quotes.get(h.symbol)?.asOf ?? null : null, held: true, bucket: h.bucket })),
+    ...ideas.flatMap((s) => {
+      const q = quotes.get(s);
+      if (!q?.prevClose) return [];
+      const cls = ws.research.find((r) => r.symbol === s)?.current?.parsed.classification ?? null;
+      return [{ symbol: s, dayPct: q.price / q.prevClose - 1, price: q.price, quoteAt: q.asOf, held: false, bucket: bucketOf(s, cls) }];
+    }),
+  ];
+  const moveAlerts = prefs.priceMoves ? priceMoveAlerts({ items: moveItems, prefs, marketDayPct: ws.benchmarks?.[0]?.dayPct ?? null, sentToday, now }) : [];
+  // A fall already pushed as an urgent risk is not sent twice; it still counts as alerted for the day.
+  const urgent = new Set(freshAlerts.filter((d) => d.category === "urgent_risk").map((d) => d.symbol));
+  const moves = moveAlerts.map((m) => ({ alert: m, covered: urgent.has(m.symbol) && m.dir === "down", pushed: false, queued: false }));
+
+  const run: WatchRun = { version: WATCH_VERSION, at: now.toISOString(), trigger: opts.force ? "manual" : "schedule", checked: all.length, sent: fresh, summary: null, pushed: false, error: null, costUsd: 0, moves };
+  const toPushMoves = moves.filter((m) => !m.covered);
+  if (toPushMoves.length) {
+    if (prefs.priceDelivery === "daily") toPushMoves.forEach((m) => { m.queued = true; });
+    else {
+      const msg = formatMovePush(toPushMoves.map((m) => m.alert));
+      const click = toPushMoves.length === 1 ? `${origin}${toPushMoves[0].alert.href}` : `${origin}/alerts`;
+      try { await pushNtfy(settings.topic, { ...msg, click }); toPushMoves.forEach((m) => { m.pushed = true; }); } catch (e) { run.error = (e as Error).message; }
+    }
+  }
+  if (fresh.length && prefs.intelligenceDelivery === "daily") {
+    // Held for the end-of-day summary; counted as sent so the repeat windows still apply.
+    run.queued = true;
+    await recordPaperDecisions(db, freshAlerts, { vooPrice: quotes.get("VOO")?.price ?? null, now }).catch((e) => console.error(`watch: paper decision failed: ${(e as Error).message}`));
+  } else if (fresh.length) {
     const items = fresh.map((f) => f.alert);
     const spent = await spentToday(db, now);
     // The one-line summary is the only paid part; without budget room the alert is still sent, unsummarized.
@@ -103,10 +159,14 @@ export async function runWatch(db: SupabaseClient, origin: string, opts: { force
       const s = await summarize(items, theses).catch((e) => { console.error(`watch: summary failed: ${(e as Error).message}`); return { text: null, costUsd: 0 }; });
       run.summary = s.text; run.costUsd = s.costUsd;
     }
-    const msg = formatPush(items, run.summary);
+    const msg = formatDecisionPush(freshAlerts, run.summary);
     const click = items.length === 1 ? `${origin}${items[0].href}` : `${origin}/alerts`;
     try { await pushNtfy(settings.topic, { ...msg, click }); run.pushed = true; } catch (e) { run.error = (e as Error).message; }
+    // Evaluation log: a paper decision whenever an action plan's entry (or trim) criteria are met.
+    await recordPaperDecisions(db, freshAlerts, { vooPrice: quotes.get("VOO")?.price ?? null, now }).catch((e) => console.error(`watch: paper decision failed: ${(e as Error).message}`));
   }
+  await dailySummary(run, past, prefs, settings.topic, origin, now).catch((e) => console.error(`watch: daily summary failed: ${(e as Error).message}`));
+  await warnCost(db, settings.topic, origin, now).catch((e) => console.error(`watch: cost warning failed: ${(e as Error).message}`));
   // Quiet runs are stored too (they are small), so the page can say when the last check ran.
   await save(db, "watch_run", WATCH_VERSION, { day: etDay(now), force: !!opts.force }, run);
   return run;
@@ -129,4 +189,70 @@ export async function pushTradeNews(topic: string, origin: string, trades: Trade
     const body = what === "new" ? `${describeIdea(t.idea)}. ${t.idea.whyNow}`.slice(0, 600) : `${describeIdea(t.idea)}. ${r!.edgePct !== null ? `${r!.edgePct >= 0 ? "Beat" : "Trailed"} VOO by ${pct(Math.abs(r!.edgePct)).replace("+", "")}.` : ""}`;
     await pushNtfy(topic, { title, body, priority: what === "new" ? "high" : "default", click: `${origin}/trades` });
   }
+}
+
+/** The Alerts page's shape for a pushed decision alert (it lists what was sent). */
+function toAlert(d: DecisionAlert): Alert {
+  return {
+    id: d.id, severity: d.priority === "high" ? "high" : "medium", symbol: d.symbol,
+    kind: d.category === "thesis_change" ? "event" : d.category === "urgent_risk" ? "big_move" : "price_zone",
+    title: `${CATEGORY_LABEL[d.category]}: ${d.title}`,
+    detail: `${d.changed} Why it matters: ${d.why} Action: ${d.action} Uncertain: ${d.uncertain} Verified: ${d.verified}.`,
+    href: d.href,
+  };
+}
+
+/**
+ * During the 30-day test: one phone warning when AI spending reaches the warning level ($15), and one
+ * when it reaches the ceiling ($20, after which automated paid jobs stop). Each is sent once per test.
+ */
+export async function warnCost(db: SupabaseClient, topic: string, origin: string, now: Date): Promise<"warn" | "over" | null> {
+  const s = await loadSpend(db, now);
+  const e = s.evaluation;
+  if (!e?.active || !e.warn) return null;
+  const level = e.over ? "over" : "warn";
+  const { data } = await db.from("model_runs").select("id").eq("kind", "cost_warning").eq("inputs->>start", e.start).eq("inputs->>level", level).limit(1);
+  if ((data ?? []).length) return null;
+  const top = [...e.byCategory].sort((a, b) => b.cost - a.cost).filter((c) => c.cost > 0).slice(0, 2).map((c) => `${c.label} $${c.cost.toFixed(2)}`).join(", ");
+  const body = level === "over"
+    ? `$${e.spent.toFixed(2)} spent on AI in the 30-day test (day ${e.day}), reaching the $${e.ceiling} ceiling. Scheduled paid jobs (briefing, morning answer, plan) now stop and say so; price and filing checks and alerts continue at no cost. Largest: ${top}.`
+    : `$${e.spent.toFixed(2)} of the $${e.ceiling} test ceiling spent (day ${e.day}); at this pace about $${e.projected.toFixed(2)} by day 30. Largest: ${top}. Scheduled paid jobs stop at $${e.ceiling}.`;
+  await pushNtfy(topic, { title: level === "over" ? "AI cost ceiling reached" : `AI cost warning: $${e.spent.toFixed(2)} of $${e.ceiling}`, body, priority: "default", click: `${origin}/costs` });
+  await save(db, "cost_warning", WATCH_VERSION, { start: e.start, level }, { at: now.toISOString(), spent: e.spent, ceiling: e.ceiling, level });
+  return level;
+}
+
+/**
+ * The end-of-day summary for alert types you set to "daily summary": sent once, with the first check at or
+ * after 3:45 PM ET, listing what was held back today (price moves and investment-intelligence alerts).
+ */
+async function dailySummary(run: WatchRun, past: WatchRun[], prefs: AlertPrefs, topic: string, origin: string, now: Date): Promise<void> {
+  if (prefs.priceDelivery !== "daily" && prefs.intelligenceDelivery !== "daily") return;
+  const parts = new Intl.DateTimeFormat("en-US", { timeZone: "America/New_York", hour: "numeric", minute: "numeric", hourCycle: "h23" }).formatToParts(now);
+  const minutes = Number(parts.find((p) => p.type === "hour")?.value) * 60 + Number(parts.find((p) => p.type === "minute")?.value);
+  if (minutes < DAILY_SUMMARY_AT_MIN) return;
+  const day = etDay(now);
+  const todays = [...past.filter((r) => r.at && etDay(new Date(r.at)) === day), run];
+  if (todays.some((r) => r.dailySummary)) return;
+  const moves = todays.flatMap((r) => (r.moves ?? []).filter((m) => m.queued).map((m) => m.alert));
+  // Only the highest level per symbol and direction.
+  const top = new Map<string, MoveAlert>();
+  for (const m of moves) { const k = `${m.symbol}|${m.dir}`; if (!top.has(k) || top.get(k)!.level < m.level) top.set(k, m); }
+  const intel = todays.filter((r) => r.queued).flatMap((r) => r.sent.map((s) => s.decision).filter((d): d is DecisionAlert => !!d));
+  if (!top.size && !intel.length) return;
+  if (top.size) await pushNtfy(topic, { ...formatMovePush([...top.values()], true), click: `${origin}/alerts` });
+  if (intel.length) {
+    const msg = formatDecisionPush(intel);
+    await pushNtfy(topic, { ...msg, title: `Today's investment alerts: ${msg.title}`, click: `${origin}/alerts` });
+  }
+  run.dailySummary = true;
+}
+
+/** Weekdays 4:00-4:10 PM ET: the closing check. */
+export function isClosingCheck(now: Date): boolean {
+  const parts = new Intl.DateTimeFormat("en-US", { timeZone: "America/New_York", weekday: "short", hour: "numeric", minute: "numeric", hourCycle: "h23" }).formatToParts(now);
+  const get = (t: string) => parts.find((p) => p.type === t)?.value ?? "";
+  if (get("weekday") === "Sat" || get("weekday") === "Sun") return false;
+  const m = Number(get("hour")) * 60 + Number(get("minute"));
+  return m >= 16 * 60 && m < 16 * 60 + 10;
 }

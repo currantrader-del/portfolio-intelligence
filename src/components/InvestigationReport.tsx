@@ -36,13 +36,14 @@ type Ev = { findings?: Finding[]; questions?: Question[]; conflicts?: Conflict[]
 const typeOf = (v: InvVersion) => (v.conclusion.research_type === "material_event_refresh" ? "Material-event refresh" : "Full investigation");
 
 /** Completeness and approval pills for an investigation. */
-export function InvestigationPills({ v }: { v: InvVersion }) {
+export function InvestigationPills({ v, usedId }: { v: InvVersion; usedId?: string | null }) {
   const state = String(v.conclusion.review_state ?? "");
+  const used = v.is_current || (!!usedId && v.id === usedId);
   const completion = v.conclusion.completion as { kind?: string } | undefined;
   return (
     <>
       <Pill small tone={v.completeness === "complete" ? "gain" : "warn"}>{v.completeness === "complete" ? "Complete" : completion?.kind === "material_uncertainty" ? "Incomplete: material uncertainty" : "Incomplete"}</Pill>
-      {v.is_current ? <Pill small tone={state === "adopted_provisional" ? "warn" : "gain"} dot="solid">{state === "adopted_provisional" ? "In use, provisional" : "In use"}</Pill> : state === "awaiting_approval" ? <Pill small tone="copper">Awaiting your decision</Pill> : state === "set_aside" ? <Pill small>Set aside</Pill> : null}
+      {used && usedId !== undefined && v.id !== usedId ? null : used ? <Pill small tone={v.completeness === "complete" && state !== "adopted_provisional" ? "gain" : "warn"} dot="solid">{v.completeness === "complete" && state !== "adopted_provisional" ? "In use" : "In use, open questions"}</Pill> : state === "set_aside" ? <Pill small>Set aside</Pill> : null}
     </>
   );
 }
@@ -52,7 +53,8 @@ export function InvestigationPills({ v }: { v: InvVersion }) {
  * items) and, while it waits for you, the approval controls. `bare` renders it without its card, for use
  * inside a collapsible section. The evidence is in InvestigationEvidence.
  */
-export function InvestigationConclusion({ symbol, v, inUse, validation, bare }: { symbol: string; v: InvVersion; inUse?: { research_as_of: string; label: string } | null; validation?: ValidationReport | null; bare?: boolean }) {
+export function InvestigationConclusion({ symbol, v, inUse, validation, bare, usedId }: { symbol: string; v: InvVersion; inUse?: { research_as_of: string; label: string } | null; validation?: ValidationReport | null; bare?: boolean; usedId?: string | null }) {
+  const used = v.is_current || (!!usedId && v.id === usedId);
   const c = v.conclusion;
   const sm = c.investment_summary as InvestmentSummary | null | undefined;
   const completion = c.completion as { complete: boolean; reasons: string[]; kind?: string } | undefined;
@@ -111,7 +113,7 @@ export function InvestigationConclusion({ symbol, v, inUse, validation, bare }: 
       {state === "adopted_provisional" && v.is_current && (
         <p className="t-sm rounded-[12px] bg-warn-bg text-warn-ink px-3 py-2">Approved provisionally by you with {adoption?.open_items?.length ?? completion?.reasons.length ?? 0} open item{(adoption?.open_items?.length ?? 0) === 1 ? "" : "s"}. The app suggests no new money for {symbol} until a refresh resolves them.</p>
       )}
-      {state === "awaiting_approval" && !v.is_current && (
+      {state === "awaiting_approval" && !used && usedId === undefined && (
         <div className="flex flex-col gap-2 rounded-[12px] border border-line px-3 py-2.5">
           <span className="text-ink font-semibold t-sm">Your decision</span>
           <span className="t-xs">Nothing changes until you choose. Approving makes this the research your decisions use; {inUse ? `the research in use now (${shortDate(inUse.research_as_of)}, ${inUse.label}) stays on file unchanged` : "there is no research in use now"}. Keeping your current research leaves this investigation on file, marked as set aside.</span>

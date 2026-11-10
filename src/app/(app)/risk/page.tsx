@@ -37,7 +37,7 @@ export default async function RiskPage({ searchParams }: { searchParams: Promise
   const recorded = daily.filter((d) => d.investable > 0);
   const conflicts = new Set(ws.policy?.audit?.conflicts.map((x) => x.subject) ?? []);
   const exps = [...p.exposures].sort((a, b) => b.total - a.total);
-  // Same dollars, larger denominator: savings above the reserve hold no stocks.
+  // Same dollars, larger denominator: savings hold no stocks.
   const share = p.investableCapital ? p.total / p.investableCapital : 1;
   const top = exps[0];
   const others = exps.slice(1, 7);
@@ -96,7 +96,7 @@ export default async function RiskPage({ searchParams }: { searchParams: Promise
                 </details>
               ))}
             </div>
-            <span className="t-xs">Effect on your invested portfolio of {usd(p.total)} (savings outside the brokerage are not included). Cash and the protected reserve are never shocked. Based on past behaviour; real moves can be larger.</span>
+            <span className="t-xs">Effect on your invested portfolio of {usd(p.total)} (savings outside the brokerage are not included). Cash is never shocked. Based on past behaviour; real moves can be larger.</span>
           </Card>
         </div>
 
@@ -120,7 +120,7 @@ export default async function RiskPage({ searchParams }: { searchParams: Promise
             })}
             <div className="divider" />
             <div className="flex items-center justify-between gap-3"><span className="t-sm">Top 5 companies</span><span className="t-sm num text-ink font-semibold">{pctStr(risk.concentration.topFive, 0)} of invested · {pctStr(risk.concentration.topFive * share, 0)} of all investable</span></div>
-            <span className="t-xs">Two denominators: your invested portfolio ({usd(p.total)}, which every limit applies to) and total investable capital ({usd(p.investableCapital)}, adding savings above the reserve). Each company is counted once: direct plus its share inside your ETFs. Top 5 includes your share of companies inside ETFs (approximate). Across holdings, the mix is like about {risk.concentration.effectiveN.toFixed(0)} equal positions, counting each ETF as one. Conflicted limits use the stricter source until you choose.</span>
+            <span className="t-xs">Two denominators: your invested portfolio ({usd(p.total)}, which every limit applies to) and total investable capital ({usd(p.investableCapital)}, adding savings). Each company is counted once: direct plus its share inside your ETFs. Top 5 includes your share of companies inside ETFs (approximate). Across holdings, the mix is like about {risk.concentration.effectiveN.toFixed(0)} equal positions, counting each ETF as one. Conflicted limits use the stricter source until you choose.</span>
           </Card>
 
           <Card flush>

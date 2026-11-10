@@ -33,6 +33,9 @@ export default async function TodayPage() {
   const etDay = (d: Date) => d.toLocaleDateString("en-CA", { timeZone: "America/New_York" });
   const morning = mrow && mout?.answer && !mout.error ? { answer: mout.answer, at: mrow.computed_at as string, ms: mout.ms ?? 0, costUsd: mout.costUsd ?? 0, today: etDay(new Date(mrow.computed_at)) === etDay(ws.now) } : null;
   // A saved briefing stays as written; it is flagged when the policy, holdings, cash or research it used changed since.
+  // What this morning's scheduled run could not do (budget, ceiling or a failed step), said plainly rather than left out.
+  const { data: runRow } = await db.from("model_runs").select("computed_at, outputs").eq("kind", "morning_run").order("computed_at", { ascending: false }).limit(1).maybeSingle();
+  const morningSkipped = runRow && etDay(new Date(runRow.computed_at)) === etDay(ws.now) ? ((runRow.outputs as { skipped?: string[] }).skipped ?? []).filter((x) => !/^trade_scan paused/.test(x)) : [];
   const morningCheck = morning ? outdatedVerdict({ writtenAt: morning.at, events: await loadContextEvents(db, morning.at).catch(() => []), text: morning.answer, currentReserve: p.cashDetail.protectedReserve }) : null;
 
   const spy = ws.benchmarks.find((b) => b.symbol === "SPY")?.dayPct ?? null;
@@ -73,13 +76,14 @@ export default async function TodayPage() {
 
       <Card labelledBy="mb-h" className="!gap-2">
         <CardHead id="mb-h" cap="Morning briefing" right={<MorningRunner label={morningCheck?.outdated ? "Rewrite with today's facts" : morning ? "Write a new one" : "Write it now"} />} />
+        {morningSkipped.length > 0 && <p className="t-xs warn">Not done this morning: {morningSkipped.map((x) => x.replace(/^(\w+) (skipped: |failed: )?/, (_m, k: string, how?: string) => `${({ market_briefing: "market briefing", assistant_answer: "this summary", morning_answer: "this summary", portfolio_plan: "weekly plan", trade_scan: "trade scan" } as Record<string, string>)[k] ?? k} ${how?.startsWith("failed") ? "failed: " : "skipped, "}`)).join("; ")}. <Link href="/costs">Costs</Link></p>}
         {morning ? (
           <>
             {morningCheck && <OutdatedNotice v={morningCheck} what="briefing" />}
             <div className={morningCheck?.outdated ? "opacity-70" : undefined}><AnswerView text={morning.answer} /></div>
             <span className="t-xs">Written {new Intl.DateTimeFormat("en-US", { hour: "numeric", minute: "2-digit", timeZone: "America/New_York" }).format(new Date(morning.at))} ET{morning.today ? "" : ` on ${shortDate(morning.at)}`} · {Math.round(morning.ms / 1000)}s · ${morning.costUsd.toFixed(2)} · from your portfolio, policy, research and that day&apos;s market briefing · AI summary: facts are checked against sources on Markets, not here</span>
           </>
-        ) : <p className="t-sm">Written automatically at 9:00 AM ET on weekdays, after the 8:30 economic data: what happened, what it means for your holdings, and what (if anything) to do.</p>}
+        ) : <p className="t-sm">Written automatically at 9:00 AM ET on weekdays, after the 8:30 economic data. It answers six questions, key recommendation first: what happened in the market, whether anything materially affected your investments, whether any action is needed, which researched stocks are approaching entry, which new opportunities are worth investigating, and what is coming up.</p>}
       </Card>
 
       <MarketsTeaser />

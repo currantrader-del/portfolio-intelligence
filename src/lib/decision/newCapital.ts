@@ -26,7 +26,7 @@
  *
  * EXECUTION READINESS (needed before a dollar amount is "ready to execute"):
  *  - the money is verified: planned money that has not arrived is a plan, never an order; cash already held is
- *    capped at what is deployable after the protected reserve;
+ *    capped at what is deployable;
  *  - holdings and balances are verified: a statement, sync or your own check within a week. Trades recorded
  *    since an older statement are not a reconciliation;
  *  - no unresolved material development (results, financing, material 8-K) for any held or receiving stock.
@@ -54,7 +54,7 @@ export type MoneySource = "planned" | "deposited" | "existing";
 /** Holdings older than this are not reliable enough to size a purchase. */
 export const HOLDINGS_FRESH_DAYS = 7;
 
-export type OptionLabel = "Candidate" | "Valid option" | "Refresh required" | "Research needed" | "Research not approved" | "No limit set" | "At limit" | "Not ahead of VOO" | "Research says hold" | "Condition not met" | "Limit not approved" | "Trim review";
+export type OptionLabel = "Candidate" | "Valid option" | "Refresh required" | "Research needed" | "Preliminary research" | "No limit set" | "At limit" | "Not ahead of VOO" | "Research says hold" | "Condition not met" | "Limit not approved" | "Trim review";
 
 export type Verdict = { ok: boolean; detail: string };
 
@@ -149,7 +149,7 @@ export function newCapital(args: {
   consider?: string[];
   /** Transfers between your accounts that you recorded as planned (savings to brokerage, for example). */
   transfers?: PlannedTransfer[];
-  /** Savings you could move under your standing transfer limit (already net of the reserve and planned transfers).
+  /** Savings you could move under your standing transfer limit (already net of planned transfers).
    *  Only used with source "existing": it can fund the purchase only if you choose to transfer it. */
   authorizedSavings?: number;
 }): NewCapitalResult {
@@ -157,7 +157,7 @@ export function newCapital(args: {
   const source: MoneySource = !args.source || args.source === "new" ? "planned" : args.source;
   const requested = args.amount;
   // ---- Money by account: only the self-directed brokerage account can buy a chosen stock or ETF. Savings
-  //      above the reserve can fund it only through a transfer you planned; Acorns and Roth cash stay where they are. ----
+  //      can fund it only through a transfer you planned; Acorns and Roth cash stay where they are. ----
   const cd = portfolio.cashDetail;
   const inv = cd.investingAccount ?? null;
   const invName = inv?.name ?? "your brokerage account";
@@ -168,7 +168,7 @@ export function newCapital(args: {
   const plannedIn = Math.round(pendingIn.reduce((a, t) => a + t.amount, 0) * 100) / 100;
   const elsewhere = (cd.accounts ?? []).filter((a) => !a.canBuyChosen && a.use !== "savings" && a.cash >= 0.5);
   const elsewhereNote = elsewhere.length ? ` Cash in ${elsewhere.map((a) => `${a.name} (${fmt$(a.cash)})`).join(" and ")} stays in ${elsewhere.length > 1 ? "those accounts" : "that account"} and is not counted.` : "";
-  const reserveNote = `The ${fmt$(cd.protectedReserve)} savings reserve is never used.`;
+  const reserveNote = "";
   const authorized = source === "existing" ? Math.max(0, Math.round((args.authorizedSavings ?? 0) * 100) / 100) : 0;
   const deployable = spendable + plannedIn + authorized;
   const amount = source === "existing" ? Math.min(requested, Math.floor(deployable * 100) / 100) : requested;
@@ -177,7 +177,7 @@ export function newCapital(args: {
   const recordedCash = Math.round(spendable * 100) / 100;
   const depositShows = source === "deposited" && recordedCash + 0.5 >= amount;
   const fromTransfer = source === "existing" ? Math.max(0, Math.round((amount - spendable) * 100) / 100) : 0;
-  const savingsHint = cd.deployableSavings >= 1 && !plannedIn ? ` Savings hold ${fmt$(cd.deployableSavings)} above the reserve; that can be used only after you plan a transfer to ${invName}.` : "";
+  const savingsHint = cd.deployableSavings >= 1 && !plannedIn ? ` Savings hold ${fmt$(cd.deployableSavings)}; that can be used only after you plan a transfer to ${invName}.` : "";
   const funds: NewCapitalResult["funds"] = source === "planned"
     ? { requested, used: amount, verified: false, detail: `${fmt$(requested)} of planned new money for ${invName}, not yet deposited. This is what to do once it arrives, not an order to place now` }
     : source === "deposited"
@@ -231,12 +231,11 @@ export function newCapital(args: {
     else if (r.conflict) { fresh = { ok: false, detail: "Research records conflict and none is marked current" }; toVerify.push(`${symbol}: resolve which research record is current`); }
     else if (!r.authoritative) {
       const what = r.authority === "preliminary_screen" ? "a preliminary screen" : r.authority === "historical" ? "older research" : "research";
-      fresh = { ok: false, detail: `No approved research: the record on file is ${what} you have not approved, so it is context only` };
-      toVerify.push(r.pendingReview ? `${symbol}: review the finished investigation (${r.pendingReview.research_as_of}) and approve it or set it aside` : `${symbol}: a full investigation you approve before research-based recommendations`);
+      fresh = { ok: false, detail: `Preliminary research only: the record on file is ${what}, enough for Hold or No Add, not for new money` };
+      toVerify.push(`${symbol}: a targeted investigation before research-based recommendations`);
     }
-    else if (r.approval === "provisional") { fresh = { ok: false, detail: "The research in use was approved provisionally, with material questions still open" }; toVerify.push(`${symbol}: resolve the open items in the provisionally approved research (a refresh) before new money`); }
+    else if (r.approval === "provisional") { fresh = { ok: false, detail: "The completed investigation still has material questions open" }; toVerify.push(`${symbol}: a targeted update to resolve the open questions before new money`); }
     else if (v!.completeness !== "complete") { fresh = { ok: false, detail: `Research is ${v!.completeness}` }; toVerify.push(`${symbol}: complete the missing research phases`); }
-    else if (r.pendingReview) { fresh = { ok: false, detail: `A newer investigation (${r.pendingReview.research_as_of}) is waiting for your decision; it is not used until you approve it` }; toVerify.push(`${symbol}: approve or set aside the newer investigation`); }
     else {
       const st = refreshState({ asOf: v!.research_as_of, pc: v!.parsed, price, filings: args.filings?.get(symbol) ?? null });
       refreshFirst = st.status === "refresh";
@@ -318,7 +317,7 @@ export function newCapital(args: {
     }
 
     let label: OptionLabel = "Candidate";
-    if (!fresh.ok) label = !v || r?.conflict ? "Research needed" : r && !r.authoritative ? "Research not approved" : "Refresh required";
+    if (!fresh.ok) label = !v || r?.conflict ? "Research needed" : r && !r.authoritative ? "Preliminary research" : "Refresh required";
     else if (!cl.hasLimit) label = "No limit set";
     else if (headroom <= 0) label = "At limit";
     else if (stance?.kind === "conditional") label = "Condition not met";
@@ -345,7 +344,7 @@ export function newCapital(args: {
       const asOf = v.research_as_of ?? "an unknown date";
       const hint = assessment ? ` At today's price the research's own scenarios model ${(assessment.expected * 100).toFixed(1)}% a year (${assessment.judgment} vs VOO${assessment.comparison === "approximate" ? ", approximate" : ""}); that is a reason to reassess, not a new conclusion.` : "";
       const current = status === "not_approved"
-        ? `No approved research. The ${asOf} record ("${action}") is ${r?.authority === "preliminary_screen" ? "a preliminary screen" : "not approved"}, so it is context only, not a recommendation. Until you approve research: hold what you own, no new money.`
+        ? `Preliminary research only. The ${asOf} record ("${action}") is ${r?.authority === "preliminary_screen" ? "a preliminary screen" : "older research"}, enough to hold what you own but not to add. Until a targeted investigation is done: hold, no new money.`
         : status === "current"
         ? `The ${asOf} conclusion still applies: nothing material has changed. ${stance?.kind === "add" ? "Add" : stance?.kind === "conditional" ? `Add only once its condition is met (${stance.condition})` : stance?.kind === "trim" ? "Review a trim" : "Hold; no new money"}.`
         : status === "unverified"
@@ -441,7 +440,7 @@ export function newCapital(args: {
   const cash: Option = {
     kind: "cash", symbol: "CASH", label: "Valid option", price: null, priceSource: null, expectedReturn: null, headroomDollars: null,
     weightNow: portfolio.total ? portfolio.cash / portfolio.total : 0, maxWeight: null, limitStatus: null, eligible: true,
-    notes: ["Policy: new cash does not have to be invested immediately", `The $${portfolio.cashDetail.protectedReserve.toLocaleString()} protected reserve is excluded from sizing`,
+    notes: ["Policy: new cash does not have to be invested immediately", "Brokerage cash and transferable savings are shown separately",
       yields.y2 ? `Risk-free alternative: 2-year Treasury ${yields.y2.value.toFixed(2)}% (FRED, ${yields.y2.date}); your savings yield is not entered` : "Treasury yields not loaded; your savings yield is not entered",
       ...(cashImp ? [`Whole-portfolio effect: ${cashImp.summary}`] : [])],
     researchAction: null, zoneAction: null, toVerify: [],
@@ -487,14 +486,14 @@ export function newCapital(args: {
   const refresh = stockOptions.filter((o) => o.label === "Refresh required" || o.label === "Research needed");
   // Unapproved research does not block a diversified purchase (it does not depend on any company's thesis),
   // but it does keep every stock out of the new money, and that is said plainly.
-  const unapproved = [...stockOptions, ...newOptions].filter((o) => o.label === "Research not approved").map((o) => o.symbol);
-  if (unapproved.length) warnings.push(`No approved research for ${unapproved.join(", ")}: their records are context only, so none of them receives new money until you approve an investigation.`);
+  const unapproved = [...stockOptions, ...newOptions].filter((o) => o.label === "Preliminary research").map((o) => o.symbol);
+  if (unapproved.length) warnings.push(`Only preliminary research for ${unapproved.join(", ")}: enough to hold, so none of them receives new money until a targeted investigation is done.`);
   const receivingStocks = allocations.map((x) => x.symbol).filter((s) => ![...etfOptions].some((e) => e.symbol === s));
   const gates: Gate[] = [
     { key: "funds", label: "The money is verified, in the account that buys", ok: source === "planned" ? false : source === "deposited" ? depositShows : funds.verified && cd.savings !== null,
       detail: source === "planned" ? `${funds.detail}. Choose "New, already deposited" once it has arrived`
         : source === "deposited" ? funds.detail
-        : cd.savings === null ? "Enter your savings balance so the protected reserve is known"
+        : cd.savings === null ? "Enter your savings balance so transferable capital is known"
         : amount < 1 ? `No cash in ${invName} to invest.${savingsHint}` : funds.detail },
     { key: "holdings", label: "Holdings and balances are verified", ok: confirmed || (!unverified.length && !gaps.length),
       detail: confirmed ? `You confirmed today that the holdings and balances shown match your broker accounts${portfolio.quality.reconciliation.complete ? "" : ` (still open, not blocking: ${portfolio.quality.reconciliation.gaps.join("; ")})`}`
@@ -554,7 +553,7 @@ export function newCapital(args: {
       alternatives: ALTERNATIVES, riskFree10y: riskFreeFor(10, yields),
       items: [
         funds.detail,
-        `Investable capital $${Math.round(portfolio.total).toLocaleString()} (${portfolio.quality.status}); the $${portfolio.cashDetail.protectedReserve.toLocaleString()} protected reserve is excluded`,
+        `Investable capital $${Math.round(portfolio.total).toLocaleString()} (${portfolio.quality.status})`,
         `Prices: ${portfolio.pricedLive} of ${portfolio.holdings.length} holdings from delayed quotes, the rest from statements`,
         "Fund look-through from each fund's dated published holdings and sector/country splits; industry and theme figures are lower bounds",
         "Exposure levels: those you approved, else the app's drafted proposals (labelled proposed)",
@@ -565,7 +564,7 @@ export function newCapital(args: {
   };
 }
 
-const LABEL_ORDER: OptionLabel[] = ["Candidate", "Limit not approved", "Condition not met", "Refresh required", "Research not approved", "Research says hold", "Not ahead of VOO", "At limit", "No limit set", "Research needed", "Valid option", "Trim review"];
+const LABEL_ORDER: OptionLabel[] = ["Candidate", "Limit not approved", "Condition not met", "Refresh required", "Preliminary research", "Research says hold", "Not ahead of VOO", "At limit", "No limit set", "Research needed", "Valid option", "Trim review"];
 const rankLabel = (l: OptionLabel) => LABEL_ORDER.indexOf(l);
 
 export function pct(n: number, digits = 1) {

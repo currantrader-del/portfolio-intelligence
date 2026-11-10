@@ -79,7 +79,7 @@ export default async function ExposurePage({ searchParams }: { searchParams: Pro
               );
             })}
           </ul>
-          <p className="t-xs">Invested portfolio {usd(r.investable)} (savings and the protected reserve excluded; total investable capital incl. savings above the reserve is {usd(ws.portfolio.investableCapital)}); stocks {usd(r.equity)}. A range means the funds don&apos;t publish enough detail to pin it down; the low end counts only companies identified. Fund data as of {oldest?.source.asOf ?? "—"} or later{stale.length ? `; ${stale.length} source${stale.length > 1 ? "s are" : " is"} stale` : ""}.</p>
+          <p className="t-xs">Invested portfolio {usd(r.investable)} (savings excluded; total investable capital incl. savings is {usd(ws.portfolio.investableCapital)}); stocks {usd(r.equity)}. A range means the funds don&apos;t publish enough detail to pin it down; the low end counts only companies identified. Fund data as of {oldest?.source.asOf ?? "—"} or later{stale.length ? `; ${stale.length} source${stale.length > 1 ? "s are" : " is"} stale` : ""}.</p>
         </Card>
 
         <Card className="lg:col-span-5" labelledBy="do-h">

@@ -64,7 +64,7 @@ Reply with exactly one JSON object in a \`\`\`json fenced block and nothing else
     "why_now": string,              // the catalyst and its date
     "risks": string[],
     "would_change": string,         // what would make you drop it
-    "size_usd": number | null,      // a sensible size given cash, reserve and limits
+    "size_usd": number | null,      // a sensible size given cash and limits
     "sources": [{ "title": string, "url": string }]
   }],
   "none_reason": string | null      // when ideas is empty: why nothing clears the bar today

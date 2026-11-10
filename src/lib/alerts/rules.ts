@@ -139,7 +139,7 @@ export function evaluateAlerts(args: {
     });
   }
   if (portfolio.cashDetail.savings === null) {
-    out.push({ id: "savings-missing", severity: "medium", symbol: null, kind: "data_missing", title: "Savings balance not entered", detail: "Without it the app cannot tell deployable savings from your protected $" + portfolio.cashDetail.protectedReserve.toLocaleString() + " reserve.", href: "/portfolio/reconcile" });
+    out.push({ id: "savings-missing", severity: "medium", symbol: null, kind: "data_missing", title: "Savings balance not entered", detail: "Without it the app cannot count the capital you could transfer to Schwab.", href: "/portfolio/reconcile" });
   }
 
   if (portfolio.oldestHoldingsAsOf) {

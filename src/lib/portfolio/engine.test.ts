@@ -70,14 +70,14 @@ describe("portfolio engine", () => {
     expect(p.quality.reasons[0]).toMatch(/plus trades you recorded since/);
   });
 
-  it("separates brokerage cash, deployable savings and the protected reserve", () => {
+  it("separates brokerage cash and transferable savings, with no protected reserve", () => {
     const sav: SnapshotInput = { accountId: "s", accountName: "Savings", accountRole: "cash", asOf: "2026-11-04T23:59:00Z", totalValue: 14000, cashValue: 14000, positions: [] };
     const p = buildPortfolio([snap(), sav], new Map(), null);
-    // With no policy loaded the reserve defaults to the $3,000 USAA reserve you set (the old $10,000 is retired).
-    expect(p.cashDetail).toMatchObject({ brokerage: 100, savings: 14000, protectedReserve: 3000, deployableSavings: 11000, deployable: 11100 });
-    // Weights use the invested portfolio: savings never change them. Investable capital adds savings above the reserve.
+    // No protected reserve (2026-11-09 direction): all savings count as transferable capital.
+    expect(p.cashDetail).toMatchObject({ brokerage: 100, savings: 14000, protectedReserve: 0, deployableSavings: 14000, deployable: 14100 });
+    // Weights use the invested portfolio: savings never change them. Investable capital adds savings.
     expect(p.total).toBe(1000 + 100);
-    expect(p.investableCapital).toBe(1000 + 100 + 11000);
+    expect(p.investableCapital).toBe(1000 + 100 + 14000);
     expect(p.holdings.find((h) => h.symbol === "VOO")!.weight).toBeCloseTo(600 / 1100, 6);
     expect(p.netWorthTracked).toBe(15100);
   });

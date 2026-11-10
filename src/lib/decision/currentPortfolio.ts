@@ -4,7 +4,7 @@
  * It adds no new analysis. It runs the same deterministic new-capital engine (approved research, today's prices,
  * limits, exposure, reserve) on the money that actually exists, and decides HOW MUCH is worth deploying:
  *  - Brokerage cash already in the account that buys is the first source.
- *  - Savings above the protected reserve, capped by your standing transfer limit and net of transfers already
+ *  - Savings, capped by your standing transfer limit and net of transfers already
  *    planned, is only a maximum you authorised for evaluating opportunities. It is never buying power, and it is
  *    proposed only when a researched stock qualifies for more than the brokerage cash covers. A diversified ETF on
  *    its own is never a reason to move savings: that is a long-term allocation choice, shown as an alternative.
@@ -32,7 +32,7 @@ export type Transferable = {
   cap: number | null;
   /** Transfers out of savings you already planned (they count against both the balance and the limit). */
   alreadyPlanned: number;
-  /** What could still be moved: min(limit, savings − reserve) minus transfers already planned, never below 0. */
+  /** What could still be moved: min(limit, savings) minus transfers already planned, never below 0. */
   amount: number;
   /** The savings balance is your own dated entry or a statement within SAVINGS_FRESH_DAYS. */
   verified: boolean;
@@ -57,8 +57,8 @@ export function transferableSavings(args: { portfolio: PortfolioView; transfers:
   const detail = savings === null
     ? "No savings balance on file, so nothing from savings is counted. Enter it on Portfolio → Reconcile."
     : cap === null
-      ? `Savings ${$2(savings)}${multiple}; ${$(aboveReserve)} is above your ${$(reserve)} protected reserve. You have not set a standing transfer limit, so none of it is considered.`
-      : `min(${$(cap)} limit, ${$2(savings)} savings${multiple} − ${$(reserve)} reserve)${alreadyPlanned ? ` − ${$2(alreadyPlanned)} already planned` : ""} = ${$(amount)} you could move if an opportunity justifies it.${verified ? "" : ` The savings balance is from ${cd.savingsAsOf?.slice(0, 10) ?? "an unknown date"}; update it before moving money.`}`;
+      ? `Savings ${$2(savings)}${multiple}. You have not set a standing transfer limit, so none of it is considered.`
+      : `min(${$(cap)} limit, ${$2(savings)} savings${multiple})${alreadyPlanned ? ` − ${$2(alreadyPlanned)} already planned` : ""} = ${$(amount)} you could move if an opportunity justifies it.${verified ? "" : ` The savings balance is from ${cd.savingsAsOf?.slice(0, 10) ?? "an unknown date"}; update it before moving money.`}`;
   return { savings, savingsAsOf: cd.savingsAsOf, reserve, aboveReserve, cap, alreadyPlanned, amount, verified, detail };
 }
 
@@ -169,7 +169,7 @@ export function currentPortfolioDecision(args: EngineArgs & { preference: Capita
   if (etf) alternatives.push({ key: "etf", title: `Buy ${etf.symbol}`, status: etfAlloc ? "In the recommendation" : "Valid option", symbol: etf.symbol, href: `/research/${etf.symbol}`,
     detail: `${etf.notes[0] ?? ""}. ${etf.notes[1] ?? ""}. Moving savings into it is a long-term allocation choice for money you will not need for 10+ years, not an opportunity the app is calling${tr.amount >= 1 ? `; you could move up to ${$(tr.amount)}` : ""}.` });
   alternatives.push({ key: "cash", title: "Keep it in savings or brokerage cash", status: "Always valid", symbol: null, href: null,
-    detail: `${opt.find((o) => o.kind === "cash")?.notes[2] ?? "Earns a savings or Treasury rate"}. No stock risk; the right choice for money you may need within a few years. Your ${$(tr.reserve)} reserve is never touched.` });
+    detail: `${opt.find((o) => o.kind === "cash")?.notes[2] ?? "Earns a savings or Treasury rate"}. No stock risk; the right choice for money you may need within a few years. Holding cash is a valid choice when nothing is attractive enough.` });
 
   const confirm = [
     ...result.gates.filter((g) => !g.ok).map((g) => `${g.label}: ${g.detail}`),

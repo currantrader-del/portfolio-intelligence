@@ -75,3 +75,20 @@ export async function recordTransaction(formData: FormData): Promise<ActionResul
   revalidatePath("/", "layout");
   redirect("/portfolio/reconcile?saved=trade");
 }
+
+/**
+ * Confirms a brokerage account's cash as you see it in the broker's app. When it matches the worked-out
+ * figure (statement plus recorded trades), the app treats that cash as confirmed for the next 7 days.
+ */
+export async function confirmCash(formData: FormData): Promise<ActionResult> {
+  const accountId = String(formData.get("account_id") ?? "");
+  const cash = money(formData.get("cash"));
+  if (!accountId || !(cash >= 0)) return fail("Enter the cash shown in the broker's app (for example 221.24).");
+  const db = await createClient();
+  const { data: acct } = await db.from("accounts").select("id").eq("id", accountId).maybeSingle();
+  if (!acct) return fail("That account is not on file.");
+  const { save } = await import("@/lib/intel/jobs");
+  const at = new Date().toISOString();
+  await save(db, "cash_confirmation", "cash-confirmation@1", { account_id: accountId, at }, { account_id: accountId, cash: Math.round(cash * 100) / 100, at });
+  revalidatePath("/", "layout");
+}

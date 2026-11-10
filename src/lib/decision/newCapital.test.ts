@@ -120,24 +120,24 @@ describe("new capital: a drop is not a buy signal", () => {
   });
 });
 
-describe("new capital: research waiting for approval or approved provisionally", () => {
+describe("new capital: completed investigations with open questions", () => {
   const policy = policyFromRules(approvedRules);
   const withBasis = { ...snap, cashValue: 400, positions: snap.positions.filter((x) => x.symbol !== "BBB").map((x) => ({ ...x, costBasis: x.marketValue })) };
   const ledger = [{ accountId: "a", tradeDate: "2026-10-01", kind: "deposit" as const, symbol: null, quantity: null, price: null, amount: 500 }];
   const p = buildPortfolio([withBasis, savings], new Map(), policy, {}, ledger, now);
   const base = research("$26").current!;
   const inv = { id: "v2", research_as_of: "2026-11-04", created_at: "2026-11-04T12:00:00Z", completeness: "partial", origin: "claude_full", is_current: false, conclusion: { ...base.conclusion, research_type: "full_investigation", review_state: "awaiting_approval", completion: { complete: false, reasons: ["Q1"] } } };
-  it("adds nothing while a newer investigation waits for the investor's decision", () => {
+  it("uses a newer finished investigation automatically, and adds nothing while its material questions are open", () => {
     const r = newCapital({ amount: 400, source: "deposited", portfolio: p, research: [toResearchRecord("AAA", "AAA", "held", [{ ...base, created_at: "2026-10-20T00:00:00Z" }, inv])], policy, now, filings: quiet });
     const aaa = r.options.find((o) => o.symbol === "AAA")!;
     expect(r.recommendation.allocations.find((a) => a.symbol === "AAA")).toBeUndefined();
-    expect(JSON.stringify(aaa)).toMatch(/waiting for your decision/);
+    expect(JSON.stringify(aaa)).toMatch(/material questions open/);
   });
   it("adds nothing on provisionally approved research, however attractive its modeled return", () => {
     const adopted = { ...inv, is_current: true, conclusion: { ...inv.conclusion, review_state: "adopted_provisional" } };
     const r = newCapital({ amount: 400, source: "deposited", portfolio: p, research: [toResearchRecord("AAA", "AAA", "held", [{ ...base, is_current: false }, adopted])], policy, now, filings: quiet });
     expect(r.recommendation.allocations.find((a) => a.symbol === "AAA")).toBeUndefined();
-    expect(JSON.stringify(r.options.find((o) => o.symbol === "AAA"))).toMatch(/approved provisionally/);
+    expect(JSON.stringify(r.options.find((o) => o.symbol === "AAA"))).toMatch(/material questions open/);
   });
 });
 
@@ -166,11 +166,11 @@ describe("new capital: ceilings and money source", () => {
     const fromCash = newCapital({ amount: 1000, source: "existing", portfolio: p, research: [research("$26")], policy, now });
     const room = (x: typeof fromNew) => x.options.find((o) => o.symbol === "AAA")!.headroomDollars!;
     expect(room(fromNew) - room(fromCash)).toBeCloseTo(100, 1); // 10% of the extra 1000
-    // Cash already held is only what the brokerage account itself holds: savings above the reserve
-    // ($12,000 - $10,000) needs a planned transfer first.
+    // Cash already held is only what the brokerage account itself holds: savings need a planned transfer first.
     const tooMuch = newCapital({ amount: 5000, source: "existing", portfolio: p, research: [], policy, now });
     expect(tooMuch.funds).toMatchObject({ requested: 5000, used: 1500, verified: true });
-    expect(tooMuch.funds.detail).toMatch(/Broker holds \$1,500 of cash that can buy a stock or ETF, so this is sized on \$1,500\. Savings hold \$2,000 above the reserve; that can be used only after you plan a transfer to Broker\. The \$10,000 savings reserve is never used\./);
+    expect(tooMuch.funds.detail).toMatch(/Broker holds \$1,500 of cash that can buy a stock or ETF, so this is sized on \$1,500\. Savings hold \$12,000; that can be used only after you plan a transfer to Broker\./);
+    expect(tooMuch.funds.detail).not.toMatch(/reserve/);
     expect(tooMuch.recommendation.allocations.reduce((a, x) => a + x.amount, 0)).toBe(1500);
     // With a planned $2,000 transfer it can be used, but only as conditional money until it arrives.
     const transfers = [{ id: "t1", fromAccountId: "s", toAccountId: "a", amount: 2000, date: "2026-11-06", note: null, createdAt: "2026-11-05T15:00:00Z" }];

@@ -142,14 +142,15 @@ describe("buildFinancials", () => {
 
 describe("research in use", () => {
   const v = (id: string, conclusion: Record<string, unknown>, is_current = false, research_as_of = "2026-11-08") => ({ id, research_as_of, completeness: "complete", origin: "claude_full", is_current, conclusion });
-  it("never lets an unapproved investigation or a preliminary screen replace the research in use", () => {
-    expect(usableVersion(v("a", { research_type: "full_investigation", review_state: "awaiting_approval" }))).toBe(false);
-    expect(usableVersion(v("b", { research_type: "preliminary_screen" }))).toBe(false);
+  it("uses a finished investigation over older notes, never a running or set-aside one", () => {
+    expect(usableVersion(v("a", { research_type: "full_investigation", review_state: "awaiting_approval" }))).toBe(true);
+    expect(usableVersion(v("r", { research_type: "full_investigation", review_state: "running" }))).toBe(false);
+    expect(usableVersion(v("s", { research_type: "full_investigation", review_state: "set_aside" }))).toBe(false);
     expect(usableVersion(v("c", { research_type: "full_investigation", review_state: "adopted" }, true))).toBe(true);
     const r = toResearchRecord("X", null, "held", [v("old", { action: "Hold" }, true, "2026-09-01"), v("new", { research_type: "full_investigation", review_state: "awaiting_approval", action: "Buy" })]);
-    expect(r.current?.id).toBe("old");
-    expect(r.latest?.id).toBe("old");
-    expect(r.versions).toBe(1);
+    expect(r.current?.id).toBe("new");
+    expect(r.latest?.id).toBe("new");
+    expect(r.versions).toBe(2);
   });
 });
 
