@@ -6,7 +6,7 @@ let alerts: Alert[] = [];
 let dayPct = -0.12;
 vi.mock("@/lib/workspace-core", () => ({ buildWorkspace: async () => ({
   alerts, research: [], quotes: new Map([["ACME", { price: 44, prevClose: 50, asOf: "2026-11-09T15:55:00Z" }]]), benchmarks: [{ symbol: "SPY", label: "S&P 500", dayPct: 0.001 }],
-  portfolio: { holdings: [{ symbol: "ACME", price: 44, priceSource: "quote", dayPct, weight: 0.05 }], exposures: [] },
+  portfolio: { holdings: [{ symbol: "ACME", price: 44, priceSource: "quote", dayPct, weight: 0.05, bucket: "Quality/growth individual stocks" }], exposures: [] },
 }) }));
 vi.mock("@/lib/alerts/events", () => ({ loadEventAlerts: async () => ({ alerts: [] }) }));
 vi.mock("@/lib/market/quotes", () => ({ getQuotes: async () => new Map() }));
@@ -58,14 +58,22 @@ describe("runWatch", () => {
     expect("pushed" in second && second.pushed).toBe(true);
   });
 
-  it("does not push an ordinary daily move", async () => {
+  it("pushes a price move past the stock's 5% level once, as a price move and not a signal; smaller moves stay quiet", async () => {
     dayPct = -0.06;
     const fetchMock = vi.fn(async () => new Response("{}", { status: 200 }));
     vi.stubGlobal("fetch", fetchMock);
     const { runWatch } = await import("./job");
     const r = await runWatch(db, "https://app.test", { now: open });
     expect("sent" in r && r.sent).toEqual([]);
-    expect(fetchMock).not.toHaveBeenCalled();
+    expect("moves" in r && r.moves?.map((m) => [m.alert.symbol, m.alert.level, m.pushed])).toEqual([["ACME", 1, true]]);
+    const body = JSON.parse((fetchMock.mock.calls[0] as unknown as [string, RequestInit])[1].body as string);
+    expect(body.title).toMatch(/^Price move: ACME −6\.0% today/);
+    expect(body.message).toMatch(/^Price move only, not a buy or sell signal/);
+    await runWatch(db, "https://app.test", { now: new Date(open.getTime() + 30 * 60000) });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    saved.length = 0; dayPct = -0.04;
+    await runWatch(db, "https://app.test", { now: open });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 
   it("does nothing when the market is closed unless forced", async () => {
