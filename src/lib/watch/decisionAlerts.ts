@@ -33,6 +33,8 @@ export type DecisionAlert = {
   id: string; category: PushCategory; symbol: string; title: string;
   changed: string; why: string; action: string; uncertain: string; verified: string;
   href: string; priority: "high" | "default";
+  /** The price and research the alert was based on (kept for the evaluation log). */
+  price?: number | null; researchVersionId?: string | null; researchAsOf?: string | null;
   /** How long a repeat of the same alert is held back, in days (0 = only once ever). */
   repeatAfterDays: number;
 };
@@ -94,6 +96,7 @@ export function decisionAlerts(a: DecisionInputs): DecisionAlert[] {
       const ok = blockers.length === 0;
       out.push({
         id: `buy:${r.symbol}:${z.label}`, category: ok ? "buy_opportunity" : "approaching", symbol: r.symbol, href, priority: ok ? "high" : "default", repeatAfterDays: 7,
+        price, researchVersionId: v.id, researchAsOf: v.research_as_of,
         title: ok ? `${r.symbol} is in its researched buy range (${z.label})` : `${r.symbol} is in its buy range (${z.label}), not yet actionable`,
         changed: `${r.symbol} trades at ${money(price)}, inside the ${z.label} range set by the ${v.research_as_of} investigation.`,
         why: `The research's action for this range: ${short(z.action, 220)}`,
@@ -106,6 +109,7 @@ export function decisionAlerts(a: DecisionInputs): DecisionAlert[] {
     if (z && isTrimZone(z) && h) {
       out.push({
         id: `trim:${r.symbol}:${z.label}`, category: "position_review", symbol: r.symbol, href, priority: "default", repeatAfterDays: 7,
+        price, researchVersionId: v.id, researchAsOf: v.research_as_of,
         title: `${r.symbol} reached its research trim range (${z.label})`,
         changed: `${r.symbol} trades at ${money(price)}, inside the ${z.label} range of the ${v.research_as_of} investigation.`,
         why: `The research's action for this range: ${short(z.action, 220)}`,
@@ -120,6 +124,7 @@ export function decisionAlerts(a: DecisionInputs): DecisionAlert[] {
     if (near) {
       out.push({
         id: `near:${r.symbol}:${near.label}`, category: "approaching", symbol: r.symbol, href, priority: "default", repeatAfterDays: 7,
+        price, researchVersionId: v.id, researchAsOf: v.research_as_of,
         title: `${r.symbol} is ${((price / near.high - 1) * 100).toFixed(1)}% above its buy range (${near.label})`,
         changed: `${r.symbol} at ${money(price)} is within 5% of the ${near.label} range.`,
         why: `In that range the research says: ${short(near.action, 200)}`,
@@ -140,6 +145,7 @@ export function decisionAlerts(a: DecisionInputs): DecisionAlert[] {
     const q = a.quotes.get(h.symbol);
     out.push({
       id: `risk:${h.symbol}`, category: "urgent_risk", symbol: h.symbol, href: `/decisions/review/${h.symbol}`, priority: "high", repeatAfterDays: 1,
+      price: h.price, researchVersionId: r?.current?.id ?? null, researchAsOf: r?.current?.research_as_of ?? null,
       title: `${h.symbol} ${pct(h.dayPct)} today, ${pct(rel)} against the market`,
       changed: `${h.symbol} fell ${pct(h.dayPct)} while the S&P 500 moved ${pct(a.marketDayPct)}.${filedToday.has(h.symbol) ? " It filed with the SEC today." : ""}`,
       why: `A fall this large against the market can mean the thesis changed. It is ${(h.weight * 100).toFixed(1)}% of your invested portfolio.${r?.current?.parsed.thesis ? ` Thesis on file: ${short(r.current.parsed.thesis, 160)}` : ""}`,
@@ -157,6 +163,7 @@ export function decisionAlerts(a: DecisionInputs): DecisionAlert[] {
     if (!h && !r?.current) continue;
     out.push({
       id: `filing:${e.id}`, category: "thesis_change", symbol: e.symbol, href: e.href, priority: "default", repeatAfterDays: 0,
+      price: a.quotes.get(e.symbol)?.price ?? h?.price ?? null, researchVersionId: r?.current?.id ?? null, researchAsOf: r?.current?.research_as_of ?? null,
       title: e.title,
       changed: `${e.detail}`,
       why: `${h ? `You hold ${e.symbol} (${(h.weight * 100).toFixed(1)}%).` : `${e.symbol} is on your researched watchlist.`} Results, reports and financings are where a thesis usually changes.${r?.current?.parsed.thesis ? ` Thesis on file: ${short(r.current.parsed.thesis, 160)}` : ""}`,

@@ -12,6 +12,7 @@ import { DESKS, DESK_VERSION, type DeskResult } from "./desks";
 import { portfolioContext, watchlist } from "./context";
 import { briefingFor, dispatchJob, planDesks, recentMacro, save, type SnapshotInputs } from "./jobs";
 import { AGENT_VERSION } from "@/lib/assistant/agent";
+import { logRecommendation } from "@/lib/eval/recommendation";
 
 export async function startBriefing(db: SupabaseClient, token: string, origin: string, force = false) {
   const now = new Date();
@@ -84,7 +85,9 @@ export async function runMorning(db: SupabaseClient, token: string, origin: stri
   if (new Intl.DateTimeFormat("en-US", { timeZone: "America/New_York", weekday: "short" }).format(new Date()) === "Wed" && (await room("trade_scan"))) {
     trades = await startTradeScan(db, origin, token, "weekly").catch((e) => { console.error(`morning: trade scan did not start: ${(e as Error).message}`); return null; });
   }
-  return { briefing: "error" in b ? null : b.snapshotId, requestId, answerId, plan, trades, skipped };
+  // Evaluation log: the morning's recommendation and the data behind it (code only, no AI cost).
+  const logged = await logRecommendation(db, { trigger: "morning", answerId, briefingId: "error" in b ? null : b.snapshotId ?? null }).catch((e) => { console.error(`morning: recommendation log failed: ${(e as Error).message}`); return null; });
+  return { briefing: "error" in b ? null : b.snapshotId, requestId, answerId, plan, trades, skipped, logged };
 }
 
 export const MORNING_QUESTION ="Morning briefing. Using today's market briefing and my portfolio: what happened in markets and the world, and why it matters; where short-term and long-term conditions appear to be heading and what changed in that view; what changed for my specific holdings (filings, results, research that needs reassessment); what deserves my attention; what actions, if any, are justified (including holding cash); and which opportunities warrant more research. Lead with the conclusions in a few lines, then the explanation.";

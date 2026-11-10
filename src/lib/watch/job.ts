@@ -14,6 +14,7 @@ import { buildWorkspace } from "@/lib/workspace-core";
 import { save } from "@/lib/intel/jobs";
 import { DAILY_CAP, spentToday } from "@/lib/intel/start";
 import { WATCH_VERSION } from "./watch";
+import { recordPaperDecisions } from "@/lib/eval/log";
 import { CATEGORY_LABEL, decisionAlerts, formatDecisionPush, selectDecisionAlerts, type DecisionAlert } from "./decisionAlerts";
 import { checkTrades, describeIdea, type Trade } from "@/lib/trades/job";
 
@@ -118,6 +119,8 @@ export async function runWatch(db: SupabaseClient, origin: string, opts: { force
     const msg = formatDecisionPush(freshAlerts, run.summary);
     const click = items.length === 1 ? `${origin}${items[0].href}` : `${origin}/alerts`;
     try { await pushNtfy(settings.topic, { ...msg, click }); run.pushed = true; } catch (e) { run.error = (e as Error).message; }
+    // Evaluation log: a paper decision whenever an action plan's entry (or trim) criteria are met.
+    await recordPaperDecisions(db, freshAlerts, { vooPrice: quotes.get("VOO")?.price ?? null, now }).catch((e) => console.error(`watch: paper decision failed: ${(e as Error).message}`));
   }
   // Quiet runs are stored too (they are small), so the page can say when the last check ran.
   await save(db, "watch_run", WATCH_VERSION, { day: etDay(now), force: !!opts.force }, run);

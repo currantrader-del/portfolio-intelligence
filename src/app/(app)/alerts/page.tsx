@@ -3,7 +3,8 @@ import { createClient } from "@/lib/supabase/server";
 import { Card, CardHead, Disclose, Pill } from "@/components/ui";
 import { watchRuns, watchSettings } from "@/lib/watch/job";
 import { shortDate } from "@/lib/format";
-import { checkNow, resetTopic, setEnabled, test } from "./actions";
+import { checkNow, feedback, reportMissed, resetTopic, setEnabled, test } from "./actions";
+import { loadFeedback, VERDICT_LABEL, type Verdict } from "@/lib/eval/log";
 
 export const dynamic = "force-dynamic";
 
@@ -14,12 +15,15 @@ const MSG: Record<string, string> = {
   newtopic: "New topic made. Subscribe to it in the ntfy app and remove the old one.",
   test: "Test sent. It should arrive on your phone within a few seconds.",
   quiet: "Checked just now: nothing new that needs you.",
+  feedback: "Thanks: noted for the 30-day evaluation.",
+  missed: "Missed event noted for the 30-day evaluation.",
 };
 
 /** Phone alerts: turn on, connect the phone, and see what was sent. */
 export default async function AlertsPage({ searchParams }: { searchParams: Promise<{ msg?: string }> }) {
   const db = await createClient();
-  const [s, runs, { msg }] = await Promise.all([watchSettings(db), watchRuns(db, 14), searchParams]);
+  const [s, runs, { msg }, fb] = await Promise.all([watchSettings(db), watchRuns(db, 14), searchParams, loadFeedback(db).catch(() => ({ byAlert: new Map<string, Verdict>(), all: [] }))]);
+  const missed = fb.all.filter((f) => f.verdict === "missed");
   const last = runs[0];
   const sent = runs.filter((r) => r.sent.length);
   const note = !msg ? null : msg.startsWith("error:") ? { warn: true, text: msg.slice(6) } : msg.startsWith("sent:") ? { warn: false, text: `Checked just now: sent ${msg.slice(5)} alert${msg.slice(5) === "1" ? "" : "s"} to your phone.` } : MSG[msg] ? { warn: false, text: MSG[msg] } : null;
@@ -29,7 +33,7 @@ export default async function AlertsPage({ searchParams }: { searchParams: Promi
       <div className="flex flex-col gap-1">
         <span className="cap">Watch for me</span>
         <h1 className="h1">Phone alerts</h1>
-        <p className="t-sm">Every 30 minutes while the market is open, the app checks your holdings and the companies you researched. It sends a notification only when something needs a look: a big move against the market, a price reaching one of your research bands, a position over its limit, or a new filing such as results or an offering. Each alert comes once, with one line on whether it touches your thesis. The checks are code; the AI line costs well under a cent and only runs when something fires.</p>
+        <p className="t-sm">Every 30 minutes while the market is open, the app checks your holdings and the companies you researched, and notifies you only when something matters to a decision: a buy opportunity, an opportunity approaching, a material development (results, reports, financings), an urgent risk, or a trim review. Each says what changed, why it matters, the supported action, what is uncertain and when it was verified. Ordinary daily moves go to the morning brief. The checks are code; a one-line AI note costs well under a cent and runs only when something fires.</p>
       </div>
 
       {note && <p role={note.warn ? "alert" : "status"} className={`t-sm ${note.warn ? "warn" : "text-ink"}`}>{note.text}</p>}
@@ -72,18 +76,41 @@ export default async function AlertsPage({ searchParams }: { searchParams: Promi
                 }>
                   <div className="flex flex-col gap-2 t-sm">
                     {r.summary && <p className="text-ink">{r.summary}</p>}
-                    {r.sent.map(({ alert: a }) => (
-                      <div key={a.id}>
-                        <a href={a.href} className="text-ink font-semibold">{a.title}</a>
-                        <p className="t-xs">{a.detail}</p>
-                      </div>
-                    ))}
+                    {r.sent.map(({ alert: a }) => {
+                      const v = fb.byAlert.get(`${r.id}|${a.id}`);
+                      return (
+                        <div key={a.id} className="flex flex-col gap-1">
+                          <a href={a.href} className="text-ink font-semibold">{a.title}</a>
+                          <p className="t-xs">{a.detail}</p>
+                          <div className="flex flex-wrap items-center gap-1.5">
+                            <span className="t-xs">{v ? `Your verdict: ${VERDICT_LABEL[v]}.` : "Was this worth it?"}</span>
+                            {(["useful", "false", "repetitive"] as const).map((k) => (
+                              <ActionForm key={k} action={feedback} success={null}>
+                                <input type="hidden" name="verdict" value={k} /><input type="hidden" name="runId" value={r.id} /><input type="hidden" name="alertId" value={a.id} /><input type="hidden" name="symbol" value={a.symbol ?? ""} />
+                                <SubmitButton className={`btn btn-sm ${v === k ? "btn-primary" : ""}`} pendingText="Saving…">{k === "useful" ? "Useful" : k === "false" ? "False" : "Repetitive"}</SubmitButton>
+                              </ActionForm>
+                            ))}
+                          </div>
+                        </div>
+                      );
+                    })}
                   </div>
                 </Disclose>
               </li>
             ))}
           </ul>
         )}
+      </Card>
+
+      <Card labelledBy="al-missed" className="!gap-2">
+        <CardHead id="al-missed" title="Missed something?" right={missed.length ? <span className="t-xs">{missed.length} reported</span> : null} />
+        <p className="t-xs">If something mattered and no alert came, note it here. It counts in the 30-day evaluation.</p>
+        <ActionForm action={reportMissed} success={null} className="flex flex-col gap-2">
+          <label className="field">Company (optional)<input name="symbol" maxLength={12} className="input" /></label>
+          <label className="field">What was missed<input name="note" required maxLength={500} className="input" /></label>
+          <SubmitButton className="btn btn-sm self-start" pendingText="Saving…">Report missed event</SubmitButton>
+        </ActionForm>
+        {missed.length > 0 && <ul className="t-xs list-disc pl-4">{missed.slice(-5).reverse().map((m) => <li key={m.id}>{shortDate(m.at)}{m.symbol ? ` · ${m.symbol}` : ""} · {m.note}</li>)}</ul>}
       </Card>
     </div>
   );
