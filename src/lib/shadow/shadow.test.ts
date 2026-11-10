@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { Bar } from "@/lib/market/history";
-import { checkOwnTrades, closeIsFinal, proposalsFromPlan, shadowReport, startDateFor, startFromHistory, type ShadowTest } from "./shadow";
+import { checkOwnTrades, closeIsFinal, shadowReport, startDateFor, startFromHistory, type ShadowTest } from "./shadow";
 
 // Made-up numbers only (the repo is public).
 const days = ["2026-11-10", "2026-11-11", "2026-11-12", "2026-11-13", "2026-11-16", "2026-11-17"];
@@ -46,8 +46,8 @@ describe("shadow test results", () => {
     expect(r.resolved!.costs).toBe(1);
     expect(r.resolved!.taxEstimate).toBe(55); // 22% of the $250 gain
     expect(r.resolved!.exposure.find((e) => e.symbol === "RDDT")).toEqual({ symbol: "RDDT", before: 76.92, after: 38.48 });
-    // One week later: total return from adjusted closes.
-    const w = r.horizons.find((h) => h.key === "1w")!.results!;
+    // At the latest close: total return from adjusted closes.
+    const w = r.now!;
     expect(w.original).toEqual({ value: 2450, gain: -150, pct: -5.77 });
     expect(w.hypothetical.value).toBeCloseTo(2648.9, 0);
     expect(w.voo).toEqual({ value: 2860, gain: 260, pct: 10 });
@@ -65,7 +65,7 @@ describe("shadow test results", () => {
     ];
     const r = shadowReport(test(), start, ledger, hist, null);
     expect(r.flows).toBe(500);
-    const w = r.horizons.find((h) => h.key === "1w")!.results!;
+    const w = r.now!;
     expect(w.original).toEqual({ value: 2950, gain: -150, pct: -4.84 });
     expect(w.actual).toEqual({ value: 2962, gain: -138, pct: -4.45 });
     expect(w.voo.gain).toBe(260);
@@ -78,19 +78,7 @@ describe("shadow test results", () => {
   });
 });
 
-describe("app proposals and your own tests", () => {
-  const supported = (s: string) => (s === "IONQ" || s === "RDDT" || s === "NOW" ? { versionId: `v-${s}`, asOf: "2026-11-08" } : null);
-  const pos = (symbol: string, action: string, currentPct: number | null, targetPct: number | null) =>
-    ({ symbol, status: "held" as const, currentPct, targetPct, action, reason: "r", researchAsOf: "2026-11-08", plan: { action, thesis: "t", invalidation: null } });
-  it("creates tests only for researched Trim-to-target or Exit, at most three, never twice for one company", () => {
-    const out = proposalsFromPlan([pos("RDDT", "Trim", 8, 4), pos("GOOGL", "Trim", 6, 5), pos("NOW", "Trim", 3, null), pos("IONQ", "Exit", 2, 0), pos("NVDA", "Hold", 5, 5)],
-      { supported, activeApp: 1, activeSymbols: new Set(["IONQ"]), planAt: "2026-11-10T14:00:00Z" });
-    expect(out).toHaveLength(1);
-    expect(out[0].name).toBe("Trim RDDT to 4%, buy VOO");
-    expect(out[0].trades).toEqual([{ side: "sell", symbol: "RDDT", amount: 50, unit: "pct_holding" }, { side: "buy", symbol: "VOO", amount: 100, unit: "pct_proceeds" }]);
-    expect(out[0].source.researchVersionId).toBe("v-RDDT");
-    expect(proposalsFromPlan([pos("RDDT", "Trim", 8, 4)], { supported, activeApp: 3, activeSymbols: new Set(), planAt: "" })).toEqual([]);
-  });
+describe("your own tests", () => {
   it("checks your own trades", () => {
     const held = new Set(["RDDT"]);
     expect(checkOwnTrades([{ side: "sell", symbol: "RDDT", amount: 50, unit: "pct_holding" }, { side: "buy", symbol: "AVUV", amount: 100, unit: "pct_proceeds" }], held)).toBeNull();

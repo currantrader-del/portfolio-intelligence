@@ -1,6 +1,9 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
+import { headers } from "next/headers";
+import { startImprovementCheck } from "@/lib/shadow/proposals";
+import { automatedAllowed } from "@/lib/costs/spend";
 import { createClient } from "@/lib/supabase/server";
 import { buildWorkspace } from "@/lib/workspace-core";
 import { fail, type ActionResult } from "@/lib/action-result";
@@ -42,5 +45,18 @@ export async function stopShadowTest(formData: FormData): Promise<ActionResult> 
   if (!entry) return fail("That test was not found.");
   if (entry.close) return;
   await closeShadowTest(db, id, "stopped by you");
+  revalidatePath("/plan");
+}
+
+/** Runs the improvement check now (in the background). The AI review runs only if a trigger holds (about $0.10). */
+export async function checkImprovementNow(): Promise<ActionResult> {
+  const db = await createClient();
+  const { data: s } = await db.auth.getSession();
+  if (!s.session?.access_token) return fail("Sign in first.");
+  const gate = await automatedAllowed(db, "shadow_proposal");
+  if (!gate.ok) return fail(`Not started: ${gate.reason.replace(/^skipped: /, "")}.`);
+  const h = await headers();
+  const origin = `${h.get("x-forwarded-proto") ?? "https"}://${h.get("x-forwarded-host") ?? h.get("host")}`;
+  try { await startImprovementCheck(db, origin, s.session.access_token); } catch (e) { return fail(`Could not start the check: ${(e as Error).message.slice(0, 160)}`); }
   revalidatePath("/plan");
 }

@@ -14,6 +14,8 @@ import { loadDecisionFilings } from "@/lib/alerts/events";
 import type { PlanPosition } from "@/lib/plan/plan";
 import { shadowReports } from "@/lib/shadow/store";
 import { ShadowTests } from "@/components/ShadowTests";
+import { ImprovementCard } from "@/components/ImprovementCard";
+import { improvementView } from "@/lib/shadow/proposals";
 
 export const dynamic = "force-dynamic";
 
@@ -52,6 +54,7 @@ export default async function PlanPage() {
   const brokers = ws.portfolio.accounts.filter((a) => a.role !== "cash" && a.role !== "protected_savings");
   const unverified = brokers.filter((a) => a.ageDays > HOLDINGS_FRESH_DAYS || a.tradesAfter > 0);
   const shadows = await shadowReports(db, ws).catch((e) => { console.error(`plan: shadow tests failed: ${(e as Error).message}`); return null; });
+  const improve = await improvementView(db, ws, shadows ?? undefined).catch((e) => { console.error(`plan: improvement view failed: ${(e as Error).message}`); return null; });
 
   return (
     <div className="flex flex-col gap-3 lg:gap-4 max-w-3xl">
@@ -79,6 +82,7 @@ export default async function PlanPage() {
         <p className="t-xs">Allocation ranges are guidelines and ceilings, never targets to fill. Being below a range, or below 5% cash, is not a reason to buy, sell or wait.</p>
       </Card>
 
+      {improve && <ImprovementCard active={improve.active} history={improve.history} last={improve.last} />}
       {shadows ? <ShadowTests rows={shadows} /> : <p role="alert" className="t-sm warn">Shadow tests could not be loaded right now.</p>}
 
       {!plan ? (

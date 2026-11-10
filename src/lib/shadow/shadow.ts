@@ -22,7 +22,7 @@ export const COST_RATE = 0.0005;
 /** Assumed tax rate on realized gains, shown as an estimate and never deducted from the comparison. */
 export const TAX_RATE = 0.22;
 /** At most this many app-created tests are active at once; your own tests have their own limit. */
-export const MAX_APP_ACTIVE = 3;
+export const MAX_APP_ACTIVE = 3; // enforced by the proposal job: never two active tests on one stock
 export const MAX_OWN_ACTIVE = 5;
 
 export type TradeUnit = "usd" | "pct_holding" | "pct_proceeds";
@@ -207,8 +207,8 @@ function bookValue(b: Book, flows: { amount: number; date: string }[], date: str
 }
 
 export const HORIZONS = [
-  { key: "1w", label: "1 week", days: 7 }, { key: "1m", label: "1 month", days: 30 }, { key: "3m", label: "3 months", days: 91 },
-  { key: "6m", label: "6 months", days: 182 }, { key: "1y", label: "1 year", days: 365 },
+  { key: "1m", label: "1 month", days: 30 }, { key: "3m", label: "3 months", days: 91 }, { key: "6m", label: "6 months", days: 182 },
+  { key: "12m", label: "12 months", days: 365 }, { key: "24m", label: "24 months", days: 730 },
 ] as const;
 export const PORTFOLIOS = [
   { key: "original", label: "No change", long: "Original portfolio, unchanged" }, { key: "hypothetical", label: "With change", long: "With the proposed change" },
@@ -216,7 +216,7 @@ export const PORTFOLIOS = [
 ] as const;
 export type PortfolioKey = (typeof PORTFOLIOS)[number]["key"];
 export type Result = { value: number; gain: number; pct: number };
-export type Risk = { largest: { symbol: string; pct: number } | null; volatility: number | null; maxDrawdown: number | null };
+export type Risk = { largest: { symbol: string; pct: number } | null; volatility: number | null; maxDrawdown: number | null; /** annualized return / annualized volatility, after 20 trading days */ returnPerRisk: number | null };
 export type ShadowReport = {
   status: "pending" | "active" | "closed";
   startDate: string; resolved: Resolved | null; asOf: string | null; flows: number;
@@ -274,6 +274,7 @@ export function shadowReport(t: ShadowTest, start: ShadowStart | null, ledger: L
     return [p.key, {
       largest: pos && tot > 0 ? { symbol: pos[0], pct: r2((pos[1] / tot) * 100) } : null,
       volatility: rets.length >= 5 ? Math.round(sd * Math.sqrt(252) * 1000) / 10 : null,
+      returnPerRisk: rets.length >= 20 && sd > 0 ? Math.round((((idx ** (252 / rets.length)) - 1) / (sd * Math.sqrt(252))) * 100) / 100 : null,
       maxDrawdown: rets.length ? Math.round(mdd * 1000) / 10 : null,
     }];
   })) as Record<PortfolioKey, Risk>);
@@ -281,43 +282,6 @@ export function shadowReport(t: ShadowTest, start: ShadowStart | null, ledger: L
     status, startDate: r.startDate, resolved: r, asOf: last >= 0 ? series[last].date : null,
     flows: r2(flows.reduce((a, f) => a + f.amount, 0)), now: last >= 0 ? resultAt(last) : null, horizons, risk, missing: [...missing],
   };
-}
-
-/** Plan positions the app can test on its own: a researched Trim to a stated target, or an Exit. */
-export type PlanCandidate = { symbol: string; status: "held" | "idea"; currentPct: number | null; targetPct: number | null; action: string; reason: string; researchAsOf: string | null; plan?: { action: string; thesis: string; invalidation: string | null } | null };
-
-/**
- * Proposals from the latest plan that are supported well enough to track: a held company with a completed
- * investigation (open questions allowed: they support a trim) whose action plan says Trim to a lower target, or
- * Exit. The proceeds go to VOO, the same convention the paper-decision log uses. Nothing is invented: a trim
- * without a target is skipped. At most MAX_APP_ACTIVE app tests are active, and never two on the same company.
- */
-export function proposalsFromPlan(positions: PlanCandidate[], ctx: { supported: (symbol: string) => { versionId: string | null; asOf: string | null } | null; activeApp: number; activeSymbols: Set<string>; planAt: string }): Omit<ShadowTest, "id" | "createdAt" | "startDate" | "base" | "assumptions">[] {
-  const out: Omit<ShadowTest, "id" | "createdAt" | "startDate" | "base" | "assumptions">[] = [];
-  let room = MAX_APP_ACTIVE - ctx.activeApp;
-  for (const p of positions) {
-    if (room <= 0) break;
-    const action = p.plan?.action;
-    if (p.status !== "held" || p.symbol === "VOO" || ctx.activeSymbols.has(p.symbol) || (action !== "Trim" && action !== "Exit")) continue;
-    const research = ctx.supported(p.symbol);
-    if (!research) continue;
-    let sellPct: number;
-    if (action === "Exit") sellPct = 100;
-    else {
-      if (p.targetPct === null || p.currentPct === null || p.targetPct >= p.currentPct) continue;
-      sellPct = Math.round(((p.currentPct - p.targetPct) / p.currentPct) * 1000) / 10;
-    }
-    out.push({
-      name: action === "Exit" ? `Sell all ${p.symbol}, buy VOO` : `Trim ${p.symbol} to ${p.targetPct}%, buy VOO`,
-      origin: "app",
-      rationale: [`The plan says ${action} ${p.symbol}${action === "Trim" ? ` from ${p.currentPct}% to ${p.targetPct}%` : ""}: ${p.reason}`, p.plan?.invalidation ? `Thesis breaks if: ${p.plan.invalidation}` : ""].filter(Boolean).join(" ").slice(0, 900),
-      source: { planAt: ctx.planAt, researchVersionId: research.versionId, researchAsOf: research.asOf, action },
-      trades: [{ side: "sell", symbol: p.symbol, amount: sellPct, unit: "pct_holding" }, { side: "buy", symbol: "VOO", amount: 100, unit: "pct_proceeds" }],
-    });
-    ctx.activeSymbols.add(p.symbol);
-    room--;
-  }
-  return out;
 }
 
 /** Checks your own test before it is saved. Returns the problem in plain words, or null. */

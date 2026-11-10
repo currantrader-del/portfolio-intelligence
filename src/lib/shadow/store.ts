@@ -10,9 +10,8 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import { save } from "@/lib/intel/jobs";
 import { getHistories, type Bar } from "@/lib/market/history";
 import type { Workspace } from "@/lib/workspace-core";
-import type { Plan } from "@/lib/plan/plan";
 import {
-  COST_RATE, SHADOW_VERSION, TAX_RATE, proposalsFromPlan, shadowReport, startDateFor, startFromHistory, symbolsOf,
+  COST_RATE, SHADOW_VERSION, TAX_RATE, shadowReport, startDateFor, startFromHistory, symbolsOf,
   type ShadowClose, type ShadowReport, type ShadowStart, type ShadowTest,
 } from "./shadow";
 
@@ -56,7 +55,7 @@ export async function closeShadowTest(db: SupabaseClient, testId: string, reason
 
 const rangeFor = (startDate: string, now: Date) => {
   const days = (now.getTime() - Date.parse(`${startDate}T12:00:00Z`)) / 86_400_000;
-  return days < 80 ? "3mo" : days < 170 ? "6mo" : days < 350 ? "1y" : "2y";
+  return days < 80 ? "3mo" : days < 170 ? "6mo" : days < 350 ? "1y" : days < 700 ? "2y" : "5y";
 };
 
 export async function historiesFor(entries: ShadowEntry[], now: Date): Promise<Map<string, Bar[]>> {
@@ -86,23 +85,4 @@ export async function shadowReports(db: SupabaseClient, ws: Workspace): Promise<
   const entries = await loadShadowTests(db);
   const hist = await historiesFor(entries, ws.now);
   return entries.map((e) => ({ ...e, report: shadowReport(e.test, e.start ?? startFromHistory(e.test, hist, ws.now), ws.ledger, hist, e.close) }));
-}
-
-/**
- * After a plan is built: creates a test for each supported Trim or Exit it proposes (at most three active app
- * tests, never two on one company). Returns how many were created.
- */
-export async function autoCreateFromPlan(db: SupabaseClient, ws: Workspace, plan: Plan, planAt: string): Promise<number> {
-  const active = (await loadShadowTests(db)).filter((e) => !e.close);
-  const proposals = proposalsFromPlan(plan.positions, {
-    planAt,
-    activeApp: active.filter((e) => e.test.origin === "app").length,
-    activeSymbols: new Set(active.flatMap((e) => e.test.trades.filter((t) => t.side === "sell").map((t) => t.symbol))),
-    supported: (symbol) => {
-      const r = ws.research.find((x) => x.symbol === symbol);
-      return r?.authoritative && r.current ? { versionId: r.current.id, asOf: r.current.research_as_of } : null;
-    },
-  });
-  for (const p of proposals) await createShadowTest(db, ws, p);
-  return proposals.length;
 }
