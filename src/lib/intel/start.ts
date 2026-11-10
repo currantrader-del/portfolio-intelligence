@@ -13,6 +13,7 @@ import { portfolioContext, watchlist } from "./context";
 import { briefingFor, dispatchJob, planDesks, recentMacro, save, type SnapshotInputs } from "./jobs";
 import { AGENT_VERSION } from "@/lib/assistant/agent";
 import { logRecommendation } from "@/lib/eval/recommendation";
+import { settleShadowStarts } from "@/lib/shadow/store";
 
 export async function startBriefing(db: SupabaseClient, token: string, origin: string, force = false) {
   const now = new Date();
@@ -56,6 +57,8 @@ export async function runMorning(db: SupabaseClient, token: string, origin: stri
   const spent = await spentToday(db);
   // Every morning run is recorded with what it skipped, so Today can say what is missing instead of leaving it out.
   const record = (o: Record<string, unknown>) => save(db, "morning_run", AGENT_VERSION, { day: new Date().toISOString().slice(0, 10) }, { at: new Date().toISOString(), ...o }).catch(() => null);
+  // Shadow tests: record yesterday's start-close prices (code only, no AI cost; runs even when the AI budget is spent).
+  await settleShadowStarts(db).catch((e) => console.error(`morning: shadow starts not recorded: ${(e as Error).message}`));
   if (spent.total >= DAILY_CAP.total) {
     const why = `the daily safety limit was reached ($${spent.total.toFixed(2)} spent today)`;
     await record({ skipped: [`market_briefing skipped: ${why}`] });

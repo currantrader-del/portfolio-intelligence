@@ -10,6 +10,7 @@ import { runAgent } from "@/lib/assistant/agent";
 import { extractJson } from "@/lib/research/aiResearch";
 import { companyMax } from "@/lib/policy/limits";
 import { isEtf } from "@/lib/portfolio/classify";
+import { autoCreateFromPlan } from "@/lib/shadow/store";
 import { PLAN_LIMITS, PLAN_SYSTEM, PLAN_VERSION, planQuestion, validatePlan, type Plan } from "./plan";
 
 export type StoredPlan = { ok: boolean; error?: string; plan?: Plan; costUsd: number; ms: number; searches: number; model: string | null; trigger: string };
@@ -49,7 +50,10 @@ export async function runPlanJob(db: SupabaseClient, requestId: string): Promise
       deployable: ws.portfolio.cashDetail.spendableNow, // only the brokerage account's own cash; savings need a planned transfer
     });
     if ("error" in plan) return out({ ok: false, error: `${plan.error}${ans.stopped ? ` (stopped: ${ans.stopped})` : ""}`, ...meta });
-    return out({ ok: true, plan, ...meta });
+    const id = await out({ ok: true, plan, ...meta });
+    // Supported Trim or Exit actions become shadow tests, tracked forward against no change and VOO (code only).
+    await autoCreateFromPlan(db, ws, plan, ws.now.toISOString()).catch((e) => console.error(`plan: shadow tests not created: ${(e as Error).message}`));
+    return id;
   } catch (e) {
     return out({ ok: false, error: (e as Error).message.slice(0, 300), costUsd: 0, ms: 0, searches: 0, model: null });
   }
