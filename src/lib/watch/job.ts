@@ -8,6 +8,8 @@ import Anthropic from "@anthropic-ai/sdk";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { Alert } from "@/lib/alerts/rules";
 import { loadEventAlerts } from "@/lib/alerts/events";
+import { loadReviewState } from "@/lib/alerts/review";
+import { filingsToPush } from "./filingFilter";
 import { isMarketOpen } from "@/lib/market/hours";
 import { getQuotes } from "@/lib/market/quotes";
 import { buildWorkspace } from "@/lib/workspace-core";
@@ -99,6 +101,9 @@ export async function runWatch(db: SupabaseClient, origin: string, opts: { force
     ideas.length ? getQuotes(ideas) : Promise.resolve(new Map()),
     watchRuns(db),
   ]);
+  // Filings already read by research, marked reviewed, debt-only, or first seen days late stay on the Events page.
+  const review = await loadReviewState(db, events.alerts).catch((e) => { console.error(`watch: filing review state failed: ${(e as Error).message}`); return null; });
+  const pushable = review ? filingsToPush(events.alerts, review, now) : events.alerts;
   // Only what matters to a decision is pushed (decisionAlerts); plain moves and reminders wait for the brief.
   const quotes = new Map<string, { price: number; prevClose: number | null; asOf: string }>();
   for (const [s, q] of ws.quotes ?? new Map()) quotes.set(s, q);
@@ -107,7 +112,7 @@ export async function runWatch(db: SupabaseClient, origin: string, opts: { force
     research: ws.research,
     holdings: ws.portfolio.holdings.map((h) => ({ symbol: h.symbol, price: h.price, priceSource: h.priceSource, dayPct: h.dayPct, weight: h.weight })),
     quotes, headroom: new Map(ws.portfolio.exposures.filter((e) => e.hasLimit).map((e) => [e.symbol, e.headroomDollars])),
-    marketDayPct: ws.benchmarks?.[0]?.dayPct ?? null, events: events.alerts, now,
+    marketDayPct: ws.benchmarks?.[0]?.dayPct ?? null, events: pushable, now,
   });
   const prefs = await loadAlertPrefs(db).catch(() => DEFAULT_ALERT_PREFS);
   const lastSent = new Map<string, string>();

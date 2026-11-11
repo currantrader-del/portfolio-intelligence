@@ -1,10 +1,11 @@
 "use server";
 
-import { provisionalItems } from "@/lib/research/review";
-import type { ValidationReport } from "@/lib/research/validate";
+import { adoptVersion } from "@/lib/research/adopt";
 import { AGE_REMINDER_DAYS } from "@/lib/policy/limits";
 import { createHash } from "node:crypto";
 import { redirect } from "next/navigation";
+import { headers } from "next/headers";
+import { startCalibration } from "@/lib/recovery/job";
 import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
 import { getFilings, getFundamentals } from "@/lib/market/sec";
@@ -126,27 +127,11 @@ export async function adoptResearch(formData: FormData): Promise<ActionResult> {
   const c = (v.conclusion ?? {}) as Record<string, unknown>;
   if (v.is_current) return fail("This research is already the one in use.");
   if (c.review_state !== "awaiting_approval") return fail("Only a finished investigation waiting for your decision can be approved.");
-  // A complete record can still be approved provisionally: its reviewer caveats become the open items.
+  // A complete record can still be put in use provisionally: its reviewer caveats become the open items.
   const complete = v.completeness === "complete" && formData.get("mode") !== "provisional";
-  let open = Array.isArray((c.completion as { reasons?: unknown } | undefined)?.reasons) ? ((c.completion as { reasons: unknown[] }).reasons.map(String)) : [];
-  if (!complete) {
-    if (formData.get("acknowledge") !== "yes") return fail(v.completeness === "complete" ? "Tick the box to confirm you have read the reviewer caveats before approving provisionally." : "This investigation is incomplete. Tick the box to confirm you have read its open items before approving it provisionally.");
-    const { data: val } = await db.from("model_runs").select("outputs").eq("kind", "research_validation").eq("inputs->>version_id", v.id).order("computed_at", { ascending: false }).limit(1).maybeSingle();
-    open = [...open, ...provisionalItems((val?.outputs ?? null) as ValidationReport | null)];
-    if (!open.length) open = ["Approved provisionally by you, pending your own review."];
-  }
-  const { data: prior } = await db.from("research_versions").select("id, research_as_of").eq("company_id", v.company_id).eq("is_current", true).maybeSingle();
-  const at = new Date().toISOString();
-  const mode = complete ? "full" : "provisional";
-  const { error: e1 } = await db.from("research_versions").update({ is_current: false }).eq("company_id", v.company_id).eq("is_current", true);
-  if (e1) return fail(`Could not retire the research in use: ${e1.message}`);
-  const { error: e2 } = await db.from("research_versions").update({ is_current: true, conclusion: { ...c, review_state: complete ? "adopted" : "adopted_provisional", adopted_at: at, adoption: { mode, at, open_items: open, replaced: prior?.id ?? null, recommendation_approved: false } } }).eq("id", v.id);
-  if (e2) {
-    // Put the earlier record back in use rather than leave the company with none.
-    if (prior) await db.from("research_versions").update({ is_current: true }).eq("id", prior.id);
-    return fail(`Could not approve it: ${e2.message}`);
-  }
-  await save(db, "research_adoption", "adoption@1", { symbol, version_id: v.id, mode, at }, { replaced: prior ? { id: prior.id, research_as_of: prior.research_as_of } : null, open_items: open, action: c.action ?? null }).catch(() => null);
+  if (!complete && formData.get("acknowledge") !== "yes") return fail(v.completeness === "complete" ? "Tick the box to confirm you have read the reviewer caveats first." : "This investigation is incomplete. Tick the box to confirm you have read its open items first.");
+  const r = await adoptVersion(db, v.id, complete ? "full" : "provisional", "investor", symbol);
+  if (!r.ok) return fail(r.error);
   revalidatePath("/research");
   revalidatePath(`/research/${symbol}`);
   revalidatePath("/");
@@ -202,4 +187,14 @@ export async function setAsideResearch(formData: FormData): Promise<ActionResult
   revalidatePath(`/research/${symbol}`);
   revalidatePath("/");
   redirect(`/research/${symbol}?saved=set_aside`);
+}
+
+/** Starts the recovery-odds calibration check in the background (code only, free price data). */
+export async function runRecoveryCheck(): Promise<ActionResult> {
+  const db = await createClient();
+  const { data: s } = await db.auth.getSession();
+  if (!s.session?.access_token) return fail("Sign in first.");
+  const h = await headers();
+  const origin = `${h.get("x-forwarded-proto") ?? "https"}://${h.get("x-forwarded-host") ?? h.get("host")}`;
+  try { await startCalibration(db, origin, s.session.access_token, "manual"); } catch (e) { return fail(`Could not start the check: ${(e as Error).message.slice(0, 160)}`); }
 }

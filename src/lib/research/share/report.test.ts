@@ -135,7 +135,7 @@ describe("the shared report", () => {
     const pending: ShareVersion = { ...version, id: "v-acme-4", is_current: false, created_at: "2026-11-09T12:00:00Z", conclusion: { ...conclusion, review_state: "awaiting_approval" }, completeness: "partial" };
     const r2 = buildShareReport({ symbol: "ACME", name: "Acme Power", version: pending, choice: "latest", approved: version, latest: pending, validation: null, redactor: makeRedactor(fp) });
     expect(r2.notices.join(" ")).toMatch(/not the one the owner approved/);
-    expect(r2.notices.join(" ")).toMatch(/Not approved/);
+    expect(r2.notices.join(" ")).toMatch(/Not in use/);
     expect(r2.notices.join(" ")).toMatch(/Incomplete/);
   });
 

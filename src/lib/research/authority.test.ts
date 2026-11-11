@@ -134,9 +134,9 @@ describe("the plan cannot turn an unapproved thesis into a target or an opportun
       maxFor: () => 0.1, deployable: 2000,
     });
     if ("error" in plan) throw new Error(plan.error);
-    expect(plan.positions.find((x) => x.symbol === "ACME")).toMatchObject({ targetPct: 3, flags: [expect.stringMatching(/not used: the research is not approved/)] });
+    expect(plan.positions.find((x) => x.symbol === "ACME")).toMatchObject({ targetPct: 3, flags: [expect.stringMatching(/not used: the research is not in use yet/)] });
     expect(plan.positions.find((x) => x.symbol === "OKAY")!.targetPct).toBe(5);
     expect(plan.opportunities.map((o) => o.symbol)).toEqual(["GOOD"]);
-    expect(plan.problems.join(" ")).toMatch(/BETA was suggested as an opportunity but its research is not approved/);
+    expect(plan.problems.join(" ")).toMatch(/BETA was suggested as an opportunity but its research is not in use yet/);
   });
 });

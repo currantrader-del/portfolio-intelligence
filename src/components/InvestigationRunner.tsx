@@ -111,7 +111,7 @@ export function InvestigationRunner({ symbol, hasResearch, plan }: { symbol: str
       ) : (
         <div className="flex flex-col gap-1.5 t-sm">
           <p><strong className="text-ink">Update research.</strong> Reads only what was filed or said since the investigation it builds on, and updates the evidence, model and conclusion. A price move alone needs no AI.</p>
-          <p className="t-xs">Results are saved as a new dated record. Nothing replaces the research in use until you approve it.</p>
+          <p className="t-xs">Results are saved as a new dated record. When it finishes complete (or open only on an outside event), it becomes the research in use; the earlier record stays on file.</p>
         </div>
       )}
       {st?.status === "stalled" && <p className="t-xs warn">The last run stopped between steps. Resume it from its last checkpoint.</p>}
@@ -164,7 +164,7 @@ function UpdateSummary({ plan }: { plan: UpdatePlan }) {
   return (
     <div className="flex flex-col gap-1.5 t-sm">
       <p>{plan.summary}</p>
-      {plan.foundation && <p className="t-xs">Builds on: research of {plan.foundation.label}. The result is a new dated record; nothing replaces the research in use until you approve it.</p>}
+      {plan.foundation && <p className="t-xs">Builds on: research of {plan.foundation.label}. The result is a new dated record; nothing replaces the research in use unless it finishes complete, or open only on an outside event.</p>}
       {plan.newEvidence.length > 0 && (
         <ul className="list-disc pl-4 t-xs">{plan.newEvidence.slice(0, 8).map((e, i) => <li key={i}>{e.filed}: {e.label}</li>)}</ul>
       )}

@@ -95,7 +95,7 @@ export function suggestStage(args: { stage: string; held: boolean; coverageKey: 
   let s: { stage: "screening" | "researching" | "ready" | "passed"; reason: string } | null = null;
   if (hasResearch && coverageKey === "current" && action && /\b(avoid|pass|do not (buy|own)|don't buy|sell|exit)\b/i.test(action)) s = { stage: "passed", reason: `The research says: ${action}` };
   else if (hasResearch && coverageKey === "current") s = { stage: "ready", reason: "Research is on file and current, so it can be compared for new money (automated research stays preliminary until its open questions are checked)." };
-  else if (hasResearch && coverageKey === "unapproved") s = { stage: "researching", reason: "Research is on file but you have not approved it, so it cannot be used for new money yet." };
+  else if (hasResearch && coverageKey === "unapproved") s = { stage: "researching", reason: "Research is on file but not in use yet, so it cannot be used for new money yet." };
   else if (hasResearch) s = { stage: "researching", reason: coverageKey === "incomplete" ? "Research is on file but incomplete." : "Research is on file but needs a refresh before it can be relied on." };
   else if (screenVerdict === "Weak on screen") s = { stage: "passed", reason: "Weak on the first screen and no research on file." };
   else if (screenVerdict) s = { stage: "screening", reason: `Screened: ${screenVerdict.toLowerCase()}. Next is AI research.` };
