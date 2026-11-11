@@ -232,9 +232,9 @@ export function approvalText(v: Pick<ShareVersion, "conclusion" | "completeness"
   const mode = (c.adoption as { mode?: string } | undefined)?.mode;
   if (rs === "adopted" && v.completeness === "complete") return `Approved in full by the owner${at ? ` on ${day(at)}` : ""}${mode === "full_after_provisional" ? " (after a provisional approval)" : ""}`;
   if (rs === "adopted" || rs === "adopted_provisional") return `Approved provisionally by the owner${at ? ` on ${day(at)}` : ""}, with open items listed`;
-  if (rs === "awaiting_approval") return "Not approved: finished and waiting for the owner's review";
-  if (rs === "set_aside") return "Not approved: set aside by the owner";
-  return "Not approved";
+  if (rs === "awaiting_approval") return "Not in use: finished with unfinished work, kept beside the research in use";
+  if (rs === "set_aside") return "Not in use: set aside by the owner";
+  return "Not in use";
 }
 
 /**
@@ -287,7 +287,7 @@ export function buildShareReport(input: {
   const rs = String(c.review_state ?? "");
   if (input.choice === "latest" && input.approved && input.approved.id !== v.id) notices.push(`This is the most recent investigation, not the one the owner approved. The approved research is dated ${day(input.approved.research_as_of)}.`);
   if (input.choice === "approved" && input.latest && input.latest.id !== v.id) notices.push(`This is the owner's approved research. A newer investigation dated ${day(input.latest.research_as_of)} exists and is not approved.`);
-  if (rs === "awaiting_approval") notices.push("Not approved: this investigation has not been reviewed and approved by the owner.");
+  if (rs === "awaiting_approval") notices.push("Not in use: this investigation has unfinished work, so the app keeps using the earlier research.");
   if (rs === "set_aside") notices.push("The owner set this investigation aside; it is not the research in use.");
   if (rs === "adopted_provisional" || (rs === "adopted" && v.completeness !== "complete")) notices.push("Provisional: approved with open items, listed under Research status.");
   if (v.completeness !== "complete") notices.push(`Incomplete: ${completion?.kind === "material_uncertainty" ? "a material question has no reliable answer" : "some work could not be finished"}. The open items are listed under Research status.`);

@@ -124,7 +124,7 @@ export function validatePlan(raw: unknown, f: PlanFacts): Plan | { error: string
     if (target !== null && max !== null && target / 100 > max + 1e-9) { flags.push(`target ${r1(target)}% capped at the ${r1(max * 100)}% policy maximum`); target = r1(max * 100); }
     // An unapproved thesis cannot set a target above today's weight (that would be a research-based add).
     if (unapproved.has(symbol) && target !== null && current !== null && target > r1(current * 100) + 0.05) {
-      flags.push(`target ${r1(target)}% not used: the research is not approved, so no research-based increase`); target = r1(current * 100);
+      flags.push(`target ${r1(target)}% not used: the research is not in use yet, so no research-based increase`); target = r1(current * 100);
     }
     const pr = Number(p.priority);
     const plan = actionPlanOf(p.plan, { symbol, researched: !!k.asOf, preliminary: unapproved.has(symbol), openQuestions: openQ.has(symbol), flags });
@@ -144,7 +144,7 @@ export function validatePlan(raw: unknown, f: PlanFacts): Plan | { error: string
   for (const o of Array.isArray(r.opportunities) ? (r.opportunities as Record<string, unknown>[]) : []) {
     const symbol = str(o?.symbol, 12).toUpperCase();
     if (!symbol || opportunities.some((x) => x.symbol === symbol)) continue;
-    if (!ready.has(symbol)) { if (!passed.has(symbol)) problems.push(unapproved.has(symbol) ? `${symbol} was suggested as an opportunity but its research is not approved, so it was left out` : `${symbol} was suggested as an opportunity but is not Ready for decision, so it was left out`); continue; }
+    if (!ready.has(symbol)) { if (!passed.has(symbol)) problems.push(unapproved.has(symbol) ? `${symbol} was suggested as an opportunity but its research is not in use yet, so it was left out` : `${symbol} was suggested as an opportunity but is not Ready for decision, so it was left out`); continue; }
     const verdict = (["Buy now", "Wait for price", "Not yet"] as const).find((v) => v === o.verdict) ?? "Not yet";
     let amountUsd = num(o.amount_usd);
     if (amountUsd !== null && amountUsd <= 0) amountUsd = null;

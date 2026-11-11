@@ -138,11 +138,12 @@ export function cashBasis(a: { cashValue: number | null; asOf: string; sourceKin
   if (a.cashValue === null) checks.push("The statement on file has no cash figure.");
   if (cash < -0.005) checks.push(`Recorded transactions spend ${money(-cash)} more than the cash on the ${d(a.asOf)} statement: a deposit or trade is missing from the records.`);
   if (a.statementGap !== null && Math.abs(a.statementGap) > 1) checks.push(`The ${d(a.asOf)} statement total differs from its positions plus cash by ${money(a.statementGap)}.`);
-  if (age > CASH_CONFIRM_DAYS) checks.push(`The ${kind === "manual" ? "balance you entered" : "statement"} is ${age} days old.`);
+  const synced = kind === "schwab_api";
+  if (age > CASH_CONFIRM_DAYS) checks.push(`The ${kind === "manual" ? "balance you entered" : synced ? "last Schwab sync" : "statement"} is ${age} days old.`);
   const status: CashBasis["status"] = derived ? "derived" : kind === "manual" ? "manual" : "statement";
   const detail = derived
     ? `${money(stmt)} on the ${d(a.asOf)} statement ${net >= 0 ? "plus" : "less"} ${money(net)} from ${a.after.length} recorded transaction${a.after.length === 1 ? "" : "s"} through ${last} = ${money(cash)}. Worked out, not confirmed: nothing since ${d(a.asOf)} shows the actual balance or buying power.`
-    : kind === "manual" ? `${money(stmt)} as you entered it on ${d(a.asOf)}.` : `${money(stmt)} on the ${d(a.asOf)} statement, with no recorded activity since.`;
+    : kind === "manual" ? `${money(stmt)} as you entered it on ${d(a.asOf)}.` : synced ? `${money(stmt)} from Schwab, synced ${d(a.asOf)}.` : `${money(stmt)} on the ${d(a.asOf)} statement, with no recorded activity since.`;
   const c = a.confirmation;
   if (derived && c) {
     const cAge = Math.max(0, Math.floor((a.now.getTime() - Date.parse(c.at)) / 86_400_000));

@@ -9,7 +9,11 @@ import { getWorkspace } from "@/lib/workspace";
 import { writeBrief } from "@/lib/brief";
 import { getNews } from "@/lib/market/news";
 import { pctStr, shortDate, toneOf, usd } from "@/lib/format";
-import { Bar, Card, CardHead, Chevron, DataLabel, Disclose, Dot, Metric, PageHeader, Pill, Skel } from "@/components/ui";
+import { Bar, Card, CardHead, Chevron, DataLabel, Disclose, Dot, LinkRow, Metric, PageHeader, Pill, Skel } from "@/components/ui";
+import { settingsFrom } from "@/lib/costs/spend";
+
+/** An account that does not sync gets a statement reminder after this many days. */
+const STATEMENT_REMINDER_DAYS = 35;
 import { AlertList } from "@/components/cards/Alerts";
 import { EventsCard, EventsSkeleton } from "@/components/cards/Events";
 import { AnswerView } from "@/components/AnswerView";
@@ -56,6 +60,10 @@ export default async function TodayPage() {
   const vsSpy = p.dayPct !== null && spy !== null ? p.dayPct - spy : null;
   const verified = p.quality.status === "verified";
   const improve = await improvementView(db, ws).catch(() => null);
+  // Things only you can do, shown until done: start the 30-day test, and upload a statement for an account that does not sync.
+  const { data: costRow } = await db.from("model_runs").select("outputs").eq("kind", "cost_settings").order("computed_at", { ascending: false }).limit(1).maybeSingle();
+  const testNotStarted = !settingsFrom(costRow?.outputs ?? null).evalStart;
+  const staleAccounts = p.accounts.filter((a) => a.sourceKind !== "schwab_api" && a.role !== "cash" && a.role !== "protected_savings" && a.ageDays > STATEMENT_REMINDER_DAYS);
 
   if (!p.holdings.length && !ws.research.length) {
     return (
@@ -76,6 +84,14 @@ export default async function TodayPage() {
           <Link href="/brief" className="btn btn-sm lg:min-h-11 lg:px-4 lg:text-[15px] max-lg:hidden">Daily brief</Link>
         </>
       } />
+
+      {(testNotStarted || staleAccounts.length > 0) && (
+        <Card labelledBy="todo-h" className="!gap-2">
+          <CardHead id="todo-h" title="Needs you" />
+          {testNotStarted && <LinkRow href="/costs"><span className="t-sm text-ink block">Start the 30-day test</span><span className="t-xs block">Nothing counts toward the proof-of-value test until you tap Start on AI spending.</span></LinkRow>}
+          {staleAccounts.map((a) => <LinkRow key={a.id} href="/import"><span className="t-sm text-ink block">Upload the latest {a.name} statement</span><span className="t-xs block">Its figures are from {shortDate(a.asOf)} ({a.ageDays} days old), so its holdings and cash are estimates. It doesn&apos;t sync automatically.</span></LinkRow>)}
+        </Card>
+      )}
 
       <Card labelledBy="mb-h" className="!gap-2">
         <CardHead id="mb-h" cap="Morning briefing" right={<MorningRunner label={morningCheck?.outdated ? "Rewrite with today's facts" : morning ? "Write a new one" : "Write it now"} />} />

@@ -9,6 +9,10 @@ import { coverage } from "@/lib/research/status";
 import { pctStr, shortDate, usd } from "@/lib/format";
 import { Bar, Card, CardHead, DataLabel, Disclose, LinkRow, Metric, Pill } from "./ui";
 import { ZoneBar, toZoneViews } from "./ZoneBar";
+import { VOO_SPAN } from "@/lib/policy/evidence";
+import { companyView, marketDayOf, monthYear, valueToday } from "@/lib/research/valueLabels";
+
+const quoteTime = (iso: string) => new Date(iso).toLocaleString("en-US", { month: "short", day: "numeric", hour: "numeric", minute: "2-digit", timeZone: "America/New_York" }) + " ET";
 
 const cap1 = (s: string | null | undefined) => (s ? s.charAt(0).toUpperCase() + s.slice(1).toLowerCase() : "—");
 
@@ -75,6 +79,9 @@ export async function InvestmentSummary({ ws, symbol, brief }: { ws: Workspace; 
   const exp = exp0;
   const cov = coverage(r, price, ws.now, AGE_REMINDER_DAYS);
   const lim = lim0;
+  const view = companyView(cmp?.judgment);
+  const today0 = v?.parsed.weightedValue && v.parsed.horizonDate ? valueToday(v.parsed.weightedValue, v.parsed.horizonDate, ws.now) : null;
+  const refDay = any?.parsed.referenceDate ? marketDayOf(any.parsed.referenceDate) : null;
 
   return (
     <Card labelledBy="inv-h">
@@ -83,18 +90,21 @@ export async function InvestmentSummary({ ws, symbol, brief }: { ws: Workspace; 
       {any?.parsed.classification && <span className="t-xs -mt-1">Classification: <span className="text-ink">{any.parsed.classification}</span></span>}
       {any ? (
         <div className="grid grid-cols-3 gap-x-2 gap-y-3">
-          <Metric label="Action" value={brief?.action || cap1(any.parsed.action)} />
+          <Metric label="Company at this price" value={view ?? "—"} note={view ? "valuation only, vs VOO" : v && !check?.ok ? "not re-priced" : undefined} />
+          <Metric label="For your portfolio" value={brief?.action || cap1(any.parsed.action)} note="uses your limits and cash" />
           <Metric label="Confidence" value={cap1(brief?.confidence ?? any.parsed.confidence)} />
+          <Metric label="Price now" value={price ? usd(price, 2) : "—"} note={!q && h ? "statement price" : q?.asOf ? `delayed, ${quoteTime(q.asOf)}` : "delayed"} />
+          <Metric label={v?.parsed.horizonDate ? `Price forecast, ${monthYear(v.parsed.horizonDate)}` : "Price forecast"} value={v?.parsed.weightedValue ? usd(v.parsed.weightedValue, 2) : "—"} note={v?.parsed.weightedValue ? "weighted scenarios, a future price" : undefined} />
+          <Metric label="Value today" value={today0 !== null ? usd(today0, 2) : "—"} note={today0 !== null ? `the forecast at ${pctStr(VOO_SPAN.high)} a year` : undefined} />
+          <Metric label="Expected return" value={er === null ? "—" : `≈ ${pctStr(er)}`} note={er === null ? (v && !check?.ok ? "not re-priced" : undefined) : "a year from today's price"} />
           <Metric label="Research" value={shortDate(any.research_as_of).replace(/, \d{4}$/, "")} note={age !== null ? `${age} days old` : undefined} />
-          <Metric label="Price" value={price ? usd(price, 2) : "—"} note={!q && h ? "statement price" : "delayed"} />
-          <Metric label="Estimated value" value={v?.parsed.weightedValue ? usd(v.parsed.weightedValue, 2) : "—"} note={v?.parsed.weightedValue ? (v.parsed.horizonDate ? `weighted, by ${shortDate(v.parsed.horizonDate).replace(/^[A-Za-z]+ \d+, /, "")}` : "weighted") : undefined} />
-          <Metric label="Expected return" value={er === null ? "—" : `≈ ${pctStr(er)}`} note={er === null ? (v && !check?.ok ? "not re-priced" : undefined) : "a year"} />
+          <Metric label="Research price" value={any.parsed.referencePrice ? usd(any.parsed.referencePrice, 2) : "—"} note={refDay ? `close of ${shortDate(refDay.date).replace(/, \d{4}$/, "")}${refDay.moved ? " (market closed on the research date)" : ""}` : undefined} />
         </div>
       ) : (
         <p className="t-sm">No research on file for {symbol}. Run the screen below, then start full research before comparing it for new money.</p>
       )}
       {r?.pendingReview && (
-        <p className="t-xs warn">Newer research awaiting your approval: the {shortDate(r.pendingReview.research_as_of)} investigation{brief?.pending && !brief.pending.running && brief.pending.action ? ` (${brief.pending.action}${brief.pending.confidence ? `, ${brief.pending.confidence.toLowerCase()} confidence` : ""})` : ""}. The figures above use the research in use until you approve it; the decision is below.</p>
+        <p className="t-xs warn">Newer research not in use yet: the {shortDate(r.pendingReview.research_as_of)} investigation{brief?.pending && !brief.pending.running && brief.pending.action ? ` (${brief.pending.action}${brief.pending.confidence ? `, ${brief.pending.confidence.toLowerCase()} confidence` : ""})` : ""}. It has open work, so the figures above still use the research in use; you can put it in use below.</p>
       )}
 
       {v && (

@@ -279,7 +279,7 @@ function ResearchStatus({ s }: { s: Standing }) {
         </div>
         {s.pending && (
           <div><span className="t-xs block">Latest investigation</span>
-            <span className="text-ink">{shortDate(s.pending.v.research_as_of)} · {s.pending.state === "running" ? "in progress" : `${s.pending.complete ? "complete" : s.pending.kind === "material_uncertainty" ? "incomplete: a material question has no reliable answer" : "incomplete"} · waiting for your decision (not used until you approve it)`}{s.pending.open.length ? ` · ${s.pending.open.length} open item${s.pending.open.length === 1 ? "" : "s"}` : ""}</span>
+            <span className="text-ink">{shortDate(s.pending.v.research_as_of)} · {s.pending.state === "running" ? "in progress" : `${s.pending.complete ? "complete" : s.pending.kind === "material_uncertainty" ? "incomplete: a material question has no reliable answer" : "incomplete"} · not in use: it has unfinished work`}{s.pending.open.length ? ` · ${s.pending.open.length} open item${s.pending.open.length === 1 ? "" : "s"}` : ""}</span>
           </div>
         )}
         {s.history.length > 0 && <div><span className="t-xs block">History</span><span>{s.history.length} earlier record{s.history.length === 1 ? "" : "s"}, kept unchanged (listed under Research history)</span></div>}

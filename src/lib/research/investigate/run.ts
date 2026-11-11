@@ -8,6 +8,7 @@
  * The result is a NEW research version (origin claude_full or claude_targeted_update) that is never
  * made current automatically: it waits for the investor's approval. Earlier versions are not touched.
  */
+import { autoAdopt } from "@/lib/research/adopt";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { save } from "@/lib/intel/jobs";
 import { DAILY_CAP, spentToday } from "@/lib/intel/start";
@@ -444,7 +445,7 @@ async function stepFinalize(db: SupabaseClient, s: RunState) {
   const runtimeMs = Date.now() - Date.parse(s.startedAt);
   const conclusion = {
     research_type: s.type, review_state: "awaiting_approval", request_id: s.requestId, generated_by: INVESTIGATION_VERSION,
-    action: sm?.action ?? null, classification: sm?.classification ?? null, confidence: sm?.confidence ?? null, thesis: sm?.thesis ?? null, summary: sm?.headline ?? null,
+    company_view: (sm as { company_view?: unknown } | undefined)?.company_view ?? null, action: sm?.action ?? null, classification: sm?.classification ?? null, confidence: sm?.confidence ?? null, thesis: sm?.thesis ?? null, summary: sm?.headline ?? null,
     reference_price: s.price.value, reference_date: s.today, reference_price_source: s.price.source ?? "none",
     valuation: v ? {
       bear_value: by("bear")?.value_per_share ?? null, bear_probability: by("bear")?.probability ?? null,
@@ -470,7 +471,7 @@ async function stepFinalize(db: SupabaseClient, s: RunState) {
   if (s.versionId) {
     const { error } = await db.from("research_versions").update({
       completeness: s.completeness.complete ? "complete" : "partial", conclusion,
-      change_summary: `${s.type === "full_investigation" ? "Full investigation" : "Material-event refresh"} ${s.today}: ${s.completeness.complete ? "complete" : `incomplete (${s.completeness.reasons.length} open item${s.completeness.reasons.length === 1 ? "" : "s"})`}. ${counts.fully_reviewed ?? 0} documents read in full. $${s.usage.costUsd.toFixed(2)}, ${Math.round(runtimeMs / 60000)} min. Awaiting your approval before it is used.`.slice(0, 2000),
+      change_summary: `${s.type === "full_investigation" ? "Full investigation" : "Material-event refresh"} ${s.today}: ${s.completeness.complete ? "complete" : `incomplete (${s.completeness.reasons.length} open item${s.completeness.reasons.length === 1 ? "" : "s"})`}. ${counts.fully_reviewed ?? 0} documents read in full. $${s.usage.costUsd.toFixed(2)}, ${Math.round(runtimeMs / 60000)} min.`.slice(0, 2000),
     }).eq("id", s.versionId);
     if (error) throw new Error(`Could not save the result: ${error.message}`);
     await db.from("research_sources").delete().eq("version_id", s.versionId);
@@ -497,6 +498,9 @@ async function stepFinalize(db: SupabaseClient, s: RunState) {
       p.summary = `Carried forward unchanged from the research dated ${s.base?.research_as_of} (not redone in this refresh).\n\n${old?.body_markdown ?? "(no text in the earlier research)"}`;
       await savePhaseRow(db, s, p.n);
     }
+    // The investor's standing rule: the most recent, complete, most in-depth research is the one in use.
+    try { note(s, "finalize", `Research in use: ${await autoAdopt(db, s.versionId, s.symbol)}.`); }
+    catch (e) { note(s, "finalize", `Not put in use automatically: ${(e as Error).message.slice(0, 160)}`); }
   }
   s.status = "finished";
   advance(s);

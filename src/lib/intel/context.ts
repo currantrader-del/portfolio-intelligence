@@ -11,7 +11,7 @@ export function portfolioContext(ws: Workspace): PortfolioContext {
     const r = ws.research.find((x) => x.symbol === h.symbol);
     const v = r?.current ?? r?.latest;
     const age = r ? researchAgeDays(r, ws.now) : null;
-    // A newer version than the approved one (a refresh in progress) must never be hidden behind it.
+    // A newer version than the one in use (a refresh in progress) must never be hidden behind it.
     const newer = r?.current && r.latest && r.latest.id !== r.current.id && r.latest.research_as_of > r.current.research_as_of ? r.latest : null;
     const lim = ws.policy?.companies[h.symbol];
     const limit = lim?.hardMax != null
@@ -20,7 +20,7 @@ export function portfolioContext(ws: Workspace): PortfolioContext {
     return {
       symbol: h.symbol, weight: h.weight, bucket: h.bucket,
       research: v
-        ? `${r?.current ? "approved" : "not approved"}: ${v.completeness}, dated ${v.research_as_of}${age != null ? ` (${age} days old)` : ""}${v.parsed.action ? `, last call ${v.parsed.action}` : ""}${newer ? `; NEWER VERSION IN PROGRESS dated ${newer.research_as_of} (${newer.completeness}${newer.parsed.action ? `, status ${newer.parsed.action}` : ""}): the approved call is under review` : ""}`
+        ? `${r?.current ? "in use" : "not in use"}: ${v.completeness}, dated ${v.research_as_of}${age != null ? ` (${age} days old)` : ""}${v.parsed.action ? `, last call ${v.parsed.action}` : ""}${newer ? `; NEWER VERSION IN PROGRESS dated ${newer.research_as_of} (${newer.completeness}${newer.parsed.action ? `, status ${newer.parsed.action}` : ""}): the call in use may change` : ""}`
         : "none on file",
       limit,
     };
