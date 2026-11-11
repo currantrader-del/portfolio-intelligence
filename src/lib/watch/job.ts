@@ -10,8 +10,10 @@ import type { Alert } from "@/lib/alerts/rules";
 import { loadEventAlerts } from "@/lib/alerts/events";
 import { loadReviewState } from "@/lib/alerts/review";
 import { filingsToPush } from "./filingFilter";
+import { addFilingReads } from "./filingRead";
 import { isMarketOpen } from "@/lib/market/hours";
 import { getQuotes } from "@/lib/market/quotes";
+import { withSchwabQuotes } from "@/lib/schwab/market";
 import { buildWorkspace } from "@/lib/workspace-core";
 import { save } from "@/lib/intel/jobs";
 import { DAILY_CAP, spentToday } from "@/lib/intel/start";
@@ -93,12 +95,13 @@ export async function runWatch(db: SupabaseClient, origin: string, opts: { force
   if (closed.length && settings.enabled && settings.topic) await pushTradeNews(settings.topic, origin, closed, "closed").catch((e) => console.error(`watch: trade push failed: ${(e as Error).message}`));
   if (!settings.enabled || !settings.topic) return { skipped: "phone alerts are off" };
 
-  const ws = await buildWorkspace(db, now);
+  // Schwab's real-time quotes when connected (free delayed quotes otherwise).
+  const ws = await buildWorkspace(db, now, { liveQuotes: true });
   const held = new Set(ws.portfolio.holdings.map((h) => h.symbol));
   const ideas = ws.research.filter((r) => !held.has(r.symbol) && r.current).map((r) => r.symbol);
   const [events, ideaQuotes, past] = await Promise.all([
     loadEventAlerts([...held, ...ideas], now).catch(() => ({ alerts: [] as Alert[] })),
-    ideas.length ? getQuotes(ideas) : Promise.resolve(new Map()),
+    ideas.length ? getQuotes(ideas).then((free) => withSchwabQuotes(db, free, ideas)) : Promise.resolve(new Map()),
     watchRuns(db),
   ]);
   // Filings already read by research, marked reviewed, debt-only, or first seen days late stay on the Events page.
@@ -118,6 +121,16 @@ export async function runWatch(db: SupabaseClient, origin: string, opts: { force
   const lastSent = new Map<string, string>();
   for (const r of [...past].reverse()) if (r.pushed || r.queued) for (const s of r.sent) if (s.decision) lastSent.set(s.decision.id, r.at);
   const freshAlerts = prefs.intelligence ? selectDecisionAlerts(all, lastSent, now) : [];
+  // New filings get a two-line first read (a fraction of a cent each), within the daily and test budgets.
+  let readCost = 0;
+  if (freshAlerts.some((d) => d.category === "thesis_change")) {
+    const room = (await spentToday(db, now)).total < DAILY_CAP.total && (await automatedAllowed(db, "watch_run", now)).ok;
+    if (room) {
+      const files = new Map(pushable.filter((e) => e.source).map((e) => [`filing:${e.id}`, { url: e.source!.url, form: e.source!.form }]));
+      const theses = new Map(ws.research.filter((r) => r.current?.parsed.thesis).map((r) => [r.symbol, r.current!.parsed.thesis!]));
+      readCost = await addFilingReads(db, freshAlerts, files, theses).catch((e) => { console.error(`watch: filing reads failed: ${(e as Error).message}`); return 0; });
+    }
+  }
   const fresh = freshAlerts.map((d) => ({ key: d.id, decision: d, alert: toAlert(d) }));
 
   // Price-movement alerts: code only, independent of research, one per threshold crossing per session.
@@ -141,7 +154,7 @@ export async function runWatch(db: SupabaseClient, origin: string, opts: { force
   const urgent = new Set(freshAlerts.filter((d) => d.category === "urgent_risk").map((d) => d.symbol));
   const moves = moveAlerts.map((m) => ({ alert: m, covered: urgent.has(m.symbol) && m.dir === "down", pushed: false, queued: false }));
 
-  const run: WatchRun = { version: WATCH_VERSION, at: now.toISOString(), trigger: opts.force ? "manual" : "schedule", checked: all.length, sent: fresh, summary: null, pushed: false, error: null, costUsd: 0, moves };
+  const run: WatchRun = { version: WATCH_VERSION, at: now.toISOString(), trigger: opts.force ? "manual" : "schedule", checked: all.length, sent: fresh, summary: null, pushed: false, error: null, costUsd: readCost, moves };
   const toPushMoves = moves.filter((m) => !m.covered);
   if (toPushMoves.length) {
     if (prefs.priceDelivery === "daily") toPushMoves.forEach((m) => { m.queued = true; });
@@ -162,7 +175,7 @@ export async function runWatch(db: SupabaseClient, origin: string, opts: { force
     if (spent.total < DAILY_CAP.total && (await automatedAllowed(db, "watch_run", now)).ok) {
       const theses = new Map(ws.research.filter((r) => r.current?.parsed.thesis).map((r) => [r.symbol, r.current!.parsed.thesis!]));
       const s = await summarize(items, theses).catch((e) => { console.error(`watch: summary failed: ${(e as Error).message}`); return { text: null, costUsd: 0 }; });
-      run.summary = s.text; run.costUsd = s.costUsd;
+      run.summary = s.text; run.costUsd += s.costUsd;
     }
     const msg = formatDecisionPush(freshAlerts, run.summary);
     const click = items.length === 1 ? `${origin}${items[0].href}` : `${origin}/alerts`;

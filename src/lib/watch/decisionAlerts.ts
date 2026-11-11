@@ -167,7 +167,7 @@ export function decisionAlerts(a: DecisionInputs): DecisionAlert[] {
       title: e.title,
       changed: `${e.detail}`,
       why: `${h ? `You hold ${e.symbol} (${(h.weight * 100).toFixed(1)}%).` : `${e.symbol} is on your researched watchlist.`} Results, reports and financings are where a thesis usually changes.${r?.current?.parsed.thesis ? ` Thesis on file: ${short(r.current.parsed.thesis, 160)}` : ""}`,
-      action: "Review the filing against the thesis (Events page). No trade is supported until it is read.",
+      action: "Review the filing against the thesis (company page). No trade is supported until it is read.",
       uncertain: "The filing has not been read by the app; its terms and impact are unknown.",
       verified: e.source ? `SEC ${e.source.form} filed ${e.source.filed}` : "SEC filing",
     });

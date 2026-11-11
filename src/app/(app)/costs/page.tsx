@@ -1,5 +1,6 @@
 import { createClient } from "@/lib/supabase/server";
 import { loadSpend, type BudgetClass } from "@/lib/costs/spend";
+import { actionCounts, loadMyActions } from "@/lib/eval/log";
 import { measuredEstimates } from "@/lib/research/costEstimates";
 import { DAILY_CAP, spentToday } from "@/lib/intel/start";
 import { ActionForm, SubmitButton } from "@/components/forms";
@@ -15,7 +16,7 @@ const CLASS: Record<BudgetClass, { title: string; what: string }> = {
 export default async function CostsPage() {
   const db = await createClient();
   const now = new Date();
-  const [s, est, today] = await Promise.all([loadSpend(db, now), measuredEstimates(db, now), spentToday(db, now)]);
+  const [s, est, today, mine] = await Promise.all([loadSpend(db, now), measuredEstimates(db, now), spentToday(db, now), loadMyActions(db, 45).catch(() => new Map())]);
   const monthName = now.toLocaleDateString("en-US", { month: "long", year: "numeric", timeZone: "UTC" });
 
   return (
@@ -47,12 +48,13 @@ export default async function CostsPage() {
                 </tr>
               ))}
             </tbody></table>
+            {(() => { const n = actionCounts([...mine.values()].filter((a) => a.at >= e.start)); return <span className="t-xs">Your decisions logged in the test: {n.did} done, {n.passed} passed (tap &quot;I did this&quot; or &quot;I passed&quot; on Today, Alerts and Radar).</span>; })()}
           </Card>
         );
       })() : (
         <Card className="!gap-2">
           <CardHead title="30-day test" right={<Pill small>Not started</Pill>} />
-          <p className="t-sm">When you start the test, all AI spending from that moment counts against one ceiling, reported as market briefings, research updates, company analysis, your questions and background monitoring. You get one phone warning at the warning level; at the ceiling, scheduled paid jobs stop and the app says what it skipped. The weekly trade scan is paused during the test.</p>
+          <p className="t-sm">When you start the test, all AI spending from that moment counts against one ceiling, reported as market briefings, research updates, company analysis, your questions and background monitoring. You get one phone warning at the warning level; at the ceiling, scheduled paid jobs stop and the app says what it skipped. The weekly trade scan is paused during the test; Opportunity Radar (about $0.45 a week) keeps running.</p>
           <ActionForm action={startEvaluation} success="30-day test started" className="flex flex-col gap-2">
             <div className="grid grid-cols-2 gap-2">
               <label className="field">Ceiling ($)<input name="ceiling" inputMode="decimal" defaultValue={s.settings.evalCeiling} className="input" required /></label>

@@ -1,5 +1,5 @@
 /**
- * Schwab Trader API, READ-ONLY (2026-11-10). The app reads balances, positions and cash; it never trades.
+ * Schwab Trader API, READ-ONLY (2026-11-10). The app reads balances, positions, cash, past trades and quotes; it never trades.
  *   - Requests to Schwab's data API go through schwabGet(), which allows GET only and only the paths in
  *     READ_PATHS. There is no code for orders, and a test fails if any appears in this folder.
  *   - The Schwab app itself is registered with an order limit of 0.
@@ -15,7 +15,7 @@ export const SCHWAB_VERSION = "schwab@1";
 const AUTH = "https://api.schwabapi.com/v1/oauth";
 const API = "https://api.schwabapi.com";
 /** The only Schwab data paths the app may call, all with GET. */
-export const READ_PATHS = [/^\/trader\/v1\/accounts(\?fields=positions)?$/, /^\/trader\/v1\/accounts\/accountNumbers$/, /^\/marketdata\/v1\/quotes\?/];
+export const READ_PATHS = [/^\/trader\/v1\/accounts(\?fields=positions)?$/, /^\/trader\/v1\/accounts\/accountNumbers$/, /^\/trader\/v1\/accounts\/[A-Za-z0-9]+\/transactions\?[^/]*$/, /^\/marketdata\/v1\/quotes\?[^/]*$/];
 export const REFRESH_DAYS = 7;
 const ACCESS_MARGIN_MS = 60_000;
 

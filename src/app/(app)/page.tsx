@@ -25,6 +25,8 @@ import { currentDecisionFor } from "@/lib/decision/currentPortfolio";
 import { loadDecisionFilings } from "@/lib/alerts/events";
 import { ImprovementTeaser } from "@/components/ImprovementCard";
 import { improvementView } from "@/lib/shadow/proposals";
+import { MyActionButtons } from "@/components/eval/MyAction";
+import { actionRef, loadMyActions } from "@/lib/eval/log";
 
 const pts = (v: number) => `${v >= 0 ? "+" : "−"}${Math.abs(v).toFixed(2)}`;
 
@@ -95,7 +97,7 @@ export default async function TodayPage() {
 
       <Card labelledBy="mb-h" className="!gap-2">
         <CardHead id="mb-h" cap="Morning briefing" right={<MorningRunner label={morningCheck?.outdated ? "Rewrite with today's facts" : morning ? "Write a new one" : "Write it now"} />} />
-        {morningSkipped.length > 0 && <p className="t-xs warn">Not done this morning: {morningSkipped.map((x) => x.replace(/^(\w+) (skipped: |failed: )?/, (_m, k: string, how?: string) => `${({ market_briefing: "market briefing", assistant_answer: "this summary", morning_answer: "this summary", portfolio_plan: "weekly plan", trade_scan: "trade scan" } as Record<string, string>)[k] ?? k} ${how?.startsWith("failed") ? "failed: " : "skipped, "}`)).join("; ")}. <Link href="/costs">Costs</Link></p>}
+        {morningSkipped.length > 0 && <p className="t-xs warn">Not done this morning: {morningSkipped.map((x) => x.replace(/^(\w+) (skipped: |failed: )?/, (_m, k: string, how?: string) => `${({ market_briefing: "market briefing", assistant_answer: "this summary", morning_answer: "this summary", portfolio_plan: "weekly plan", trade_scan: "trade scan", radar_run: "Opportunity Radar" } as Record<string, string>)[k] ?? k} ${how?.startsWith("failed") ? "failed: " : "skipped, "}`)).join("; ")}. <Link href="/costs">Costs</Link></p>}
         {morning ? (
           <>
             {morningCheck && <OutdatedNotice v={morningCheck} what="briefing" />}
@@ -209,18 +211,24 @@ async function MoverHeadlines({ movers }: { movers: { symbol: string; dayPct: nu
   );
 }
 
-/** The Current Portfolio decision in one line: the same answer the Decisions page gives. */
+/** The Current Portfolio decision in one line: the same answer the Decisions page gives, with one tap to say what you did. */
 async function BestAction() {
   const ws = await getWorkspace();
   const d = currentDecisionFor(ws, await loadDecisionFilings(ws).catch(() => new Map()));
+  const db = await createClient();
+  const day = ws.now.toLocaleDateString("en-CA", { timeZone: "America/New_York" });
+  const mine = (await loadMyActions(db, 3).catch(() => new Map())).get(actionRef("recommendation", day)) ?? null;
   return (
-    <Link href="/decisions" className="card card-tight lg:col-span-12 !flex-row items-center justify-between gap-3 no-underline">
-      <span className="flex flex-col min-w-0">
-        <span className="cap">Best action now</span>
-        <span className="font-semibold text-ink">{d.headline}</span>
-        <span className="t-xs">From your holdings, approved research, cash and standing transfer limit. No AI. Open Decisions for the alternatives and what to confirm.</span>
-      </span>
-      <Chevron />
-    </Link>
+    <div className="card card-tight lg:col-span-12 !gap-2">
+      <Link href="/decisions" className="flex items-center justify-between gap-3 no-underline">
+        <span className="flex flex-col min-w-0">
+          <span className="cap">Best action now</span>
+          <span className="font-semibold text-ink">{d.headline}</span>
+          <span className="t-xs">From your holdings, research in use, cash and standing transfer limit. No AI. Open Decisions for the alternatives and what to confirm.</span>
+        </span>
+        <Chevron />
+      </Link>
+      <MyActionButtons subject="recommendation" refId={day} summary={d.headline} path="/" current={mine} label="Today, did you act on it?" />
+    </div>
   );
 }

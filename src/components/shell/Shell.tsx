@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { MORE, SECTIONS, NavIcon, backOf, sectionOf, titleOf } from "./nav";
+import { MORE, SECTIONS, SETUP, NavIcon, backOf, sectionOf, titleOf } from "./nav";
 import { Chevron } from "@/components/ui";
 import { usePendingPath } from "./NavProgress";
 
@@ -30,9 +30,12 @@ export function Sidebar({ status }: { status: React.ReactNode }) {
       </nav>
       <div className="flex-1" />
       <nav aria-label="More" className="flex flex-col">
-        {MORE.map((m) => (
-          <Link key={m.href} href={m.href} aria-current={path === m.href.split("?")[0] ? "page" : undefined}
-            className="nav-item flex items-center min-h-9 px-3 rounded-[10px] text-sm no-underline text-muted hover:text-ink aria-[current=page]:text-ink">{m.label}</Link>
+        {[...MORE, ...SETUP].map((m, i) => (
+          <span key={m.href} className="contents">
+            {i === MORE.length && <span className="cap px-3 pt-3 pb-1">Setup</span>}
+            <Link href={m.href} aria-current={path === m.href.split("?")[0] ? "page" : undefined}
+              className="nav-item flex items-center min-h-9 px-3 rounded-[10px] text-sm no-underline text-muted hover:text-ink aria-[current=page]:text-ink">{m.label}</Link>
+          </span>
         ))}
       </nav>
       <div className="px-3 pt-3 min-h-8">{status}</div>
@@ -59,9 +62,12 @@ export function TopBar({ status }: { status: React.ReactNode }) {
               <svg width="20" height="20" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true"><circle cx="4.5" cy="10" r="1.5" /><circle cx="10" cy="10" r="1.5" /><circle cx="15.5" cy="10" r="1.5" /></svg>
             </summary>
             <nav aria-label="More" className="absolute right-0 top-12 w-52 card card-tight p-1.5 gap-0 shadow-2xl shadow-black/60">
-              {MORE.map((m) => (
-                <Link key={m.href} href={m.href} className="nav-item min-h-11 px-3 flex items-center rounded-lg no-underline text-ink-2 hover:bg-surface-2"
-                  onClick={(e) => (e.currentTarget.closest("details") as HTMLDetailsElement | null)?.removeAttribute("open")}>{m.label}</Link>
+              {[...MORE, ...SETUP].map((m, i) => (
+                <span key={m.href} className="contents">
+                  {i === MORE.length && <span className="cap px-3 pt-2 pb-1 border-t border-line mt-1">Setup</span>}
+                  <Link href={m.href} className="nav-item min-h-11 px-3 flex items-center rounded-lg no-underline text-ink-2 hover:bg-surface-2"
+                    onClick={(e) => (e.currentTarget.closest("details") as HTMLDetailsElement | null)?.removeAttribute("open")}>{m.label}</Link>
+                </span>
               ))}
             </nav>
           </details>

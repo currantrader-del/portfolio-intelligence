@@ -5,6 +5,7 @@
 import { startPlan } from "@/lib/plan/job";
 import { automatedAllowed, evaluationActive } from "@/lib/costs/spend";
 import { startTradeScan } from "@/lib/trades/job";
+import { startRadar } from "@/lib/radar/job";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { buildWorkspace } from "@/lib/workspace-core";
 import { takeSnapshot } from "./snapshot";
@@ -39,7 +40,7 @@ export async function startBriefing(db: SupabaseClient, token: string, origin: s
 /** What has been spent today (UTC) on briefings, and on assistant answers plus company research (one shared bucket), from the stored rows. */
 export async function spentToday(db: SupabaseClient, now = new Date()) {
   const since = `${now.toISOString().slice(0, 10)}T00:00:00Z`;
-  const { data } = await db.from("model_runs").select("kind, outputs->>costUsd").in("kind", ["market_briefing", "assistant_answer", "research_result", "portfolio_plan", "watch_run", "trade_scan", "exposure_review", "investigation_step"]).gte("computed_at", since);
+  const { data } = await db.from("model_runs").select("kind, outputs->>costUsd").in("kind", ["market_briefing", "assistant_answer", "research_result", "portfolio_plan", "watch_run", "trade_scan", "radar_run", "exposure_review", "investigation_step"]).gte("computed_at", since);
   let briefings = 0, answers = 0;
   for (const r of (data ?? []) as { kind: string; costUsd: string | null }[]) {
     const c = Number(r.costUsd ?? 0) || 0;
@@ -105,11 +106,16 @@ export async function runMorning(db: SupabaseClient, token: string, origin: stri
   if (wed && !testing && (await room("trade_scan"))) {
     trades = await startTradeScan(db, origin, token, "weekly").catch((e) => { console.error(`morning: trade scan did not start: ${(e as Error).message}`); return null; });
   }
+  // Opportunity Radar (Wednesdays, also during the test): at most three new ideas worth researching, or none.
+  let radar: string | null = null;
+  if (wed && (await room("radar_run"))) {
+    radar = await startRadar(db, origin, token, "weekly").catch((e) => { console.error(`morning: radar did not start: ${(e as Error).message}`); return null; });
+  }
   // Evaluation log: the morning's recommendation and the data behind it (code only, no AI cost).
   const logged = await logRecommendation(db, { trigger: "morning", answerId, briefingId: "error" in b ? null : b.snapshotId ?? null }).catch((e) => { console.error(`morning: recommendation log failed: ${(e as Error).message}`); return null; });
   if ("error" in b) skipped.push(`market_briefing failed: ${b.error}`);
-  await record({ skipped, briefing: "error" in b ? null : b.snapshotId, answerId, plan, trades });
-  return { briefing: "error" in b ? null : b.snapshotId, requestId, answerId, plan, trades, skipped, logged };
+  await record({ skipped, briefing: "error" in b ? null : b.snapshotId, answerId, plan, trades, radar });
+  return { briefing: "error" in b ? null : b.snapshotId, requestId, answerId, plan, trades, radar, skipped, logged };
 }
 
 export const MORNING_QUESTION = "Morning briefing. Using today's market briefing, my portfolio, the research and action plans on file and the alerts, answer these six questions in this order, each under its own short bold heading, in one to three sentences each: 1. What happened in the market? 2. Did anything materially affect my investments? 3. Is any action needed? (Holding, and holding cash, are valid answers; name a buy or trim only when the action plan's conditions are met with current, verified data.) 4. Are any researched stocks approaching their entry criteria? 5. Are any new opportunities worth investigating? 6. Are there important upcoming events? Start with one line giving the key recommendation. Say plainly when nothing changed; do not fill space. Mark anything unverified or stale as such.";

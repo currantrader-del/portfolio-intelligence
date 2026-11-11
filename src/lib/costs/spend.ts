@@ -16,6 +16,7 @@ export const FEATURES: Record<string, { label: string; cls: BudgetClass }> = {
   assistant_answer: { label: "Your questions (Ask)", cls: "everyday" },
   portfolio_plan: { label: "Portfolio plan", cls: "everyday" },
   trade_scan: { label: "Trade ideas scan", cls: "everyday" },
+  radar_run: { label: "Opportunity Radar", cls: "everyday" },
   watch_run: { label: "Watch alerts", cls: "everyday" },
   exposure_review: { label: "Exposure review", cls: "everyday" },
   shadow_proposal: { label: "Portfolio improvement reviews", cls: "everyday" },
@@ -23,7 +24,7 @@ export const FEATURES: Record<string, { label: string; cls: BudgetClass }> = {
   full_investigation: { label: "Full investigations", cls: "research" },
   material_event_refresh: { label: "Research updates", cls: "research" },
 };
-export const COST_KINDS = ["market_briefing", "assistant_answer", "portfolio_plan", "trade_scan", "watch_run", "exposure_review", "shadow_proposal", "research_result", "investigation_step"];
+export const COST_KINDS = ["market_briefing", "assistant_answer", "portfolio_plan", "trade_scan", "radar_run", "watch_run", "exposure_review", "shadow_proposal", "research_result", "investigation_step"];
 
 export type CostSettings = {
   everydayMonthly: number; researchMonthly: number; approveAbove: number;
@@ -46,7 +47,7 @@ export const EVAL_CATEGORY_LABEL: Record<EvalCategory, string> = {
 export const EVAL_CATEGORY: Record<string, EvalCategory> = {
   market_briefing: "briefings", morning_answer: "briefings",
   material_event_refresh: "research_updates", full_investigation: "research_updates", research_result: "research_updates",
-  portfolio_plan: "company_analysis", exposure_review: "company_analysis", shadow_proposal: "company_analysis", trade_scan: "company_analysis",
+  portfolio_plan: "company_analysis", exposure_review: "company_analysis", shadow_proposal: "company_analysis", trade_scan: "company_analysis", radar_run: "company_analysis",
   assistant_answer: "questions", watch_run: "monitoring",
 };
 
@@ -203,7 +204,7 @@ export async function loadSpend(db: SupabaseClient, now = new Date()): Promise<S
 
 /** What one run of a feature usually costs, until the month has enough runs of it to measure. */
 export const DEFAULT_RUN_COST: Record<string, number> = {
-  market_briefing: 0.6, morning_answer: 0.15, assistant_answer: 0.15, portfolio_plan: 0.5, trade_scan: 0.6, watch_run: 0.05, exposure_review: 0.3, research_result: 0.35, shadow_proposal: 0.12,
+  market_briefing: 0.6, morning_answer: 0.15, assistant_answer: 0.15, portfolio_plan: 0.5, trade_scan: 0.6, radar_run: 0.45, watch_run: 0.05, exposure_review: 0.3, research_result: 0.35, shadow_proposal: 0.12,
 };
 
 /** The expected cost of one more run: this month's average once there are two runs, never below half the default. */

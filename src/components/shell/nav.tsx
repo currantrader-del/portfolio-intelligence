@@ -7,18 +7,20 @@ export const SECTIONS = [
   { href: "/decisions", label: "Decisions", icon: <path d="M5 11l4 4 8-9" /> },
 ] as const;
 
+/** Less-used pages, in two groups: things you use, and setup. Trade ideas, Markets and the weekly brief are reached from their related pages. */
 export const MORE = [
-  { href: "/plan", label: "Portfolio plan" },
-  { href: "/trades", label: "Trade ideas" },
+  { href: "/radar", label: "Opportunity Radar" },
   { href: "/alerts", label: "Phone alerts" },
+  { href: "/brief", label: "Briefs (day and week)" },
   { href: "/assistant", label: "Your questions" },
-  { href: "/markets", label: "Markets briefing" },
-  { href: "/brief", label: "Daily brief" },
-  { href: "/brief?period=week", label: "Weekly brief" },
-  { href: "/policy", label: "Policy" },
-  { href: "/costs", label: "AI spending" },
+  { href: "/plan", label: "Portfolio plan" },
+  { href: "/costs", label: "30-day test and AI cost" },
+] as const;
+
+export const SETUP = [
+  { href: "/policy", label: "Policy limits" },
+  { href: "/import", label: "Import statements" },
   { href: "/portfolio/reconcile", label: "Reconcile" },
-  { href: "/import", label: "Import" },
 ] as const;
 
 const TITLES: [RegExp, string][] = [
@@ -34,6 +36,7 @@ const TITLES: [RegExp, string][] = [
   [/^\/plan/, "Plan"],
   [/^\/alerts/, "Alerts"],
   [/^\/trades/, "Trades"],
+  [/^\/radar/, "Radar"],
   [/^\/import/, "Import"],
 ];
 

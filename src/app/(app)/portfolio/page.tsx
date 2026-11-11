@@ -4,6 +4,7 @@ import { createClient } from "@/lib/supabase/server";
 import { SchwabCard } from "@/components/SchwabCard";
 import { connection } from "@/lib/schwab/client";
 import { lastSync } from "@/lib/schwab/sync";
+import { recentSchwabTrades } from "@/lib/schwab/market";
 import { getWorkspace } from "@/lib/workspace";
 import { isEtf, LOOKTHROUGH_AS_OF } from "@/lib/portfolio/classify";
 import { coverage } from "@/lib/research/status";
@@ -30,7 +31,7 @@ const STALE_DAYS = 31;
 export default async function PortfolioPage({ searchParams }: { searchParams: Promise<{ sort?: string; schwab?: string }> }) {
   const sp = await searchParams;
   const sdb = await createClient();
-  const [schwab, schwabLast] = await Promise.all([connection(sdb).catch(() => null), lastSync(sdb).catch(() => null)]);
+  const [schwab, schwabLast, schwabTrades] = await Promise.all([connection(sdb).catch(() => null), lastSync(sdb).catch(() => null), recentSchwabTrades(sdb, 8).catch(() => [])]);
   const sort: SortKey = sp.sort && sp.sort in SORTS ? (sp.sort as SortKey) : "value";
   const ws = await getWorkspace();
   const p = ws.portfolio;
@@ -63,7 +64,7 @@ export default async function PortfolioPage({ searchParams }: { searchParams: Pr
       <PageHeader title="Portfolio" actionsDesktopOnly actions={<Link href="/portfolio/reconcile" className="btn max-lg:btn-sm">Reconcile</Link>} />
 
       <div className="grid grid-cols-1 gap-3 lg:gap-4 lg:grid-cols-12">
-        {schwab && <SchwabCard c={schwab} last={schwabLast} note={sp.schwab} />}
+        {schwab && <SchwabCard c={schwab} last={schwabLast} note={sp.schwab} trades={schwabTrades} />}
         {/* Portfolio Summary */}
         <Card className="lg:col-span-4" labelledBy="cap-h">
           <CardHead id="cap-h" cap={p.quality.reconciliation.complete ? "Invested portfolio" : "Invested portfolio · incomplete"} right={<DataLabel kind={verified ? "verified" : "estimated"} />} />
