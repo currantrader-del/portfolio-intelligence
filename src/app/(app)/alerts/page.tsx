@@ -6,7 +6,8 @@ import { shortDate } from "@/lib/format";
 import { checkNow, feedback, reportMissed, resetTopic, saveAlertPreferences, setEnabled, test } from "./actions";
 import { loadAlertPrefs, MOVE_CLASS_LABEL, moveClassOf, DEFAULT_ALERT_PREFS } from "@/lib/watch/priceMoves";
 import { getWorkspace } from "@/lib/workspace";
-import { loadFeedback, VERDICT_LABEL, type Verdict } from "@/lib/eval/log";
+import { actionRef, loadFeedback, loadMyActions, VERDICT_LABEL, type ActionRecord, type Verdict } from "@/lib/eval/log";
+import { MyActionButtons } from "@/components/eval/MyAction";
 
 export const dynamic = "force-dynamic";
 
@@ -26,6 +27,7 @@ const MSG: Record<string, string> = {
 export default async function AlertsPage({ searchParams }: { searchParams: Promise<{ msg?: string }> }) {
   const db = await createClient();
   const [s, runs, { msg }, fb, prefs, ws] = await Promise.all([watchSettings(db), watchRuns(db, 14), searchParams, loadFeedback(db).catch(() => ({ byAlert: new Map<string, Verdict>(), all: [] })), loadAlertPrefs(db).catch(() => DEFAULT_ALERT_PREFS), getWorkspace().catch(() => null)]);
+  const mine = await loadMyActions(db).catch(() => new Map<string, ActionRecord>());
   const kinds = (ws?.portfolio.holdings ?? []).map((h) => ({ symbol: h.symbol, t: prefs.thresholds[moveClassOf(h.symbol, h.bucket, prefs.classOverrides)] }));
   const missed = fb.all.filter((f) => f.verdict === "missed");
   const last = runs[0];
@@ -126,6 +128,7 @@ export default async function AlertsPage({ searchParams }: { searchParams: Promi
                               </ActionForm>
                             ))}
                           </div>
+                          <MyActionButtons subject="alert" refId={a.id} symbol={a.symbol} summary={a.title} path="/alerts" current={mine.get(actionRef("alert", a.id))} />
                         </div>
                       );
                     })}

@@ -3,6 +3,7 @@ import { loadReviews, withReviews, type ReviewAnnotations } from "@/lib/research
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { BENCHMARKS, dayChangePct, getQuotes, type Quote } from "@/lib/market/quotes";
 import { isMarketOpen } from "@/lib/market/hours";
+import { withSchwabQuotes } from "@/lib/schwab/market";
 import { buildPortfolio, type CashConfirmation, type LedgerEntry, type PlannedTransfer, type PortfolioView, type SnapshotInput } from "@/lib/portfolio/engine";
 import { readPolicy, type Policy , AGE_REMINDER_DAYS } from "@/lib/policy/limits";
 import { policyFromRules, type PolicyRuleRow } from "@/lib/policy/rules";
@@ -163,10 +164,12 @@ export async function loadCapitalPreference(db: SupabaseClient): Promise<Capital
   return preferenceFromRow(data);
 }
 
-export async function buildWorkspace(db: SupabaseClient, now = new Date()): Promise<Workspace> {
+/** `liveQuotes`: overlay Schwab's real-time quotes when Schwab is connected (the alert checks); pages use the free quotes. */
+export async function buildWorkspace(db: SupabaseClient, now = new Date(), opts: { liveQuotes?: boolean } = {}): Promise<Workspace> {
   const [{ data: auth }, snapshots, research, policy, ledger, yields, transfers, capitalPreference, cashConfirmations] = await Promise.all([db.auth.getClaims(), loadSnapshots(db), loadResearch(db), loadPolicy(db), loadLedger(db), loadYields(db).catch(() => ({ y2: null, y10: null })), loadTransfers(db).catch(() => []), loadCapitalPreference(db).catch(() => null), loadCashConfirmations(db).catch(() => [])]);
   const symbols = [...new Set([...snapshots.flatMap((s) => s.positions.map((p) => p.symbol.toUpperCase())), ...ledger.filter((t) => t.symbol).map((t) => t.symbol!.toUpperCase())])];
-  const quotes = await getQuotes([...symbols, ...BENCHMARKS.map((b) => b.symbol)]);
+  const free = await getQuotes([...symbols, ...BENCHMARKS.map((b) => b.symbol)]);
+  const quotes = opts.liveQuotes ? await withSchwabQuotes(db, free, [...symbols, ...BENCHMARKS.map((b) => b.symbol)]) : free;
   const roles: Record<string, string | null> = Object.fromEntries(Object.values(policy?.companies ?? {}).map((c) => [c.symbol, c.role]));
   const classifications = { ...roles, ...Object.fromEntries(research.filter((r) => r.current?.parsed.classification).map((r) => [r.symbol, r.current!.parsed.classification])) };
   const portfolio = buildPortfolio(snapshots, quotes, policy, classifications, ledger, now, cashConfirmations, capitalPreference?.maxTransfer ?? null);

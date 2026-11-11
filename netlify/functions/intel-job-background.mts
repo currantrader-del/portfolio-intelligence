@@ -18,6 +18,7 @@ import { runTradeScan } from "../../src/lib/trades/job";
 import { runExposureReview } from "../../src/lib/exposure/reviewJob";
 import { runImprovementJob } from "../../src/lib/shadow/proposals";
 import { runCalibrationJob } from "../../src/lib/recovery/job";
+import { runRadar } from "../../src/lib/radar/job";
 
 /**
  * The owner's session for the scheduled morning run, which has no browser. The service key (server-only,
@@ -127,6 +128,9 @@ export default async (req: Request) => {
     } else if (body.job === "recovery" && body.requestId) {
       const r = await runCalibrationJob(db);
       console.log(`intel job: recovery calibration ${r.passed ? "passed" : "failed"} (${r.cases} cases, gap ${r.byKind.touch.meanGap})`);
+    } else if (body.job === "radar" && body.requestId) {
+      const id = await runRadar(db, body.requestId);
+      console.log(`intel job: radar saved ${id}`);
     } else if (body.job === "improve" && body.requestId) {
       const r = await runImprovementJob(db);
       console.log(`intel job: improvement check: ${r.outcome}`);

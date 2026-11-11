@@ -1,9 +1,10 @@
-/** The morning Schwab step (code only, no AI cost): sync, and a phone reminder before the weekly sign-in expires. */
+/** The morning Schwab step (code only, no AI cost): balances, positions and new trades, and a phone reminder before the weekly sign-in expires. */
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { save } from "@/lib/intel/jobs";
 import { pushNtfy, watchSettings } from "@/lib/watch/job";
 import { SCHWAB_VERSION, configured, connection } from "./client";
 import { syncSchwab } from "./sync";
+import { syncSchwabTrades } from "./market";
 
 /** Remind on the last day (and once a day after it expires). */
 export const needsReminder = (daysLeft: number | null, connectedBefore: boolean) => connectedBefore && daysLeft !== null && daysLeft <= 1.2;
@@ -27,5 +28,7 @@ export async function morningSchwab(db: SupabaseClient, origin: string, now = ne
   }
   if (!c.connected) return "schwab sign-in expired";
   const r = await syncSchwab(db, now);
-  return r.ok ? `schwab synced ${r.synced.map((x) => `${x.account} (${x.positions})`).join(", ")}` : `schwab sync failed: ${r.error}`;
+  const t = r.ok ? await syncSchwabTrades(db, now) : null;
+  const trades = t ? (t.ok ? `, ${t.added} new trade${t.added === 1 ? "" : "s"}` : `, trades not read: ${t.error}`) : "";
+  return r.ok ? `schwab synced ${r.synced.map((x) => `${x.account} (${x.positions})`).join(", ")}${trades}` : `schwab sync failed: ${r.error}`;
 }

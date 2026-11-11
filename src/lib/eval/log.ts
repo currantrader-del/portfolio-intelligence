@@ -63,3 +63,35 @@ export function paperResult(d: PaperDecision, price: number | null, vooPrice: nu
   const vooSigned = v === null ? null : d.side === "buy" ? v : -v;
   return { returnPct: r, vooPct: v, edgePct: signed !== null && vooSigned !== null ? signed - vooSigned : null };
 }
+
+/**
+ * What you actually did about a recommendation, alert or Radar idea (one tap: "I did this" or "I passed"),
+ * with the price and VOO at that moment, so the test can compare what the app said with what you did and
+ * how each turned out. A later tap on the same item replaces an earlier one. Stored as model_runs "eval_action".
+ */
+export type MyAction = "did" | "passed";
+export type ActionSubject = "recommendation" | "alert" | "radar";
+export const MY_ACTION_LABEL: Record<MyAction, string> = { did: "You did this", passed: "You passed" };
+export type ActionRecord = { subject: ActionSubject; ref: string; symbol: string | null; summary: string; action: MyAction; note: string | null; price: number | null; vooPrice: number | null; at: string };
+
+export const actionRef = (subject: ActionSubject, id: string) => `${subject}:${id}`;
+
+export async function saveMyAction(db: SupabaseClient, r: Omit<ActionRecord, "at">) {
+  return save(db, "eval_action", EVAL_VERSION, { ref: actionRef(r.subject, r.ref) }, { ...r, at: new Date().toISOString() });
+}
+
+/** Latest tap per item, keyed by actionRef(subject, id). */
+export async function loadMyActions(db: SupabaseClient, sinceDays = 60): Promise<Map<string, ActionRecord>> {
+  const since = new Date(Date.now() - sinceDays * 86_400_000).toISOString();
+  const { data } = await db.from("model_runs").select("outputs").eq("kind", "eval_action").gte("computed_at", since).order("computed_at", { ascending: true }).limit(2000);
+  const m = new Map<string, ActionRecord>();
+  for (const r of (data ?? []) as { outputs: ActionRecord }[]) m.set(actionRef(r.outputs.subject, r.outputs.ref), r.outputs);
+  return m;
+}
+
+/** Counts for the test summary. Pure. */
+export function actionCounts(all: Iterable<ActionRecord>) {
+  let did = 0, passed = 0;
+  for (const a of all) if (a.action === "did") did++; else passed++;
+  return { did, passed };
+}

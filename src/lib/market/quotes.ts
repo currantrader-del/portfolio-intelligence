@@ -9,7 +9,7 @@ export type Quote = {
   price: number;
   prevClose: number | null;
   asOf: string; // ISO
-  provider: "yahoo" | "stooq";
+  provider: "yahoo" | "stooq" | "schwab";
   delayClass: "realtime" | "delayed" | "eod";
 };
 
