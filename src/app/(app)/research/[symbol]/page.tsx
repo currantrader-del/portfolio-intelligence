@@ -11,6 +11,7 @@ import { createClient } from "@/lib/supabase/server";
 import { EXTRACTION_LABEL, ORIGIN_LABEL } from "@/lib/research-labels";
 import { getWorkspace } from "@/lib/workspace";
 import { dayChangePct } from "@/lib/market/quotes";
+import { RecoveryCard } from "@/components/RecoveryCard";
 import { InvestmentSummary, type Brief } from "@/components/TodayValuation";
 import { AskButton } from "@/components/AskPanel";
 import { FilingCheckCard, type StoredFilingCheck } from "@/components/FilingCheckCard";
@@ -46,7 +47,7 @@ const ERRORS: Record<string, string> = {
 };
 const SAVED: Record<string, string> = { full: "Approved in full: the research in use is no longer provisional. The open items you accepted stay listed on the record.", adopted: "Approved: the investigation is now your research in use. The earlier research stays on file.", provisional: "Approved provisionally: the investigation is in use with its open items listed, and no new money is suggested until they are resolved. The earlier research stays on file.", set_aside: "Kept your current research. The investigation stays on file, marked as set aside.", stage: "Stage saved.", screen: "Screen updated.", filing: "SEC filing checked and the result stored." };
 
-export default async function CompanyPage({ params, searchParams }: { params: Promise<{ symbol: string }>; searchParams: Promise<{ error?: string; saved?: string }> }) {
+export default async function CompanyPage({ params, searchParams }: { params: Promise<{ symbol: string }>; searchParams: Promise<{ error?: string; saved?: string; targets?: string }> }) {
   const { symbol: raw } = await params;
   const sp = await searchParams;
   const symbol = decodeURIComponent(raw).toUpperCase().replace(/[^A-Z0-9.\-]/g, "").slice(0, 10);
@@ -134,6 +135,7 @@ export default async function CompanyPage({ params, searchParams }: { params: Pr
         <div className="lg:col-span-7 flex flex-col gap-3 lg:gap-4 min-w-0">
           <ResearchStatus s={standing} />
           <InvestmentSummary ws={ws} symbol={company.symbol} brief={brief} />
+          {!etf && <Suspense fallback={<FeedSkeleton title="Recovery odds" />}><RecoveryCard symbol={company.symbol} price={price} priceAsOf={q?.asOf ?? null} targetsRaw={sp.targets?.slice(0, 80)} /></Suspense>}
           {pendingInv && <InvestigationConclusion symbol={company.symbol} v={pendingInv as unknown as InvVersion} inUse={inUseLabel} usedId={usedId} validation={(valRow?.outputs as ValidationReport | undefined) ?? null} />}
         </div>
 

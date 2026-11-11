@@ -4,6 +4,8 @@ import { adoptVersion } from "@/lib/research/adopt";
 import { AGE_REMINDER_DAYS } from "@/lib/policy/limits";
 import { createHash } from "node:crypto";
 import { redirect } from "next/navigation";
+import { headers } from "next/headers";
+import { startCalibration } from "@/lib/recovery/job";
 import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
 import { getFilings, getFundamentals } from "@/lib/market/sec";
@@ -185,4 +187,14 @@ export async function setAsideResearch(formData: FormData): Promise<ActionResult
   revalidatePath(`/research/${symbol}`);
   revalidatePath("/");
   redirect(`/research/${symbol}?saved=set_aside`);
+}
+
+/** Starts the recovery-odds calibration check in the background (code only, free price data). */
+export async function runRecoveryCheck(): Promise<ActionResult> {
+  const db = await createClient();
+  const { data: s } = await db.auth.getSession();
+  if (!s.session?.access_token) return fail("Sign in first.");
+  const h = await headers();
+  const origin = `${h.get("x-forwarded-proto") ?? "https"}://${h.get("x-forwarded-host") ?? h.get("host")}`;
+  try { await startCalibration(db, origin, s.session.access_token, "manual"); } catch (e) { return fail(`Could not start the check: ${(e as Error).message.slice(0, 160)}`); }
 }
