@@ -1,3 +1,5 @@
+import { outdatedVerdict } from "@/lib/freshness/outdated";
+import { loadContextEvents } from "@/lib/freshness/contextEvents";
 import Form from "next/form";
 import { createClient } from "@/lib/supabase/server";
 import { Card, CardHead, Disclose, Pill } from "@/components/ui";
@@ -33,6 +35,16 @@ export default async function QuestionsPage({ searchParams }: { searchParams: Pr
     return r && o?.answer && !o.error ? { question: (r.inputs as { question: string }).question, answer: o.answer, at: r.computed_at, ms: o.ms, costUsd: o.costUsd, searches: o.searches } : null;
   };
 
+  // A saved answer is marked outdated when its inputs (policy, holdings, cash, research) changed after it, or it names
+  // a reserve that is no longer in force. The answer text is never edited.
+  const oldest = (quick ?? []).map((r) => r.computed_at as string).sort()[0];
+  const events = oldest ? await loadContextEvents(db, oldest).catch(() => []) : [];
+  const staleFor = (a: StoredAnswer) => {
+    if (!a) return null;
+    const v = outdatedVerdict({ writtenAt: a.at, events, text: a.answer, currentReserve: ws.portfolio.cashDetail.protectedReserve });
+    return v.outdated ? { headline: v.headline, reasons: [...v.contradictions, ...v.changes.slice(0, 2).map((c) => `${c.label} changed ${c.at.slice(0, 10)}.`)] } : null;
+  };
+
   const { data: last } = await db.from("model_runs").select("inputs, computed_at").eq("kind", "assistant_request").not("inputs->>demo", "is", null).order("computed_at", { ascending: false }).limit(1).maybeSingle();
   const demo = (last?.inputs as { demo?: string } | undefined)?.demo ?? null;
   const { data: rows } = demo ? await db.from("model_runs").select("inputs, outputs").eq("kind", "assistant_answer").eq("inputs->>demo", demo) : { data: [] };
@@ -59,7 +71,7 @@ export default async function QuestionsPage({ searchParams }: { searchParams: Pr
         </Form>
       )}
 
-      {QUICK_QUESTIONS.map((t, i) => <QuickQuestion key={`${i}-${fill(t)}`} slot={i} initial={fill(t)} last={lastFor(i)} />)}
+      {QUICK_QUESTIONS.map((t, i) => <QuickQuestion key={`${i}-${fill(t)}`} slot={i} initial={fill(t)} last={lastFor(i)} stale={staleFor(lastFor(i))} />)}
 
       <Card flush>
         <Disclose summary={<span className="t-sm">Test against plain Claude <span className="t-xs">· the original five-question comparison</span></span>}>
