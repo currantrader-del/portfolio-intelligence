@@ -15,14 +15,27 @@ describe("candidates", () => {
   it("trims only on a trigger: over the policy line, or completed research that says Trim or Exit", () => {
     const c = findCandidates({
       total: 100_000, capFor: caps,
-      holdings: [holding("AAA", 0.08), holding("BBB", 0.04), holding("CCC", 0.03), holding("DDD", 0.03), holding("VOO", 0.6, { etf: true })],
+      holdings: [holding("AAA", 0.08, { quantity: 80 }), holding("BBB", 0.04, { quantity: 40 }), holding("CCC", 0.03), holding("DDD", 0.03), holding("VOO", 0.6, { etf: true })],
       research: [research("BBB"), research("CCC"), research("DDD", { complete: false })],
       plan: [{ symbol: "BBB", action: "Trim", targetPct: 2, reason: "Above fair value" }, { symbol: "CCC", action: "Hold", targetPct: 3, reason: "" }, { symbol: "DDD", action: "Exit", targetPct: 0, reason: "" }],
     });
-    expect(c.map((x) => [x.symbol, x.trigger, x.targetPct, x.sellPct])).toEqual([["BBB", ["research_trim"], 2, 50], ["AAA", ["concentration"], 5, 37.5]]);
-    expect(c[1].sellShares).toBe(37.5);
+    expect(c.map((x) => [x.symbol, x.trigger, x.targetPct, x.sellPct])).toEqual([["AAA", ["concentration"], 5, 37.5], ["BBB", ["research_trim"], 2, 50]]);
+    expect(c[0].sellShares).toBe(30); // $3,000 over the 5% line at $100 a share
     expect(mixBuys(1000)).toEqual([{ symbol: "VOO", pct: 50, usd: 500 }, { symbol: "VXUS", pct: 25, usd: 250 }, { symbol: "AVUV", pct: 25, usd: 250 }]);
-    expect(upsideGivenUp(c[0])).toEqual({ bullUsd: 5000, baseUsd: 1000 }); // 50 shares x (200 - 100) and x (120 - 100)
+    expect(upsideGivenUp(c[1])).toEqual({ bullUsd: 2000, baseUsd: 400 }); // 20 shares x (200 - 100) and x (120 - 100)
+  });
+  it("measures combined exposure (direct + funds) against the research's own review level, and sells only the excess", () => {
+    // 12.4% direct + 2.8% through funds = 15.2% combined; the research says trim back to 15%; normal range tops at 10%.
+    const c = findCandidates({
+      total: 100_000, capFor: () => ({ normalHigh: 0.1, max: 0.18, review: 0.15 }),
+      holdings: [{ symbol: "AAA", quantity: 124, price: 100, value: 12_400, weight: 0.152, direct: 0.124, etf: false }], research: [], plan: [],
+    });
+    expect(c).toEqual([]); // $200 over: under the 0.5-point churn threshold, so nothing is proposed
+    const d = findCandidates({
+      total: 100_000, capFor: () => ({ normalHigh: 0.1, max: 0.18, review: 0.15 }),
+      holdings: [{ symbol: "AAA", quantity: 144, price: 100, value: 14_400, weight: 0.172, direct: 0.144, etf: false }], research: [], plan: [],
+    });
+    expect(d.map((x) => [x.capPct, x.targetPct, x.sellValue])).toEqual([[15, 15, 2200]]); // to 15% combined, not 10% direct
   });
   it("ignores tiny excesses", () => {
     expect(findCandidates({ total: 100_000, capFor: caps, holdings: [holding("AAA", 0.053)], research: [], plan: [] })).toEqual([]);
@@ -65,12 +78,14 @@ describe("historical test of the concentration rule", () => {
 });
 
 describe("current assessment", () => {
-  const p = { candidates: [{ symbol: "AAA", trigger: ["concentration" as const], research: { versionId: "v1", asOf: "2026-11-01", action: null, thesis: null, bull: null, base: null, bear: null, weighted: null, confidence: null } }] };
+  const p = { candidates: [{ symbol: "AAA", capPct: 5, trigger: ["concentration" as const], research: { versionId: "v1", asOf: "2026-11-01", action: null, thesis: null, bull: null, base: null, bear: null, weighted: null, confidence: null } }] };
   const now = (o: Partial<Parameters<typeof assess>[1]> = {}) => ({ at: new Date("2026-11-20T12:00:00Z"), weightPct: () => 8, capPct: () => 5, research: () => ({ versionId: "v1", asOf: "2026-11-01", complete: true }), planAction: () => "Hold", ...o });
   it("comes from today's weights and research, never from the test's results", () => {
     expect(assess(p, now()).status).toBe("Still attractive");
     expect(assess(p, now({ weightPct: () => 5.2 })).status).toBe("No longer attractive");
-    expect(assess(p, now({ research: () => ({ versionId: "v2", asOf: "2026-11-15", complete: true }) })).status).toBe("More research needed");
+    expect(assess(p, now({ research: () => ({ versionId: "v2", asOf: "2026-11-15", complete: true }) })).status).toBe("Superseded");
+    expect(assess(p, now({ capPct: () => 15 })).status).toBe("Superseded");
+    expect(assess(p, now({ capPct: () => 15 })).reasons.join(" ")).toMatch(/line is now 15%, not the 5%/);
     expect(assess(p, now({ at: new Date("2027-06-01T12:00:00Z") })).reasons.join(" ")).toMatch(/over 120 days old/);
   });
 });

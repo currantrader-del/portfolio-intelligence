@@ -36,7 +36,8 @@ export type Candidate = {
   planReason: string | null;
 };
 
-export type HoldingFact = { symbol: string; quantity: number; price: number; value: number; weight: number; etf: boolean };
+/** weight: combined exposure (direct + through funds) over the invested portfolio, as on Decisions and Risk; direct: own shares only. */
+export type HoldingFact = { symbol: string; quantity: number; price: number; value: number; weight: number; direct?: number; etf: boolean };
 export type ResearchFact = { symbol: string; versionId: string; asOf: string; action: string | null; thesis: string | null; confidence: string | null; scenarios: { name: string; value: number }[]; weighted: number | null; complete: boolean };
 export type PlanFact = { symbol: string; action: string | null; targetPct: number | null; reason: string };
 
@@ -44,13 +45,18 @@ const r1 = (n: number) => Math.round(n * 10) / 10;
 const r2 = (n: number) => Math.round(n * 100) / 100;
 
 /** The stocks the strategy would trim today, and by how much. Nothing is proposed without a trigger. */
-export function findCandidates(a: { holdings: HoldingFact[]; total: number; capFor: (symbol: string) => { normalHigh: number | null; max: number | null }; research: ResearchFact[]; plan: PlanFact[] }): Candidate[] {
+/**
+ * The line is the research's own review level when the research in use sets one, else the top of the normal range,
+ * else the maximum. Weights are combined (direct + through funds); only the company's own shares are sold, so the
+ * size is the combined excess, capped at the direct holding.
+ */
+export function findCandidates(a: { holdings: HoldingFact[]; total: number; capFor: (symbol: string) => { normalHigh: number | null; max: number | null; review?: number | null }; research: ResearchFact[]; plan: PlanFact[] }): Candidate[] {
   const out: Candidate[] = [];
   for (const h of a.holdings) {
     if (h.etf || h.quantity <= 0 || h.value <= 0) continue;
     const cur = h.weight * 100;
     const caps = a.capFor(h.symbol);
-    const line = caps.normalHigh ?? caps.max;
+    const line = caps.review ?? caps.normalHigh ?? caps.max;
     const triggers: Trigger[] = [];
     let target = cur;
     if (line !== null && cur - line * 100 >= TRIGGER_MIN_PTS) { triggers.push("concentration"); target = Math.min(target, line * 100); }
@@ -59,8 +65,9 @@ export function findCandidates(a: { holdings: HoldingFact[]; total: number; capF
     if (r && p?.action === "Exit") { triggers.push("research_exit"); target = 0; }
     else if (r && p?.action === "Trim" && p.targetPct !== null && p.targetPct < cur) { triggers.push("research_trim"); target = Math.min(target, p.targetPct); }
     if (!triggers.length) continue;
-    const sellFrac = target <= 0 ? 1 : (cur - target) / cur;
-    const sellShares = target <= 0 ? h.quantity : Math.floor(h.quantity * sellFrac * 1000) / 1000;
+    // Dollars to sell = combined excess over the target, never more than the shares held directly.
+    const excessUsd = target <= 0 ? h.value : Math.min(h.value, r2(((cur - target) / 100) * a.total));
+    const sellShares = target <= 0 || excessUsd >= h.value ? h.quantity : Math.floor((excessUsd / h.price) * 1000) / 1000;
     const sellValue = sellShares * h.price;
     if (sellValue < TRIGGER_MIN_USD) continue;
     const sc = (n: string) => r?.scenarios.find((s) => s.name === n)?.value ?? null;
@@ -195,18 +202,21 @@ export function summarizeEvidence(tested: Backtest[], hasResearchTrigger: boolea
 
 /* ------------------------------------------------------------------ assessment */
 
-export type AssessmentStatus = "Still attractive" | "No longer attractive" | "More research needed";
+export type AssessmentStatus = "Still attractive" | "No longer attractive" | "More research needed" | "Superseded";
 export type Assessment = { status: AssessmentStatus; reasons: string[]; at: string };
 
 /**
  * Today's view of a proposal, from today's weights, research and plan. A shadow test's gains or losses are
  * deliberately not an input: recent performance is not a reason to act.
  */
-export function assess(p: { candidates: Pick<Candidate, "symbol" | "trigger" | "research">[] }, now: { at: Date; weightPct: (s: string) => number | null; capPct: (s: string) => number | null; research: (s: string) => { versionId: string; asOf: string; complete: boolean } | null; planAction: (s: string) => string | null }): Assessment {
+export function assess(p: { candidates: Pick<Candidate, "symbol" | "trigger" | "research" | "capPct">[] }, now: { at: Date; weightPct: (s: string) => number | null; capPct: (s: string) => number | null; research: (s: string) => { versionId: string; asOf: string; complete: boolean } | null; planAction: (s: string) => string | null }): Assessment {
   const reasons: string[] = [];
-  let holds = 0, needs = 0;
+  let holds = 0, needs = 0, superseded = 0;
   for (const c of p.candidates) {
     const w = now.weightPct(c.symbol), cap = now.capPct(c.symbol), r = now.research(c.symbol), act = now.planAction(c.symbol);
+    // The research or the line it was sized against has changed: the proposal is history, not a current action.
+    if (r && c.research && r.versionId !== c.research.versionId) { superseded++; reasons.push(`${c.symbol} research changed since the proposal (now ${r.asOf}), so its size and reason no longer apply`); continue; }
+    if (c.capPct !== null && c.capPct !== undefined && cap !== null && Math.abs(cap - c.capPct) >= 0.05) { superseded++; reasons.push(`${c.symbol}'s line is now ${cap}%, not the ${c.capPct}% the proposal used`); continue; }
     const conc = c.trigger.includes("concentration") && w !== null && cap !== null && w - cap >= TRIGGER_MIN_PTS;
     const res = (c.trigger.includes("research_trim") || c.trigger.includes("research_exit")) && (act === "Trim" || act === "Exit");
     if (w === null || w <= 0) { reasons.push(`${c.symbol} is no longer held`); continue; }
@@ -214,11 +224,10 @@ export function assess(p: { candidates: Pick<Candidate, "symbol" | "trigger" | "
     if (res) reasons.push(`the plan still says ${act} ${c.symbol}`);
     if (conc || res) holds++;
     else reasons.push(`${c.symbol}: the reason for the trim no longer applies${act ? ` (plan now: ${act})` : ""}`);
-    if (r && c.research && r.versionId !== c.research.versionId) { needs++; reasons.push(`${c.symbol} has newer research than the proposal; review it`); }
     if (r && (now.at.getTime() - Date.parse(r.asOf)) / 86_400_000 > RESEARCH_STALE_DAYS) { needs++; reasons.push(`${c.symbol} research is over ${RESEARCH_STALE_DAYS} days old`); }
     if (c.research && (!r || !r.complete)) { needs++; reasons.push(`${c.symbol} no longer has a completed investigation`); }
   }
-  const status: AssessmentStatus = holds === 0 ? "No longer attractive" : needs > 0 ? "More research needed" : "Still attractive";
+  const status: AssessmentStatus = superseded > 0 ? "Superseded" : holds === 0 ? "No longer attractive" : needs > 0 ? "More research needed" : "Still attractive";
   return { status, reasons, at: now.at.toISOString() };
 }
 

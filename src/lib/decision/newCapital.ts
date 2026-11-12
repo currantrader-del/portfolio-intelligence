@@ -489,6 +489,7 @@ export function newCapital(args: {
   const unapproved = [...stockOptions, ...newOptions].filter((o) => o.label === "Preliminary research").map((o) => o.symbol);
   if (unapproved.length) warnings.push(`Only preliminary research for ${unapproved.join(", ")}: enough to hold, so none of them receives new money until a targeted investigation is done.`);
   const receivingStocks = allocations.map((x) => x.symbol).filter((s) => ![...etfOptions].some((e) => e.symbol === s));
+  const blocking = [...refresh, ...newOptions.filter((o) => o.label === "Refresh required")].filter((o, i, all) => receivingStocks.includes(o.symbol) && all.findIndex((x) => x.symbol === o.symbol) === i);
   const gates: Gate[] = [
     { key: "funds", label: "The money is verified, in the account that buys", ok: source === "planned" ? false : source === "deposited" ? depositShows : funds.verified && cd.savings !== null,
       detail: source === "planned" ? `${funds.detail}. Choose "New, already deposited" once it has arrived`
@@ -500,8 +501,12 @@ export function newCapital(args: {
         : unverified.length ? `${unverified.map((a) => `${a.name}: statement ${a.asOf.slice(0, 10)} (${a.ageDays} days)${a.tradesAfter ? `, plus ${a.tradesAfter} recorded transactions through ${a.knownThrough}` : ""}`).join("; ")}. Recorded transactions are not a reconciliation: check each account in its app and confirm, or add a current statement`
         : gaps.length ? `Statement totals do not add up for ${gaps.map((a) => a.name).join(", ")}. Check them against your broker accounts and confirm`
         : `Every account verified by a statement or sync within ${HOLDINGS_FRESH_DAYS} days` },
-    { key: "research", label: "No unresolved material developments", ok: !refresh.length && !receivingStocks.some((s) => newOptions.find((o) => o.symbol === s)?.label === "Refresh required"),
-      detail: refresh.length ? `${refresh.map((o) => o.symbol).join(", ")}: something material changed since the research (results, financing, a material 8-K, a price or valuation change), or filings could not be checked. Until it is reassessed the best use of the money may change` : "No new results, financings, material filings or valuation changes since each held stock's research" },
+    // Only research on a stock that would RECEIVE this money can block it. Another stock's open question is shown,
+    // but it does not hold up a purchase that does not depend on that stock's thesis (audit 2026-11-11).
+    { key: "research", label: "No unresolved material developments for what would be bought", ok: !blocking.length,
+      detail: blocking.length ? `${blocking.map((o) => o.symbol).join(", ")}: something material changed since the research (results, financing, a material 8-K, a price or valuation change), or filings could not be checked. Reassess before this money goes to ${blocking.length > 1 ? "them" : "it"}`
+        : refresh.length ? `Nothing open for what would be bought. Not blocking: ${refresh.map((o) => o.symbol).join(", ")} need${refresh.length > 1 ? "" : "s"} reassessment, but none of this money goes to ${refresh.length > 1 ? "them" : "it"}`
+        : "No new results, financings, material filings or valuation changes since each held stock's research" },
   ];
   // Ready to execute only when every check passes. The analysis, the leaning and the conditions are given either way.
   const status: NewCapitalResult["status"] = gates.every((g) => g.ok) ? "ready" : "conditional";
@@ -511,7 +516,7 @@ export function newCapital(args: {
     ...[...stockOptions, ...newOptions].filter((o) => o.label === "Condition not met" || o.label === "Limit not approved").flatMap((o) => o.toVerify),
   ].filter((x, i, a) => a.indexOf(x) === i);
 
-  if (refresh.length) wouldChange.unshift(`Reassessed research on ${refresh.map((o) => o.symbol).join(", ")} at today's prices and filings.`);
+  if (refresh.length) wouldChange.unshift(`Reassessed research on ${refresh.map((o) => o.symbol).join(", ")} at today's prices and filings${blocking.length ? "" : " (it could change which stock, if any, deserves new money; it does not block this purchase)"}.`);
   for (const o of [...stockOptions, ...newOptions].filter((x) => x.label === "Condition not met")) wouldChange.push(`${o.symbol}: confirmation of the research's condition (${o.stance?.condition}).`);
   confidence -= gates.filter((g) => !g.ok && g.key !== "funds").length;
 

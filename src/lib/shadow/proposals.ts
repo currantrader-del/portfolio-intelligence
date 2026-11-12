@@ -15,6 +15,7 @@ import { extractJson } from "@/lib/research/aiResearch";
 import { getHistories, type Bar } from "@/lib/market/history";
 import { isEtf } from "@/lib/portfolio/classify";
 import { companyMax } from "@/lib/policy/limits";
+import { researchReviewLevel } from "@/lib/decision/positionMath";
 import type { Workspace } from "@/lib/workspace-core";
 import type { Plan } from "@/lib/plan/plan";
 import { loadAlertPrefs } from "@/lib/watch/priceMoves";
@@ -38,13 +39,17 @@ export type Proposal = {
 export function capsFor(ws: Workspace) {
   return (symbol: string) => {
     const c = ws.policy?.companies[symbol];
-    return { normalHigh: c?.normal?.high ?? null, max: isEtf(symbol) ? null : companyMax(ws.policy, symbol) };
+    const max = isEtf(symbol) ? null : companyMax(ws.policy, symbol);
+    const cur = ws.research.find((r) => r.symbol === symbol)?.current ?? null;
+    const review = cur && !isEtf(symbol) ? researchReviewLevel(cur.parsed.allocation, max, cur.research_as_of)?.value ?? null : null;
+    return { normalHigh: c?.normal?.high ?? null, max, review };
   };
 }
 
 export function factsFrom(ws: Workspace, plan: Plan | null): { holdings: HoldingFact[]; research: ResearchFact[]; plan: PlanFact[] } {
   return {
-    holdings: ws.portfolio.holdings.map((h) => ({ symbol: h.symbol, quantity: h.quantity, price: h.price, value: h.value, weight: h.weight, etf: isEtf(h.symbol) })),
+    // Combined exposure (direct + through funds), the same number Decisions and Risk show.
+    holdings: ws.portfolio.holdings.map((h) => ({ symbol: h.symbol, quantity: h.quantity, price: h.price, value: h.value, weight: ws.portfolio.exposures.find((e) => e.symbol === h.symbol)?.total ?? h.weight, direct: h.weight, etf: isEtf(h.symbol) })),
     research: ws.research.filter((r) => r.current).map((r) => ({
       symbol: r.symbol, versionId: r.current!.id, asOf: r.current!.research_as_of, action: r.current!.parsed.action, thesis: r.current!.parsed.thesis?.slice(0, 600) ?? null,
       confidence: r.current!.parsed.confidence, scenarios: r.current!.parsed.scenarios, weighted: r.current!.parsed.weightedValue, complete: !!r.authoritative,
@@ -71,8 +76,8 @@ export function assessNow(p: Proposal, ws: Workspace, plan: Plan | null): Assess
   const f = factsFrom(ws, plan);
   return assess(p, {
     at: ws.now,
-    weightPct: (s) => { const h = ws.portfolio.holdings.find((x) => x.symbol === s); return h ? Math.round(h.weight * 1000) / 10 : null; },
-    capPct: (s) => { const c = caps(s); const line = c.normalHigh ?? c.max; return line === null ? null : Math.round(line * 1000) / 10; },
+    weightPct: (s) => { const h = ws.portfolio.holdings.find((x) => x.symbol === s); if (!h) return null; const w = ws.portfolio.exposures.find((e) => e.symbol === s)?.total ?? h.weight; return Math.round(w * 1000) / 10; },
+    capPct: (s) => { const c = caps(s); const line = c.review ?? c.normalHigh ?? c.max; return line === null ? null : Math.round(line * 1000) / 10; },
     research: (s) => { const r = f.research.find((x) => x.symbol === s); return r ? { versionId: r.versionId, asOf: r.asOf, complete: r.complete } : null; },
     planAction: (s) => f.plan.find((x) => x.symbol === s)?.action ?? null,
   });
@@ -113,7 +118,7 @@ export async function runImprovement(db: SupabaseClient, ws: Workspace, plan: Pl
   const stocks = facts.holdings.filter((h) => !h.etf).map((h) => h.symbol);
   const hist = await getHistories([...stocks, ...ETF_MIX.map((m) => m.symbol)], "5y");
   const bars = new Map<string, Bar[]>([...hist].map(([s, x]) => [s, x.bars]));
-  const tested: Backtest[] = stocks.map((s) => { const c = caps(s); const line = c.normalHigh ?? c.max ?? 0.05; return backtestCap(s, Math.round(line * 1000) / 10, bars); });
+  const tested: Backtest[] = stocks.map((s) => { const c = caps(s); const line = c.review ?? c.normalHigh ?? c.max ?? 0.05; return backtestCap(s, Math.round(line * 1000) / 10, bars); });
   const evidence = summarizeEvidence(tested, candidates.some((c) => c.trigger.some((t) => t !== "concentration")));
 
   const proceeds = Math.round(candidates.reduce((a, c) => a + c.sellValue, 0) * 100) / 100;
@@ -205,10 +210,15 @@ export async function improvementView(db: SupabaseClient, ws: Workspace, shadows
   const plan = st.latest?.ok ? st.latest.plan ?? null : null;
   const tracked = proposals.filter((p) => p.review?.verdict === "Worth reviewing" && p.testId);
   const rows = tracked.length ? shadows ?? (await shadowReports(db, ws)) : [];
-  const active = tracked.map((p) => {
+  const all = tracked.map((p) => {
     const t = rows.find((x) => x.test.id === p.testId);
     return { p, assessment: assessNow(p, ws, plan), report: t?.report ?? null, testClosed: !t || !!t.close };
   }).filter((x) => !x.testClosed);
+  // A superseded proposal (newer research or a changed line) or one whose reason is gone is never shown as a
+  // current opportunity. It moves to history with today's status; its paper test keeps running for the record.
+  const current = (x: (typeof all)[number]) => x.assessment.status === "Still attractive" || x.assessment.status === "More research needed";
+  const active = all.filter(current);
+  const retired = new Map(all.filter((x) => !current(x)).map((x) => [x.p.id, x]));
   const activeIds = new Set(active.map((x) => x.p.id));
-  return { active, history: proposals.filter((p) => !activeIds.has(p.id)), last };
+  return { active, history: proposals.filter((p) => !activeIds.has(p.id)).map((p) => ({ ...p, nowStatus: retired.get(p.id)?.assessment ?? null, testRunning: retired.has(p.id) })), last };
 }

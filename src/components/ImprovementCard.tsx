@@ -13,7 +13,7 @@ const usd = (n: number) => `$${Math.round(Math.abs(n)).toLocaleString("en-US")}`
 const signed = (n: number) => `${n > 0 ? "+" : n < 0 ? "−" : ""}${usd(n)}`;
 const pctS = (n: number) => `${n > 0 ? "+" : n < 0 ? "−" : ""}${Math.abs(n).toFixed(1)}%`;
 const qty = (n: number) => (Number.isInteger(n) ? String(n) : n.toFixed(3).replace(/0+$/, ""));
-export const ASSESS_TONE: Record<AssessmentStatus, "gain" | "neutral" | "warn"> = { "Still attractive": "gain", "No longer attractive": "neutral", "More research needed": "warn" };
+export const ASSESS_TONE: Record<AssessmentStatus, "gain" | "neutral" | "warn"> = { "Still attractive": "gain", "No longer attractive": "neutral", "More research needed": "warn", Superseded: "neutral" };
 
 export function proposalLine(p: Proposal) {
   const sells = p.candidates.map((c) => `${c.sellPct >= 99.9 ? "Sell all" : "Trim"} ${qty(c.sellShares)} ${c.symbol} shares (${c.sellPct}% of the holding, about ${usd(c.sellValue)})`).join("; ");
@@ -28,7 +28,7 @@ export function testLine(r: ShadowReport | null) {
 }
 
 /** The improvement strategy on Plan: the proposal, its reasons, the historical evidence, the forward test and today's view. */
-export function ImprovementCard({ active, history, last }: { active: ImprovementItem[]; history: (Proposal & { id: string })[]; last: CheckResult | null }) {
+export function ImprovementCard({ active, history, last }: { active: ImprovementItem[]; history: (Proposal & { id: string; nowStatus?: Assessment | null; testRunning?: boolean })[]; last: CheckResult | null }) {
   return (
     <Card labelledBy="pl-improve" className="!gap-2" id="improve">
       <CardHead id="pl-improve" title="Portfolio improvement" right={<Pill small>{STRATEGY.name}</Pill>} />
@@ -44,7 +44,7 @@ export function ImprovementCard({ active, history, last }: { active: Improvement
         <Disclose summary={<span className="t-sm">Earlier proposals · {history.length} (kept as history)</span>}>
           <ul className="flex flex-col gap-1.5 t-sm">
             {history.map((p) => (
-              <li key={p.id}><span className="text-ink">{shortDate(p.at)}</span> · {p.review ? p.review.verdict : "Not reviewed"} · {proposalLine(p)}{p.review ? <span className="t-xs"> {p.review.reason}</span> : p.reviewSkipped ? <span className="t-xs"> ({p.reviewSkipped})</span> : null}</li>
+              <li key={p.id}><span className="text-ink">{shortDate(p.at)}</span> · {p.nowStatus ? <><Pill small tone={ASSESS_TONE[p.nowStatus.status]}>{p.nowStatus.status}</Pill> <span className="t-xs">{p.nowStatus.reasons.join("; ")}.{p.testRunning ? " Its paper test keeps running for the record." : ""}</span> · </> : null}{p.review ? p.review.verdict : "Not reviewed"} · {proposalLine(p)}{p.review ? <span className="t-xs"> {p.review.reason}</span> : p.reviewSkipped ? <span className="t-xs"> ({p.reviewSkipped})</span> : null}</li>
             ))}
           </ul>
         </Disclose>
