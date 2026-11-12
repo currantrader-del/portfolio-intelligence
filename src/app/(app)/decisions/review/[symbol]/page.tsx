@@ -76,6 +76,12 @@ export default async function ReviewPage({ params }: { params: Promise<{ symbol:
             <h2 className="text-xs font-semibold tracking-wider text-chrome-muted">WHAT TO DO AT THIS PRICE</h2>
             <div className="h1">{rv.now.verb}</div>
             <p className="text-[15px] text-[#d9dbde]">{rv.now.headline}</p>
+            {rv.now.priceAnswer && <p className="text-sm text-[#d9dbde]">{rv.now.priceAnswer}</p>}
+            {rv.now.downside && (
+              <div className="text-sm text-[#d9dbde]"><span className="text-xs font-semibold tracking-wider text-chrome-muted block">WHY IT COULD GO LOWER</span>
+                <p>{rv.now.downside}</p>
+                {rv.now.risks.length > 0 && <ul className="list-disc pl-4 flex flex-col gap-0.5">{rv.now.risks.map((x, i) => <li key={i}>{x}</li>)}</ul>}</div>
+            )}
             {rv.now.zones.length > 0 && (
               <ul className="text-sm flex flex-col gap-1">
                 {rv.now.zones.map((z) => <li key={z.label} className={z.current ? "text-chrome-ink font-semibold" : "text-chrome-muted"}>{z.current ? "▸ " : ""}{z.label}: {z.action}</li>)}

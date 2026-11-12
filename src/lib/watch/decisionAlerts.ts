@@ -24,8 +24,8 @@ import { actionNow } from "@/lib/decision/actionNow";
 function planLine(r: ResearchRecord | undefined, symbol: string, price: number | null, held: boolean, unread: string | null): { action: string; watch: string | null } {
   const v = r?.current;
   const open = v && v.completeness !== "complete" ? Math.max(1, ((v.conclusion as { completion?: { reasons?: unknown[] } })?.completion?.reasons ?? []).length) : 0;
-  const an = actionNow({ symbol, price, research: v && r?.authoritative ? { pc: v.parsed, asOf: v.research_as_of, openQuestions: open } : null, unreadFiling: unread ?? (v ? unresolvedFiling(v.research_as_of, r!.filingCheck) : null), trim: null, held, preliminary: !!v && !r?.authoritative });
-  return { action: `${an.headline}${an.levels ? ` Levels: ${an.levels}` : ""}`, watch: an.watch[0] ?? null };
+  const an = actionNow({ symbol, price, research: v && r?.authoritative ? { pc: v.parsed, asOf: v.research_as_of, openQuestions: open } : null, unreadFiling: unread ?? (v ? unresolvedFiling(v.research_as_of, r!.filingCheck) : null), trim: null, held, now: new Date(), preliminary: !!v && !r?.authoritative });
+  return { action: `${an.headline}${an.priceAnswer ? ` ${an.priceAnswer}` : ""}${an.downside ? ` ${an.downside}` : ""}${an.levels ? ` Levels: ${an.levels}` : ""}`, watch: an.watch[0] ?? null };
 }
 
 export type PushCategory = "buy_opportunity" | "approaching" | "thesis_change" | "urgent_risk" | "position_review";

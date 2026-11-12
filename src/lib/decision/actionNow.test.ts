@@ -53,3 +53,17 @@ describe("one plain action at today's price, with its levels", () => {
     expect(a.headline).toMatch(/no researched price levels yet/);
   });
 });
+
+describe("is this a good price to buy: the research's own numbers at today's price", () => {
+  const val = parseConclusion({
+    valuation: { bear_value: 86.32, bear_probability: 0.3, base_value: 193.59, base_probability: 0.5, bull_value: 289.55, bull_probability: 0.2, terminal_date: "2029-06-30" },
+    price_framework: [{ price_zone: "< $135", action: "Review an add" }, { price_zone: "$135–$170", action: "Hold" }, { price_zone: "> $170", action: "Trim" }],
+    investment_summary: { risks: ["Capex durability (F52): the growth is only a preliminary expectation.", "CEO probe (F34, F46): outcome unknown."] },
+  });
+  it("gives the yearly return from today's price and from the buy level, the bear case and the risks", () => {
+    const a = actionNow({ symbol: "NVDA", price: 160, now: new Date("2026-11-12T15:00:00Z"), research: { pc: val, asOf: "2026-11-10", openQuestions: 1 }, unreadFiling: null, trim: null, held: true });
+    expect(a.priceAnswer).toMatch(/^From \$160\.00, the research's weighted value of \$180\.60 by 2029 works out to about 4\.\d% a year\. From \$135 \(where it starts to review an add\) it would be about 11\.\d% a year\./);
+    expect(a.downside).toBe("Its bear case is $86.32 (-46% from here), given a 30% chance.");
+    expect(a.risks[0]).toBe("Capex durability: the growth is only a preliminary expectation.");
+  });
+});

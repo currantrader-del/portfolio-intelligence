@@ -140,7 +140,7 @@ export default async function CompanyPage({ params, searchParams }: { params: Pr
   // The plain action at today's price: the same rule the position review and the alerts use.
   const filingsOk = secF && !("error" in secF) ? secF : null;
   const plainAction = etf ? null : held ? reviewPosition(ws, company.symbol, filingsOk)?.now ?? null : actionNow({
-    symbol: company.symbol, price, held: false, preliminary: !!record?.current && !record.authoritative,
+    symbol: company.symbol, price, held: false, now: ws.now, preliminary: !!record?.current && !record.authoritative,
     unreadFiling: reassess?.status === "refresh" ? reassess.triggers.filter((t) => t.kind === "results" || t.kind === "financing" || t.kind === "material_event").map((t) => t.detail.replace(/^[^:]+: /, ""))[0] ?? null : null,
     research: record?.current && record.authoritative ? { pc: record.current.parsed, asOf: record.current.research_as_of, openQuestions: standing.inUse?.open.length ?? 0 } : null, trim: null,
   });
@@ -313,6 +313,8 @@ function ResearchStatus({ s, f, verdict, now, price }: { s: Standing; f: StatusF
                 <span className="t-xs">What to do{price ? ` at $${price.toFixed(2)}` : ""}</span>
                 <span className="text-ink font-semibold">{now.verb}</span>
                 <span>{now.headline}</span>
+                {now.priceAnswer && <span className="t-sm">{now.priceAnswer}</span>}
+                {now.downside && <span className="t-sm">Why it could go lower: {now.downside}{now.risks.length ? ` Main risks: ${now.risks.join(" · ")}` : ""}</span>}
                 {now.levels && <span className="t-xs">Levels: {now.levels}</span>}
                 {now.watch.length > 0 && <span className="t-xs">What would change this: {now.watch[0]}</span>}
               </div>
