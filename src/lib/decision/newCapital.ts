@@ -411,7 +411,7 @@ export function newCapital(args: {
   }
   exReasons.sort((x, y) => Number(y.includes("(chosen)")) - Number(x.includes("(chosen)")));
   const cashImp = impactOf("CASH");
-  exReasons.push(`Keep cash: no stock risk, and it earns about ${yields.y2 ? `the 2-year Treasury's ${yields.y2.value.toFixed(2)}%` : "a savings or Treasury rate"} (your savings yield is not entered). ${cashImp?.summary ?? ""} Better than any ETF for money you may need within a few years; the ETF forecasts (10-15 years) only apply to money you can leave invested that long.`);
+  exReasons.push(`Keep cash: no stock risk. What your cash actually earns is not known to the app (no savings or sweep yield is entered)${yields.y2 ? `; the 2-year Treasury at ${yields.y2.value.toFixed(2)}% is the comparison alternative, not your yield` : ""}. ${cashImp?.summary ?? ""} Better than any ETF for money you may need within a few years; the ETF forecasts (10-15 years) only apply to money you can leave invested that long.`);
   const heldWords = stockOptions.filter((o) => o.stance).map((o) => `${o.symbol} (${o.label === "Research says hold" ? "research says hold" : o.label.toLowerCase()})`);
   if (heldWords.length) exReasons.push(`Existing holdings: ${stockOptions.some((o) => o.eligible) ? `${stockOptions.filter((o) => o.eligible).map((o) => o.symbol).join(", ")} qualify for new money; ` : "none qualifies for new money: "}${heldWords.join(", ")}.`);
 
@@ -508,6 +508,9 @@ export function newCapital(args: {
         : refresh.length ? `Nothing open for what would be bought. Not blocking: ${refresh.map((o) => o.symbol).join(", ")} need${refresh.length > 1 ? "" : "s"} reassessment, but none of this money goes to ${refresh.length > 1 ? "them" : "it"}`
         : "No new results, financings, material filings or valuation changes since each held stock's research" },
   ];
+  // A check's label states its result, so an open check never reads as done (audit 2026-11-11).
+  const OPEN_LABEL: Record<string, string> = { funds: "The money is not yet verified in the account that buys", holdings: "Holdings and balances are not yet verified", research: "Open research on what would be bought" };
+  for (const g of gates) if (!g.ok && OPEN_LABEL[g.key]) g.label = OPEN_LABEL[g.key];
   // Ready to execute only when every check passes. The analysis, the leaning and the conditions are given either way.
   const status: NewCapitalResult["status"] = gates.every((g) => g.ok) ? "ready" : "conditional";
   const toVerify = [
@@ -558,7 +561,7 @@ export function newCapital(args: {
       alternatives: ALTERNATIVES, riskFree10y: riskFreeFor(10, yields),
       items: [
         funds.detail,
-        `Investable capital $${Math.round(portfolio.total).toLocaleString()} (${portfolio.quality.status})`,
+        `Invested portfolio $${Math.round(portfolio.total).toLocaleString()} (${portfolio.quality.status}; the denominator for every weight and limit; savings excluded)`,
         `Prices: ${portfolio.pricedLive} of ${portfolio.holdings.length} holdings from delayed quotes, the rest from statements`,
         "Fund look-through from each fund's dated published holdings and sector/country splits; industry and theme figures are lower bounds",
         "Exposure levels: those you approved, else the app's drafted proposals (labelled proposed)",

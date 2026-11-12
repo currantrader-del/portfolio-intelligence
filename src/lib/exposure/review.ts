@@ -63,7 +63,7 @@ When done, reply with exactly one JSON object in a \`\`\`json fenced block and n
 
 export function reviewQuestion(items: Material[], today: string): string {
   const p = (x: number) => `${(x * 100).toFixed(1)}%`;
-  return `Today is ${today}. Analyse the investment environment for these exposures of my portfolio and connect each to what I hold:\n${items.map((m, i) => `${i + 1}. ${m.key} (${m.dimension}): ${p(m.pctOfInvestable)} of investable capital${m.upperPct ? `, up to ${p(m.upperPct)}` : ""}; $${Math.round(m.direct)} direct, $${Math.round(m.indirect)} through funds (${m.why}).`).join("\n")}\nAlso say, briefly, whether any sector I hold little of has strong enough evidence of its own to be worth researching.`;
+  return `Today is ${today}. Analyse the investment environment for these exposures of my portfolio and connect each to what I hold:\n${items.map((m, i) => `${i + 1}. ${m.key} (${m.dimension}): ${p(m.pctOfInvestable)} of the invested portfolio${m.upperPct ? `, up to ${p(m.upperPct)}` : ""}; $${Math.round(m.direct)} direct, $${Math.round(m.indirect)} through funds (${m.why}).`).join("\n")}\nAlso say, briefly, whether any sector I hold little of has strong enough evidence of its own to be worth researching.`;
 }
 
 export type ReviewReport = {

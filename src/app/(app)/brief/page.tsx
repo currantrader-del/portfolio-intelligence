@@ -100,7 +100,7 @@ export default async function BriefPage({ searchParams }: { searchParams: Promis
         )}
         <p className="text-xs text-muted">{weekly ? "Hypothetical: today's share counts at last week's prices, so trades and deposits during the week are not reflected. " : ""}Percentages are of the invested portfolio, {verifiedWord(p)} {usd(p.total)} (holdings plus cash in the investment accounts; savings excluded).</p>
         {weekly && weekAgo && recordedNow && (
-          <p className="text-sm">Recorded value: {usd(weekAgo.investable)} on {shortDate(weekAgo.as_of)} → {usd(recordedNow.investable)} on {shortDate(recordedNow.as_of)} <span className="text-xs text-muted">(includes any deposits or withdrawals you recorded)</span></p>
+          <p className="text-sm">Recorded invested portfolio: {usd(weekAgo.invested + weekAgo.cash)} on {shortDate(weekAgo.as_of)} → {usd(recordedNow.invested + recordedNow.cash)} on {shortDate(recordedNow.as_of)} <span className="text-xs text-muted">(same sessions as above; savings excluded; includes any deposits or withdrawals you recorded)</span></p>
         )}
         <DataQuality p={p} compact />
       </section>
