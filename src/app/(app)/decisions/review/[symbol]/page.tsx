@@ -96,7 +96,7 @@ export default async function ReviewPage({ params }: { params: Promise<{ symbol:
             <ActionForm action={recordReview} success="Decision recorded" className="flex flex-col gap-2">
               <input type="hidden" name="symbol" value={sym} />
               {rv.options.map((o) => (
-                <label key={o.key} className={`grid grid-cols-[20px_56px_1fr] gap-2 items-start p-3 rounded-lg border ${o.key === rv.suggestion.key ? "border-accent bg-accent-soft" : "border-line"} ${o.available ? "" : "opacity-50"}`}>
+                <label key={o.key} className={`grid grid-cols-[20px_92px_1fr] gap-2 items-start p-3 rounded-lg border ${o.key === rv.suggestion.key ? "border-accent bg-accent-soft" : "border-line"} ${o.available ? "" : "opacity-50"}`}>
                   <input type="radio" name="chosen" value={o.key} required disabled={!o.available} className="mt-1" />
                   <span className="font-semibold">{o.label}{o.basis === "research" && <span className="block text-xs font-normal text-accent">research-backed</span>}{o.basis === "hypothetical" && <span className="block text-xs font-normal text-muted">hypothetical</span>}{o.basis === "blocked" && <span className="block text-xs font-normal text-muted">not supported</span>}</span>
                   <span className="text-sm">
