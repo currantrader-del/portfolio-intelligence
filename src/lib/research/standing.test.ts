@@ -11,7 +11,7 @@ describe("research standing (the NVDA page): the deepest completed record is use
   const s = researchStanding([nov7, stalled, inv]);
   it("uses the finished Nov 8 investigation, not the newer-looking but shallower Nov 7 screen", () => {
     expect(s.inUse?.v.id).toBe("14856bc6");
-    expect(s.inUse?.label).toBe("Full investigation, incomplete, open questions remain");
+    expect(s.inUse?.label).toBe("Full investigation, finished, open questions remain");
     expect(s.inUse?.authority).toBe("approved_provisional");
     expect(s.authoritative).toBe(true);
     expect(s.inUse?.open).toHaveLength(3);

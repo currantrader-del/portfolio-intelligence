@@ -16,6 +16,10 @@ export type ParsedConclusion = {
   horizonDate: string | null;
   zones: PriceZone[];
   allocation: Record<string, unknown> | null;
+  /** What the research says would change its view (thesis-breakers and add conditions), as written. */
+  wouldChange?: string[];
+  /** The research's principal risks (why the bear case has weight), as written. */
+  risks?: string[];
 };
 
 export function money(s: unknown): number | null {
@@ -70,6 +74,8 @@ export function parseConclusion(c: Record<string, unknown> | null | undefined): 
     horizonDate,
     zones,
     allocation: (c?.allocation as Record<string, unknown>) ?? null,
+    risks: (() => { const r = (c?.investment_summary as { risks?: unknown } | undefined)?.risks ?? c?.principal_risks ?? c?.risks; return Array.isArray(r) ? r.filter((x): x is string => typeof x === "string" && !!x.trim()) : []; })(),
+    wouldChange: Array.isArray(c?.would_change) ? (c!.would_change as unknown[]).filter((x): x is string => typeof x === "string" && !!x.trim()) : [],
   };
 }
 

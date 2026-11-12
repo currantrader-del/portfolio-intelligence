@@ -2,6 +2,7 @@ import { ActionForm, SubmitButton } from "@/components/forms";
 import { Markdown } from "@/components/Markdown";
 import { Card, CardHead, Disclose, Pill } from "@/components/ui";
 import { shortDate } from "@/lib/format";
+import { openItems } from "@/lib/research/standing";
 import { adoptResearch, setAsideResearch } from "@/app/(app)/research/actions";
 import type { ConsistencyCheck, Conflict, Finding, InvestmentSummary, Objection, Question, ReviewVerdict } from "@/lib/research/investigate/types";
 import type { ScenarioSpec, ValuationResult } from "@/lib/research/investigate/valuationCalc";
@@ -39,11 +40,11 @@ const typeOf = (v: InvVersion) => (v.conclusion.research_type === "material_even
 export function InvestigationPills({ v, usedId }: { v: InvVersion; usedId?: string | null }) {
   const state = String(v.conclusion.review_state ?? "");
   const used = v.is_current || (!!usedId && v.id === usedId);
-  const completion = v.conclusion.completion as { kind?: string; reasons?: unknown[] } | undefined;
-  const openN = Array.isArray(completion?.reasons) ? completion!.reasons!.length : 0;
+  // The same open list the status card counts (your acknowledged items when you adopted it provisionally).
+  const openN = openItems(v as unknown as Parameters<typeof openItems>[0]).length;
   return (
     <>
-      <Pill small tone={v.completeness === "complete" ? "gain" : "warn"}>{v.completeness === "complete" ? "Finished" : v.completeness === "in_progress" ? "Running" : `Finished · ${openN || "open"} item${openN === 1 ? "" : "s"} open`}</Pill>
+      <Pill small tone={v.completeness === "complete" ? "gain" : "warn"}>{v.completeness === "complete" ? "Finished" : v.completeness === "in_progress" ? "Running" : `Finished · ${openN || "some"} question${openN === 1 ? "" : "s"} open`}</Pill>
       {used && usedId !== undefined && v.id !== usedId ? null : used ? <Pill small tone="gain" dot="solid">In use for decisions</Pill> : state === "set_aside" ? <Pill small>Set aside</Pill> : null}
     </>
   );

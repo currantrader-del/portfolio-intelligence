@@ -16,7 +16,8 @@ export async function updatePlanFor(symbol: string, versions: (VersionRow & { cr
   const plan = planUpdate({
     foundation: found ? {
       versionId: found.v.id, asOf: found.v.research_as_of, label: `${shortDate(found.v.research_as_of)}, ${AUTHORITY_LABEL[found.authority].toLowerCase()}`,
-      complete: found.v.completeness === "complete", isInvestigation: true, referencePrice: num(fc.reference_price), terminalDate: typeof fv.terminal_date === "string" ? fv.terminal_date : null,
+      // Finished all its phases (complete, or with open questions recorded) is a foundation; only a run that stopped part-way is not.
+      complete: found.v.completeness === "complete" || !!fc.completion, isInvestigation: true, referencePrice: num(fc.reference_price), terminalDate: typeof fv.terminal_date === "string" ? fv.terminal_date : null,
       scenarios: { bear: num(fv.bear_value), base: num(fv.base_value), bull: num(fv.bull_value), pBear: num(fv.bear_probability), pBase: num(fv.base_probability), pBull: num(fv.bull_probability) },
       reviewedAccessions: [],
     } : null,
