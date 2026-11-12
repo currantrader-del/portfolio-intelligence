@@ -12,6 +12,7 @@ import { EXTRACTION_LABEL, ORIGIN_LABEL } from "@/lib/research-labels";
 import { getWorkspace } from "@/lib/workspace";
 import { dayChangePct } from "@/lib/market/quotes";
 import { RecoveryCard } from "@/components/RecoveryCard";
+import { AnalystCard } from "@/components/AnalystCard";
 import { InvestmentSummary, type Brief } from "@/components/TodayValuation";
 import { AskButton } from "@/components/AskPanel";
 import { FilingCheckCard, type StoredFilingCheck } from "@/components/FilingCheckCard";
@@ -90,6 +91,7 @@ export default async function CompanyPage({ params, searchParams }: { params: Pr
             </ActionForm>
           </Disclose>
         </Card>
+        {!etf && <Suspense fallback={<FeedSkeleton title="Analyst reports" />}><AnalystCard symbol={symbol} price={price} /></Suspense>}
         {!etf && <Suspense fallback={<FeedSkeleton title="Reported financials" />}><FundamentalsCard symbol={symbol} /></Suspense>}
         {feeds(null)}
       </div>
@@ -136,6 +138,7 @@ export default async function CompanyPage({ params, searchParams }: { params: Pr
           <ResearchStatus s={standing} />
           <InvestmentSummary ws={ws} symbol={company.symbol} brief={brief} />
           {!etf && <Suspense fallback={<FeedSkeleton title="Recovery odds" />}><RecoveryCard symbol={company.symbol} price={price} priceAsOf={q?.asOf ?? null} targetsRaw={sp.targets?.slice(0, 80)} /></Suspense>}
+          {!etf && <Suspense fallback={<FeedSkeleton title="Analyst reports" />}><AnalystCard symbol={company.symbol} price={price} /></Suspense>}
           {pendingInv && <InvestigationConclusion symbol={company.symbol} v={pendingInv as unknown as InvVersion} inUse={inUseLabel} usedId={usedId} validation={(valRow?.outputs as ValidationReport | undefined) ?? null} />}
         </div>
 
