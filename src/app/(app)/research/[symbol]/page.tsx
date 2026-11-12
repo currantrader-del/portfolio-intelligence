@@ -27,7 +27,9 @@ import { measuredEstimates } from "@/lib/research/costEstimates";
 import type { VersionRow } from "@/lib/research/records";
 import { getQuote } from "@/lib/market/quotes";
 import { coverage } from "@/lib/research/status";
-import { researchStanding, qualityOf, QUALITY_LABEL, approvalOf, type Standing } from "@/lib/research/standing";
+import { researchStanding, qualityOf, QUALITY_LABEL, approvalOf, statusFields, displaySummary, type Standing, type StatusFields } from "@/lib/research/standing";
+import { refreshState } from "@/lib/policy/evidence";
+import { getFilings } from "@/lib/market/sec";
 import { pctStr, shortDate, toneOf, usd } from "@/lib/format";
 import { Card, CardHead, Chevron, DataLabel, Disclose, LinkRow, Pill, SourceRef } from "@/components/ui";
 
@@ -122,6 +124,10 @@ export default async function CompanyPage({ params, searchParams }: { params: Pr
   const usedId = standing.inUse?.v.id ?? null;
   const inUseLabel = standing.inUse ? { research_as_of: standing.inUse.v.research_as_of, label: standing.inUse.label } : null;
   const brief = briefOf(standing, cur?.parsed.thesis ?? null);
+  // The same "anything material since?" check Decisions uses.
+  const secF = etf || !record?.current ? null : await getFilings(company.symbol, ws.now).catch(() => null);
+  const reassess = record?.current ? refreshState({ asOf: record.current.research_as_of, pc: record.current.parsed, price, filings: secF && !("error" in secF) ? secF : null, isEtf: etf }) : null;
+  const fields = statusFields(standing, reassess);
   const share = shareOptions(versions);
 
   return (
@@ -135,7 +141,7 @@ export default async function CompanyPage({ params, searchParams }: { params: Pr
       {/* Investment view: the decision first. */}
       <div className="grid grid-cols-1 gap-3 lg:gap-4 lg:grid-cols-12 items-start">
         <div className="lg:col-span-7 flex flex-col gap-3 lg:gap-4 min-w-0">
-          <ResearchStatus s={standing} />
+          <ResearchStatus s={standing} f={fields} />
           <InvestmentSummary ws={ws} symbol={company.symbol} brief={brief} />
           {!etf && <Suspense fallback={<FeedSkeleton title="Recovery odds" />}><RecoveryCard symbol={company.symbol} price={price} priceAsOf={q?.asOf ?? null} targetsRaw={sp.targets?.slice(0, 80)} /></Suspense>}
           {!etf && <Suspense fallback={<FeedSkeleton title="Analyst reports" />}><AnalystCard symbol={company.symbol} price={price} /></Suspense>}
@@ -180,7 +186,7 @@ export default async function CompanyPage({ params, searchParams }: { params: Pr
                     <div key={v.id} className="flex flex-col gap-2 pb-3 border-b border-line last:border-b-0 last:pb-0">
                       <div className="flex flex-wrap items-center gap-1.5">
                         <span className="text-ink font-semibold mr-1">{shortDate(v.research_as_of)}</span>
-                        {v.id === usedId && <Pill small tone={approvalOf(v) === "approved" ? "gain" : "warn"} dot="solid">{approvalOf(v) === "approved" ? "In use" : approvalOf(v) === "provisional" ? "In use, open questions" : "In use, preliminary"}</Pill>}
+                        {v.id === usedId && <Pill small tone={approvalOf(v) === "automatic" ? "warn" : "gain"} dot="solid">{approvalOf(v) === "automatic" ? "In use, preliminary" : "In use for decisions"}</Pill>}
                         <Pill small tone={qualityOf(v) === "complete_investigation" || qualityOf(v) === "imported" ? "neutral" : "warn"}>{v.completeness === "in_progress" ? "In progress" : QUALITY_LABEL[qualityOf(v)]}</Pill>
                         <Pill small>{v.conclusion?.research_type === "preliminary_screen" ? "Preliminary screen" : v.conclusion?.research_type === "full_investigation" ? "Full investigation" : v.conclusion?.research_type === "material_event_refresh" ? "Material-event refresh" : ORIGIN_LABEL[v.origin] ?? v.origin}</Pill>
                         {v.conclusion?.review_state === "set_aside" && <Pill small>Set aside</Pill>}
@@ -191,7 +197,7 @@ export default async function CompanyPage({ params, searchParams }: { params: Pr
                           <div key={k} className="min-w-0"><span className="t-xs block capitalize">{k.replace("_", " ")}</span><span className="text-ink">{c[k] ?? "—"}</span></div>
                         ))}
                       </div>
-                      {v.change_summary && <p className="t-sm">{v.change_summary}</p>}
+                      {v.change_summary && (() => { const d = displaySummary(v.change_summary, v.id === usedId); return <>{d.text && <p className="t-sm">{d.text}</p>}{d.note && <p className="t-xs">{d.note}</p>}</>; })()}
                       {v.source_documents && <SourceRef kind="Source">{v.source_documents.file_name} · {v.source_documents.sha256.slice(0, 10)}…</SourceRef>}
                       {v.research_phases?.length > 0 && (
                         <div className="flex flex-col rounded-[12px] border border-line px-3">
@@ -273,22 +279,30 @@ function briefOf(s: Standing, parsedThesis: string | null): Brief | null {
 }
 
 /** Which research decisions use, what is waiting for you, what is history, and what is still open. */
-function ResearchStatus({ s }: { s: Standing }) {
+function ResearchStatus({ s, f }: { s: Standing; f: StatusFields | null }) {
   if (!s.inUse && !s.pending) return null;
+  const row = (label: string, ok: boolean, text: string) => (
+    <div className="grid grid-cols-[130px_1fr] gap-2 items-baseline"><span className="t-xs">{label}</span><span className={ok ? "text-ink" : "warn"}>{text}</span></div>
+  );
   return (
     <Card labelledBy="rs-h" className="!gap-2">
       <CardHead id="rs-h" cap="Research status" />
       <div className="flex flex-col gap-1.5 t-sm">
-        <div><span className="t-xs block">In use for decisions</span>
-          {s.inUse ? <span className="text-ink">{shortDate(s.inUse.v.research_as_of)} · {s.inUse.label}{s.inUse.open.length ? ` · ${s.inUse.open.length} open item${s.inUse.open.length === 1 ? "" : "s"}` : ""}</span> : <span className="text-ink">None</span>}
-        </div>
+        {f ? (
+          <>
+            {row("Investigation", f.finished.ok, f.finished.text)}
+            {row("Your approval", true, f.approved.text)}
+            {row("Used for decisions", f.inUse.ok, f.inUse.text)}
+            {row("Reassessment", !f.reassess.needed, f.reassess.text)}
+            {row("Open items", f.open.length === 0, f.open.length ? `${f.open.length}, listed below` : "None")}
+          </>
+        ) : <div><span className="t-xs block">In use for decisions</span><span className="text-ink">None</span></div>}
         {s.pending && (
           <div><span className="t-xs block">Latest investigation</span>
             <span className="text-ink">{shortDate(s.pending.v.research_as_of)} · {s.pending.state === "running" ? "in progress" : `${s.pending.complete ? "complete" : s.pending.kind === "material_uncertainty" ? "incomplete: a material question has no reliable answer" : "incomplete"} · not in use: it has unfinished work`}{s.pending.open.length ? ` · ${s.pending.open.length} open item${s.pending.open.length === 1 ? "" : "s"}` : ""}</span>
           </div>
         )}
         {s.history.length > 0 && <div><span className="t-xs block">History</span><span>{s.history.length} earlier record{s.history.length === 1 ? "" : "s"}, kept unchanged (listed under Research history)</span></div>}
-        <p className={`t-xs ${s.inUse?.approval === "approved" && !s.pending ? "" : "warn"}`}>{s.decisions}</p>
         {s.inUse && s.inUse.open.length > 0 && (
           <Disclose summary={<span className="t-sm">Open questions · {s.inUse.open.length} · a targeted update resolves them</span>}>
             <ul className="t-xs list-disc pl-4 flex flex-col gap-0.5">{s.inUse.open.slice(0, 20).map((x, i) => <li key={i}>{x}</li>)}</ul>

@@ -39,11 +39,12 @@ const typeOf = (v: InvVersion) => (v.conclusion.research_type === "material_even
 export function InvestigationPills({ v, usedId }: { v: InvVersion; usedId?: string | null }) {
   const state = String(v.conclusion.review_state ?? "");
   const used = v.is_current || (!!usedId && v.id === usedId);
-  const completion = v.conclusion.completion as { kind?: string } | undefined;
+  const completion = v.conclusion.completion as { kind?: string; reasons?: unknown[] } | undefined;
+  const openN = Array.isArray(completion?.reasons) ? completion!.reasons!.length : 0;
   return (
     <>
-      <Pill small tone={v.completeness === "complete" ? "gain" : "warn"}>{v.completeness === "complete" ? "Complete" : completion?.kind === "material_uncertainty" ? "Incomplete: material uncertainty" : "Incomplete"}</Pill>
-      {used && usedId !== undefined && v.id !== usedId ? null : used ? <Pill small tone={v.completeness === "complete" && state !== "adopted_provisional" ? "gain" : "warn"} dot="solid">{v.completeness === "complete" && state !== "adopted_provisional" ? "In use" : "In use, open questions"}</Pill> : state === "set_aside" ? <Pill small>Set aside</Pill> : null}
+      <Pill small tone={v.completeness === "complete" ? "gain" : "warn"}>{v.completeness === "complete" ? "Finished" : v.completeness === "in_progress" ? "Running" : `Finished · ${openN || "open"} item${openN === 1 ? "" : "s"} open`}</Pill>
+      {used && usedId !== undefined && v.id !== usedId ? null : used ? <Pill small tone="gain" dot="solid">In use for decisions</Pill> : state === "set_aside" ? <Pill small>Set aside</Pill> : null}
     </>
   );
 }

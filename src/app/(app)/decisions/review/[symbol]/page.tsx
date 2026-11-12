@@ -48,7 +48,7 @@ export default async function ReviewPage({ params }: { params: Promise<{ symbol:
           <section aria-labelledby="th-h" className="bg-surface border border-line rounded-2xl p-6 flex flex-col gap-3">
             <div className="flex flex-wrap items-center gap-2">
               <h2 id="th-h" className="font-semibold mr-1">Thesis on file</h2>
-              {rv.researchAsOf ? <><Tag tone={rv.completeness === "complete" ? "accent" : "warn"}>{rv.completeness}</Tag><Tag>{shortDate(rv.researchAsOf)} · {rv.researchAge} days old</Tag></> : <Tag tone="warn">No current research</Tag>}
+              {rv.researchAsOf ? <><Tag tone={rv.completeness === "complete" ? "accent" : "warn"}>{rv.completeness === "complete" ? "finished" : rv.completeness === "partial" ? "finished, open items" : rv.completeness}</Tag><Tag>{shortDate(rv.researchAsOf)} · {rv.researchAge} days old</Tag></> : <Tag tone="warn">No current research</Tag>}
             </div>
             {rv.thesis ? <p className="text-[16px] leading-relaxed">{rv.thesis}</p> : <p className="text-ink-2">Nothing stored. <Link href={`/research/${sym}`}>Open research</Link></p>}
             {rv.researchAction && <p className="text-sm text-muted">Research action then: {rv.researchAction} at {usd(rv.referencePrice, 2)}.</p>}
