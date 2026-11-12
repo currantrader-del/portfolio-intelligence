@@ -341,7 +341,7 @@ export function explainLine(d: Dimension, l: Line): string {
   const p = (x: number) => `${(x * 100).toFixed(1)}%`;
   const parts = l.contributors.slice(0, 6).map((c) => `${c.via} $${Math.round(c.value).toLocaleString("en-US")}`);
   const range = l.upperPct !== undefined ? ` (could be up to ${p(l.upperPct)} counting not-itemized fund holdings)` : "";
-  return `${l.key}: ${p(l.pct)} of ${d.base === "equity" ? "stocks" : "investable capital"}${range}; $${Math.round(l.direct).toLocaleString("en-US")} direct, $${Math.round(l.indirect).toLocaleString("en-US")} through funds. From: ${parts.join(", ")}.`;
+  return `${l.key}: ${p(l.pct)} of ${d.base === "equity" ? "stocks" : "the invested portfolio"}${range}; $${Math.round(l.direct).toLocaleString("en-US")} direct, $${Math.round(l.indirect).toLocaleString("en-US")} through funds. From: ${parts.join(", ")}.`;
 }
 
 export type ExposureQuery = { country?: string; market?: string; sector?: string; industry?: string; theme?: string; company?: string };

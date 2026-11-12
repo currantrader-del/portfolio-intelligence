@@ -66,7 +66,7 @@ export default async function PlanPage() {
 
       <Card className="!gap-2">
         <PlanRunner running={st.running} hasPlan={!!plan} latestAt={last?.at ?? null} />
-        {when && <p className="t-xs">Last built {shortDate(last!.at)} {when.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit", timeZone: "America/New_York" })} ET · {last!.trigger === "research" ? "after new research" : last!.trigger === "weekly" ? "weekly" : last!.trigger === "policy" ? "after a policy change" : "by you"} · ${last!.costUsd.toFixed(2)}</p>}
+        {when && <p className="t-xs">Last built {shortDate(last!.at)} {when.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit", timeZone: "America/New_York" })} ET · {last!.trigger === "research" ? "after new research (an older rule; plans now rebuild only weekly or when you tap Rebuild)" : last!.trigger === "weekly" ? "weekly" : last!.trigger === "policy" ? "after a policy change" : "by you"} · ${last!.costUsd.toFixed(2)}</p>}
         {last && !last.ok && <p role="alert" className="t-sm warn">The last build failed: {last.error}</p>}
         {check && <OutdatedNotice v={check} what="plan" />}
       </Card>
@@ -77,6 +77,7 @@ export default async function PlanPage() {
           <li><span className="text-ink font-semibold">Cash you could invest:</span> {money(cd.spendableNow)} in your brokerage account{best.money.transferable.amount >= 1 ? `, plus up to ${money(best.money.transferable.amount)} from savings under your standing transfer limit (only for an opportunity that justifies it)` : ""}. {unverified.length ? "Estimated, not confirmed" : "Verified by recent statements"}. Investing it, or leaving it in cash, are both valid.</li>
           <li><span className="text-ink font-semibold">Holdings:</span> {unverified.length ? `estimated. ${unverified.map((a) => `${a.name} is known from a ${a.asOf.slice(0, 10)} statement${a.tradesAfter ? ` plus recorded trades` : ""}`).join("; ")}. Check them before acting on a dollar amount.` : "verified by statements within a week."}</li>
           <li><span className="text-ink font-semibold">Best action now:</span> {best.headline}. <Link href="/decisions" className="t-sm">Decisions</Link></li>
+          {ws.alerts.filter((a) => a.kind === "over_limit" && a.symbol).map((a) => <li key={a.id}><span className="text-ink font-semibold">Position to review:</span> {a.title}. <Link href={a.href} className="t-sm">Review</Link></li>)}
           {audit && <li><span className="text-ink font-semibold">Policy:</span> {audit.subjects.filter((x) => x.authority === "you").length} rules approved by you{audit.imported.length ? `; ${audit.imported.length} imported ${audit.imported.length === 1 ? "guideline" : "guidelines"} awaiting your review (they act as ceilings, not targets)` : ""}{audit.conflicts.length ? `; ${audit.conflicts.length} open limit ${audit.conflicts.length > 1 ? "conflicts" : "conflict"}` : "; no open limit conflicts"}. <Link href="/policy" className="t-sm">Policy</Link></li>}
         </ul>
         <p className="t-xs">Allocation ranges are guidelines and ceilings, never targets to fill. Being below a range, or below 5% cash, is not a reason to buy, sell or wait.</p>

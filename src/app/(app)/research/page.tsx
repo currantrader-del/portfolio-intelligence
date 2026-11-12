@@ -1,3 +1,5 @@
+import { loadDecisionFilings } from "@/lib/alerts/events";
+import type { FilingsResult } from "@/lib/market/sec";
 import { ActionForm, SubmitButton } from "@/components/forms";
 import { AGE_REMINDER_DAYS } from "@/lib/policy/limits";
 import { getWorkspace } from "@/lib/workspace";
@@ -18,12 +20,15 @@ export default async function ResearchPage({ searchParams }: { searchParams: Pro
   const sp = await searchParams;
   const ws = await getWorkspace();
   const freshDays = AGE_REMINDER_DAYS;
+  // The same SEC filings Decisions uses, so "Reassess" here matches Decisions.
+  const filings = await loadDecisionFilings(ws).catch(() => new Map<string, FilingsResult>());
+  const fl = (s: string) => filings.get(s) ?? null;
   const holdings = ws.portfolio.holdings.filter((h) => !isEtf(h.symbol)).sort((a, b) => b.value - a.value);
   const ownedSet = new Set(holdings.map((h) => h.symbol));
 
   const owned: OwnedItem[] = holdings.map((h) => {
     const r = ws.research.find((x) => x.symbol === h.symbol);
-    const c = coverage(r, h.price, ws.now, freshDays);
+    const c = coverage(r, h.price, ws.now, freshDays, fl(h.symbol));
     const v = r?.current ?? r?.latest;
     const e = ws.portfolio.exposures.find((x) => x.symbol === h.symbol);
     return {
@@ -42,7 +47,7 @@ export default async function ResearchPage({ searchParams }: { searchParams: Pro
     const v = r.current ?? r.latest;
     const price = (ws.quotes.get(r.symbol) ?? extraQuotes.get(r.symbol))?.price ?? null;
     const stageNow = r.pipeline.stage === "owned" ? "researching" : r.pipeline.stage;
-    const c = coverage(r, price, ws.now, freshDays);
+    const c = coverage(r, price, ws.now, freshDays, fl(r.symbol));
     const sug = v ? suggestStage({ stage: stageNow, held: false, coverageKey: c.key, hasResearch: true, action: v.parsed.action ?? null, screenVerdict: r.pipeline.screen?.verdict ?? null }) : null;
     // Same card as an owned position whenever research exists, minus the position size.
     const card: OwnedItem | null = v ? {
@@ -57,7 +62,7 @@ export default async function ResearchPage({ searchParams }: { searchParams: Pro
       // A company is only "owned" while it is in the holdings; otherwise it returns to research.
       stage: r.pipeline.stage === "owned" ? "researching" : r.pipeline.stage,
       note: r.pipeline.note, screen: r.pipeline.screen?.verdict ?? null, screenedAt: md(r.pipeline.screenedAt),
-      coverage: v ? coverage(r, null, ws.now, freshDays).label : null,
+      coverage: v ? c.label : null,
     };
   });
   const valid = ["owned", "ready", "researching", "screening", "idea", "passed"];

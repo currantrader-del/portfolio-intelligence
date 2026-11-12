@@ -25,7 +25,7 @@ export function insights(r: ExposureReport, limits: LimitCheck[], companies: Com
       out.push({
         id: `company-${c.symbol}`, action: over ? "reduce" : "maintain", severity: over ? 1 : 2,
         title: over ? `${c.symbol} is over its ${p(c.max)} maximum` : `${c.symbol} is at the top of its limit: don't add`,
-        detail: `${c.symbol} is ${p(c.total)} of investable capital: ${p(c.direct)} owned directly plus ${p(c.viaEtfs)} through your index funds. ${over ? "New money must not add to it, and a plan to bring it under the maximum is due." : `Only ${p(Math.max(0, c.max - c.total))} of room is left, so new money into it, or into funds that hold a lot of it, would breach the limit.`}`,
+        detail: `${c.symbol} is ${p(c.total)} of the invested portfolio: ${p(c.direct)} owned directly plus ${p(c.viaEtfs)} through your index funds. ${over ? "New money must not add to it, and a plan to bring it under the maximum is due." : `Only ${p(Math.max(0, c.max - c.total))} of room is left, so new money into it, or into funds that hold a lot of it, would breach the limit.`}`,
         evidence: ["Company limit from your approved policy", "Fund weights from the funds' published holdings (see sources)"],
       });
     }
@@ -52,7 +52,7 @@ export function insights(r: ExposureReport, limits: LimitCheck[], companies: Com
     out.push({
       id: "cluster-ai", action: "review", severity: 2,
       title: `About ${p(inv(ai.value))} rides on AI data-center spending`,
-      detail: `${names} all depend on the same driver: how much the big cloud companies spend on AI data centers. So they tend to move together when that outlook changes. Semiconductors alone are ${semis ? p(inv(semis.value)) : "n/a"} of investable capital${semis?.upper ? ` (up to ${p(inv(semis.upper))} counting fund holdings not itemized)` : ""}.`,
+      detail: `${names} all depend on the same driver: how much the big cloud companies spend on AI data centers. So they tend to move together when that outlook changes. Semiconductors alone are ${semis ? p(inv(semis.value)) : "n/a"} of the invested portfolio${semis?.upper ? ` (up to ${p(inv(semis.upper))} counting fund holdings not itemized)` : ""}.`,
       evidence: ["Look-through of direct holdings and fund top holdings", "Theme definition in the app (themes overlap)"],
     });
   }
@@ -75,7 +75,7 @@ export function insights(r: ExposureReport, limits: LimitCheck[], companies: Com
   for (const o of r.overlaps.filter((x) => /no diversification/.test(x.note))) out.push({ id: `overlap-${o.a}-${o.b}`, action: "maintain", severity: 3, title: `${o.a} and ${o.b} are the same kind of fund`, detail: `${o.note} No action is needed; if you want fewer funds to track, new international money can go to one of them.`, evidence: ["Fund country and holdings weights (see sources)"] });
 
   // Rates
-  if (r.rates.growthEquityPct >= 0.25) out.push({ id: "rates", action: "info", severity: 3, title: `${p(r.rates.growthEquityPct)} of your stocks are individual growth companies`, detail: `They are the part of the portfolio most sensitive to rising long-term interest rates. Your bond funds are small (${p(inv(r.bonds))} of investable capital): ${r.rates.notes[0]}`, evidence: ["Issuer-published bond durations", "App style classification"] });
+  if (r.rates.growthEquityPct >= 0.25) out.push({ id: "rates", action: "info", severity: 3, title: `${p(r.rates.growthEquityPct)} of your stocks are individual growth companies`, detail: `They are the part of the portfolio most sensitive to rising long-term interest rates. Your bond funds are small (${p(inv(r.bonds))} of the invested portfolio): ${r.rates.notes[0]}`, evidence: ["Issuer-published bond durations", "App style classification"] });
 
   if (r.gaps.length) out.push({ id: "gaps", action: "info", severity: 3, title: "What the numbers can't see yet", detail: r.gaps.join(" "), evidence: [] });
 

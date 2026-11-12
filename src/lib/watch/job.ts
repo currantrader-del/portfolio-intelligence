@@ -7,7 +7,7 @@ import { automatedAllowed, loadSpend } from "@/lib/costs/spend";
 import Anthropic from "@anthropic-ai/sdk";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { Alert } from "@/lib/alerts/rules";
-import { loadEventAlerts } from "@/lib/alerts/events";
+import { loadEventAlerts, researchDates } from "@/lib/alerts/events";
 import { loadReviewState } from "@/lib/alerts/review";
 import { filingsToPush } from "./filingFilter";
 import { addFilingReads } from "./filingRead";
@@ -100,7 +100,7 @@ export async function runWatch(db: SupabaseClient, origin: string, opts: { force
   const held = new Set(ws.portfolio.holdings.map((h) => h.symbol));
   const ideas = ws.research.filter((r) => !held.has(r.symbol) && r.current).map((r) => r.symbol);
   const [events, ideaQuotes, past] = await Promise.all([
-    loadEventAlerts([...held, ...ideas], now).catch(() => ({ alerts: [] as Alert[] })),
+    loadEventAlerts([...held, ...ideas], now, researchDates(ws.research)).catch(() => ({ alerts: [] as Alert[] })),
     ideas.length ? getQuotes(ideas).then((free) => withSchwabQuotes(db, free, ideas)) : Promise.resolve(new Map()),
     watchRuns(db),
   ]);

@@ -27,7 +27,7 @@ export default async function ReviewPage({ params }: { params: Promise<{ symbol:
           <h1 className="h1 mt-1">Review {sym}</h1>
           <div className="text-sm text-muted">
             <span className="font-mono">{usd(rv.price, 2)} <span className={toneOf(rv.dayPct)}>{pctStr(rv.dayPct, 1, true)}</span></span>
-            {rv.priceSource === "statement" && " (statement price)"} · your position {pctStr(rv.weight)} of the portfolio, {usd(rv.value)}
+            {rv.priceSource === "statement" && " (statement price)"} · {pctStr(rv.weight)} of your invested portfolio including funds ({usd(rv.snapshot.direct)} direct + {usd(rv.snapshot.viaFunds)} through funds, of {usd(rv.snapshot.invested)})
           </div>
         </div>
         {alerts[0] && <Tag tone={alerts[0].severity === "high" ? "alert" : alerts[0].severity === "medium" ? "warn" : "neutral"}>{alerts[0].severity.toUpperCase()}</Tag>}
@@ -48,7 +48,7 @@ export default async function ReviewPage({ params }: { params: Promise<{ symbol:
           <section aria-labelledby="th-h" className="bg-surface border border-line rounded-2xl p-6 flex flex-col gap-3">
             <div className="flex flex-wrap items-center gap-2">
               <h2 id="th-h" className="font-semibold mr-1">Thesis on file</h2>
-              {rv.researchAsOf ? <><Tag tone={rv.completeness === "complete" ? "accent" : "warn"}>{rv.completeness}</Tag><Tag>{shortDate(rv.researchAsOf)} · {rv.researchAge} days old</Tag></> : <Tag tone="warn">No current research</Tag>}
+              {rv.researchAsOf ? <><Tag tone={rv.completeness === "complete" ? "accent" : "warn"}>{rv.completeness === "complete" ? "finished" : rv.completeness === "partial" ? "finished, open items" : rv.completeness}</Tag><Tag>{shortDate(rv.researchAsOf)} · {rv.researchAge} days old</Tag></> : <Tag tone="warn">No current research</Tag>}
             </div>
             {rv.thesis ? <p className="text-[16px] leading-relaxed">{rv.thesis}</p> : <p className="text-ink-2">Nothing stored. <Link href={`/research/${sym}`}>Open research</Link></p>}
             {rv.researchAction && <p className="text-sm text-muted">Research action then: {rv.researchAction} at {usd(rv.referencePrice, 2)}.</p>}
@@ -79,16 +79,28 @@ export default async function ReviewPage({ params }: { params: Promise<{ symbol:
             <div className="text-xs text-chrome-muted">Model output from your research and limits. For a written second opinion, use Deep review.</div>
           </section>
 
+          <section aria-labelledby="lv-h" className="bg-surface border border-line rounded-2xl p-5 flex flex-col gap-2">
+            <h2 id="lv-h" className="font-semibold">Exposure and limits</h2>
+            <dl className="grid grid-cols-[1fr_auto] gap-x-3 gap-y-1 text-sm">
+              <dt>Combined exposure now</dt><dd className="font-mono text-right">{pctStr(rv.weight)}</dd>
+              {rv.levels.normal && <><dt>Normal range (a guide, not a target)</dt><dd className="font-mono text-right">{pctStr(rv.levels.normal.low, 0)}–{pctStr(rv.levels.normal.high, 0)}</dd></>}
+              {rv.levels.researchReview && <><dt>Research review level ({rv.levels.researchReview.source})</dt><dd className="font-mono text-right">{pctStr(rv.levels.researchReview.value, 0)}</dd></>}
+              {rv.levels.hardMax !== null && <><dt>Portfolio maximum</dt><dd className="font-mono text-right">{pctStr(rv.levels.hardMax, 0)}</dd></>}
+            </dl>
+            <p className="text-sm">{rv.levelState.text}.</p>
+            <p className="text-xs text-muted">All percentages are of the invested portfolio ({usd(rv.snapshot.invested)}: holdings plus cash in the investment accounts; savings excluded), counting shares held through funds.</p>
+          </section>
+
           <section className="bg-surface border border-line rounded-2xl p-5 flex flex-col gap-3">
             <h2 className="font-semibold">Your options</h2>
             <ActionForm action={recordReview} success="Decision recorded" className="flex flex-col gap-2">
               <input type="hidden" name="symbol" value={sym} />
               {rv.options.map((o) => (
-                <label key={o.key} className={`grid grid-cols-[20px_56px_1fr] gap-2 items-start p-3 rounded-lg border ${o.key === rv.suggestion.key ? "border-accent bg-accent-soft" : "border-line"} ${o.available ? "" : "opacity-50"}`}>
+                <label key={o.key} className={`grid grid-cols-[20px_92px_1fr] gap-2 items-start p-3 rounded-lg border ${o.key === rv.suggestion.key ? "border-accent bg-accent-soft" : "border-line"} ${o.available ? "" : "opacity-50"}`}>
                   <input type="radio" name="chosen" value={o.key} required disabled={!o.available} className="mt-1" />
-                  <span className="font-semibold">{o.label}</span>
+                  <span className="font-semibold">{o.label}{o.basis === "research" && <span className="block text-xs font-normal text-accent">research-backed</span>}{o.basis === "hypothetical" && <span className="block text-xs font-normal text-muted">hypothetical</span>}{o.basis === "blocked" && <span className="block text-xs font-normal text-muted">not supported</span>}</span>
                   <span className="text-sm">
-                    {o.key === "hold" ? o.note : `${o.key === "add" ? "+" : "−"}${usd(o.dollars)} → ${pctStr(o.weightAfter)}`}
+                    {o.key === "hold" ? o.note : `${o.key === "add" ? "+" : "−"}${usd(o.dollars)} → ${pctStr(o.weightAfter)} combined`}
                     <span className="block text-xs text-muted">{o.key !== "hold" ? o.note + " · " : ""}{o.tax}</span>
                   </span>
                 </label>
@@ -98,7 +110,7 @@ export default async function ReviewPage({ params }: { params: Promise<{ symbol:
               <SubmitButton className="btn btn-primary">Record my decision</SubmitButton>
             </ActionForm>
             <AskButton question={`Deep review of ${sym}: given the research, today's price and my limits, should I add, hold, trim or exit? Give the strongest case each way.`} className="min-h-11 px-4 rounded-lg border border-line-strong font-medium">Deep review</AskButton>
-            <p className="text-xs text-muted">Recording saves your choice; it does not trade. Place any order yourself at Schwab.</p>
+            <p className="text-xs text-muted">Sizes assume sale proceeds stay as cash in the brokerage, so the invested portfolio stays {usd(rv.snapshot.invested)} and fund holdings are unchanged. Recording saves your choice; it does not trade. Place any order yourself at Schwab.</p>
           </section>
         </aside>
       </div>

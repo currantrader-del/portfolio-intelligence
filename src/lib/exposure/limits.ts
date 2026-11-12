@@ -42,7 +42,7 @@ const FINRA = { label: "FINRA, Concentrate on Concentration Risk (qualitative gu
 const NASDAQ = { label: "Nasdaq-100 calendar returns (2022: -32.97%) and Nasdaq Composite 2000-2002 decline (-78%), Wikipedia", url: "https://en.wikipedia.org/wiki/Nasdaq-100", date: "2026-11-08" };
 const SPDJI = { label: "S&P Dow Jones Indices, S&P 500 brochure: emerging markets about 10% of global equity value (EM ex-China 7%, China 3%, June 2025)", url: "https://www.spglobal.com/spdji/en/documents/additional-material/sp-500-brochure.pdf", date: "2025-06-30" };
 
-/** The proposals, written down so every number has a stated basis. Percentages are of investable capital. */
+/** The proposals, written down so every number has a stated basis. Percentages are of the invested portfolio. */
 export const PROPOSALS: ExposureLimitProposal[] = [
   {
     subject: "exposure:industry:Semiconductors & Semiconductor Equipment", dimension: "industry", key: "Semiconductors & Semiconductor Equipment", label: "Semiconductors (direct + through funds)",
@@ -82,7 +82,7 @@ export const NOT_PROPOSED: { exposure: string; reason: string }[] = [
   { exposure: "International equity and the US share", reason: "Already governed by your approved International equity range (12-20%, max 30%). A second geography limit would duplicate it." },
   { exposure: "Speculative / early-stage tech", reason: "Already governed by your approved high-risk growth sleeve (5-12%, max 20%)." },
   { exposure: "Single companies (NVIDIA, Alphabet, ...)", reason: "Already governed by your approved company limits, which include fund look-through." },
-  { exposure: "Other sectors, other industries and single countries", reason: "None is material in this portfolio (each under about 13% of investable capital, and Taiwan, the largest foreign country, is 3.5%). A limit would be monitoring for its own sake." },
+  { exposure: "Other sectors, other industries and single countries", reason: "None is material in this portfolio (each under about 13% of the invested portfolio, and Taiwan, the largest foreign country, is 3.5%). A limit would be monitoring for its own sake." },
 ];
 
 /** Policy rows to insert for proposals that are not already on file (one live row per subject). */
@@ -92,7 +92,7 @@ export function proposalRows(existing: Pick<PolicyRuleRow, "scope" | "subject" |
     scope: "portfolio", subject: p.subject,
     normal_low: p.normal?.low ?? null, normal_high: p.normal?.high ?? null,
     value: p.review, hard_max: p.ceiling,
-    conditions: `Normal ${p.normal ? `${pct(p.normal.low)}-${pct(p.normal.high)} (${p.evidence.normal})` : "none proposed"}; review above ${pct(p.review)} (${p.evidence.review}); ceiling ${pct(p.ceiling)} (${p.evidence.ceiling}). Percent of investable capital, direct plus through funds. ${p.why} Sources: ${p.sources.map((s) => `${s.label} (${s.date}) ${s.url}`).join("; ")}`.slice(0, 2000),
+    conditions: `Normal ${p.normal ? `${pct(p.normal.low)}-${pct(p.normal.high)} (${p.evidence.normal})` : "none proposed"}; review above ${pct(p.review)} (${p.evidence.review}); ceiling ${pct(p.ceiling)} (${p.evidence.ceiling}). Percent of the invested portfolio, direct plus through funds. ${p.why} Sources: ${p.sources.map((s) => `${s.label} (${s.date}) ${s.url}`).join("; ")}`.slice(0, 2000),
     source_label: PROPOSAL_LABEL, source_date: PROPOSAL_DATE, source_status: "app_proposal", approval: "proposed", approved_at: null,
     approval_note: `Claude recommends: ${p.short}`,
   }));
@@ -110,7 +110,7 @@ const stateOf = (x: number, normal: LimitCheck["normal"], review: number | null,
 
 /**
  * Checks each exposure rule (approved ones first; proposals are shown as proposals) against the report.
- * The base is investable capital, as for every other policy limit.
+ * The base is the invested portfolio (savings excluded), as for every other policy limit.
  */
 export function checkLimits(report: ExposureReport, rules: Pick<PolicyRuleRow, "scope" | "subject" | "approval" | "normal_low" | "normal_high" | "value" | "hard_max">[]): LimitCheck[] {
   const n = (v: unknown) => (v === null || v === undefined || v === "" ? null : Number(v));

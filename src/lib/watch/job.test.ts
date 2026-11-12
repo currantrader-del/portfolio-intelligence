@@ -8,7 +8,7 @@ vi.mock("@/lib/workspace-core", () => ({ buildWorkspace: async () => ({
   alerts, research: [], quotes: new Map([["ACME", { price: 44, prevClose: 50, asOf: "2026-11-09T15:55:00Z" }]]), benchmarks: [{ symbol: "SPY", label: "S&P 500", dayPct: 0.001 }],
   portfolio: { holdings: [{ symbol: "ACME", price: 44, priceSource: "quote", dayPct, weight: 0.05, bucket: "Quality/growth individual stocks" }], exposures: [] },
 }) }));
-vi.mock("@/lib/alerts/events", () => ({ loadEventAlerts: async () => ({ alerts: [] }) }));
+vi.mock("@/lib/alerts/events", () => ({ loadEventAlerts: async () => ({ alerts: [] }), researchDates: () => new Map() }));
 vi.mock("@/lib/market/quotes", () => ({ getQuotes: async () => new Map() }));
 vi.mock("@/lib/intel/start", () => ({ DAILY_CAP: { total: 5 }, spentToday: async () => ({ total: 99 }) }));
 vi.mock("@/lib/intel/jobs", () => ({ save: async (_db: unknown, kind: string, _v: string, _i: unknown, outputs: unknown) => { saved.push({ kind, outputs }); return "id"; } }));

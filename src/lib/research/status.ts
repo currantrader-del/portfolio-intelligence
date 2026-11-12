@@ -5,6 +5,8 @@
 import { researchAgeDays, type FilingCheckInfo, type ResearchRecord, type VersionRow } from "./records";
 import { repriceCheck } from "./valuation";
 import { isInvestigation } from "./standing";
+import { refreshState } from "@/lib/policy/evidence";
+import type { FilingsResult } from "@/lib/market/sec";
 
 /**
  * How deep the research behind a record actually goes. Six sections written by Claude are automated
@@ -53,7 +55,11 @@ export type Coverage = { key: "current" | "unapproved" | "incomplete" | "refresh
 
 const ageText = (age: number | null, reminderDays: number) => (age ?? 0) > reminderDays ? ` ${age} days old.` : "";
 
-export function coverage(r: ResearchRecord | undefined, price: number | null, now: Date, reminderDays: number): Coverage {
+/**
+ * When `filings` is given (the SEC list Decisions uses), the same "something material happened since the research"
+ * rule as Decisions decides Reassess, so Research, Portfolio and Decisions never disagree on it.
+ */
+export function coverage(r: ResearchRecord | undefined, price: number | null, now: Date, reminderDays: number, filings?: FilingsResult | null): Coverage {
   if (!r || (!r.current && !r.latest)) return { key: "none", label: "Not researched", tone: "neutral", dot: "hollow", detail: "No research on file" };
   if (r.conflict) return { key: "conflict", label: "Conflict", tone: "warn", dot: "solid", detail: `${r.versions} dated records disagree; none is marked current` };
   const v = r.current!;
@@ -66,12 +72,23 @@ export function coverage(r: ResearchRecord | undefined, price: number | null, no
     return { key: "unapproved", label: "Preliminary", tone: "warn", dot: "hollow",
       detail: `${what}: enough for monitoring and Hold or No Add, not for new money, buy ranges or research-based targets. A targeted investigation is the research task.${ageText(age, reminderDays)}` };
   }
+  if (filings !== undefined) {
+    const st = refreshState({ asOf: v.research_as_of, pc: v.parsed, price, filings });
+    if (st.status === "refresh") {
+      const real = st.triggers.filter((t) => t.kind !== "unverified");
+      return { key: "refresh", label: "Reassess", tone: "warn", dot: "hollow", detail: `Something happened since the research: ${real.map((t) => t.detail).join("; ")}. Decisions holds off on new money until a targeted update.` };
+    }
+  }
   const check = price ? repriceCheck(v.parsed, price, age, reminderDays) : { ok: true, reason: null, note: undefined };
-  if (!check.ok) return { key: "refresh", label: "Refresh", tone: "warn", dot: "hollow", detail: check.reason ?? "Needs a refresh" };
+  if (!check.ok) return { key: "refresh", label: "Reassess", tone: "warn", dot: "hollow", detail: check.reason ?? "Needs a refresh" };
   // A material new filing the research has not absorbed means it is not current, however complete it looks.
   const pending = unresolvedFiling(v.research_as_of, r.filingCheck);
-  if (pending) return { key: "refresh", label: "Refresh", tone: "warn", dot: "hollow", detail: `Unresolved new filing: ${pending}` };
-  if (!complete) return { key: "incomplete", label: "Incomplete", tone: "warn", dot: "hollow", detail: "Partial archive: some phases are missing" };
+  if (pending) return { key: "refresh", label: "Reassess", tone: "warn", dot: "hollow", detail: `Unresolved new filing: ${pending}` };
+  if (!complete && isInvestigation(v)) {
+    const open = openCount(v);
+    return { key: "incomplete", label: open ? `Finished · ${open} open` : "Finished · open items", tone: "warn", dot: "hollow", detail: `A full investigation that finished all its phases with ${open || "some"} open item${open === 1 ? "" : "s"}. In use for Hold, No Add and Trim; no new money until a targeted update resolves ${open === 1 ? "it" : "them"}.` };
+  }
+  if (!complete) return { key: "incomplete", label: "Incomplete", tone: "warn", dot: "hollow", detail: "Partial record: some phases are missing" };
   const d = researchDepth(v, r.filingCheck);
   const ageNote = (age ?? 0) > reminderDays ? ` ${age} days old, so check filings since then (age alone doesn't make it wrong).` : "";
   if (d.level === "preliminary") {
@@ -103,4 +120,9 @@ export function suggestStage(args: { stage: string; held: boolean; coverageKey: 
   // Passed is a decision already made; only research that says avoid reopens it, and never the other way.
   if (stage === "passed") return null;
   return s;
+}
+
+function openCount(v: Pick<VersionRow, "conclusion">): number {
+  const r = (v.conclusion as { completion?: { reasons?: unknown } })?.completion?.reasons;
+  return Array.isArray(r) ? r.length : 0;
 }

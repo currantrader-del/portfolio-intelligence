@@ -16,7 +16,11 @@ import { Tag } from "@/components/Tag";
 import { pctStr, shortDate, toneOf, usd } from "@/lib/format";
 import { currentDecisionFor } from "@/lib/decision/currentPortfolio";
 import { loadDecisionFilings } from "@/lib/alerts/events";
+import { nyClose, sessionOfQuotes } from "@/lib/market/hours";
 
+const prevWeekday = (d: string) => { const t = new Date(`${d}T12:00:00Z`); do t.setUTCDate(t.getUTCDate() - 1); while (t.getUTCDay() === 0 || t.getUTCDay() === 6); return t.toISOString().slice(0, 10); };
+
+const verifiedWord = (p: { quality: { status: string } }) => (p.quality.status === "verified" ? "" : "estimated");
 const card = "bg-surface border border-line rounded-2xl p-5 flex flex-col gap-3";
 const SEV = { high: "alert", medium: "warn", low: "neutral" } as const;
 
@@ -42,18 +46,31 @@ export default async function BriefPage({ searchParams }: { searchParams: Promis
   const sameSyms = (a: { symbol: string }[] = [], b: { symbol: string }[] = []) => a.map((x) => x.symbol).sort().join() === b.map((x) => x.symbol).sort().join();
   const changedSinceLast = lastRec ? !sameSyms(lastRec.allocations, best.allocations) : null;
   const spy = ws.benchmarks.find((b) => b.symbol === "SPY")?.dayPct ?? null;
-  const moves = periodMoves(histories, symbols, sessions).sort((a, b) => Math.abs(b.change) - Math.abs(a.change));
-  const bench = periodMoves(histories, ["SPY", "QQQ"], sessions);
+  // One session for the whole daily brief: the quotes' session (the same numbers as the headline and Today).
+  // The weekly brief uses daily closes, and says which five sessions.
+  const session = sessionOfQuotes([...p.holdings.map((h) => ws.quotes.get(h.symbol)?.asOf), ...["SPY", "QQQ"].map((s) => ws.quotes.get(s)?.asOf)], ws.now);
+  const dailyMoves = p.holdings.filter((h) => h.dayPct !== null).map((h) => ({ symbol: h.symbol, from: "", to: session?.date ?? "", change: h.dayPct! }));
+  const dailyBench = ws.benchmarks.filter((b) => (b.symbol === "SPY" || b.symbol === "QQQ") && b.dayPct !== null).map((b) => ({ symbol: b.symbol, from: "", to: session?.date ?? "", change: b.dayPct! }));
+  const moves = (weekly ? periodMoves(histories, symbols, sessions) : dailyMoves).sort((a, b) => Math.abs(b.change) - Math.abs(a.change));
+  const bench = weekly ? periodMoves(histories, ["SPY", "QQQ"], sessions) : dailyBench;
   const change = weekly ? holdingsPeriodChange(p.holdings.map((h) => ({ symbol: h.symbol, quantity: h.quantity, value: h.value })), histories, sessions, p.total) : null;
   const daySentences = writeBrief(p, spy, ws.alerts).sentences;
   const since = new Date(ws.now.getTime() - (weekly ? 7 : 1) * 86400000).toISOString();
   const pipelineChanges = ws.research.filter((r) => (r.pipeline.stageUpdatedAt ?? "") >= since || (r.pipeline.screenedAt ?? "") >= since);
   const review = ws.alerts.filter((a) => a.severity !== "low");
-  const weekAgo = daily.find((d) => d.as_of <= new Date(ws.now.getTime() - 7 * 86400000).toISOString().slice(0, 10));
-  const recordedNow = daily.at(-1);
+  const spyMove0 = bench.find((b) => b.symbol === "SPY");
+  // Recorded values over the SAME five sessions as the price figures, not through today.
+  const inWeek = weekly && spyMove0 ? daily.filter((d) => d.as_of >= spyMove0.from && d.as_of <= spyMove0.to) : [];
+  const weekAgo = inWeek[0];
+  const recordedNow = inWeek.length > 1 ? inWeek.at(-1) : undefined;
   const dateLabel = new Intl.DateTimeFormat("en-US", { weekday: "long", month: "long", day: "numeric", timeZone: "America/New_York" }).format(ws.now);
   const newsMovers = moves.filter((m) => !isEtf(m.symbol)).slice(0, 3).map((m) => ({ symbol: m.symbol, dayPct: m.change, name: ws.research.find((r) => r.symbol === m.symbol)?.name ?? null }));
-  const spyMove = bench.find((b) => b.symbol === "SPY");
+  const spyMove = spyMove0;
+  const moveWindow = weekly
+    ? (spyMove ? { startIso: nyClose(spyMove.from).toISOString(), endIso: nyClose(spyMove.to).toISOString() } : undefined)
+    : session ? { startIso: nyClose(prevWeekday(session.date)).toISOString(), endIso: session.open ? ws.now.toISOString() : session.closeIso } : undefined;
+  const periodLabel = weekly ? (spyMove ? `five sessions, ${shortDate(spyMove.from)} close to ${shortDate(spyMove.to)} close` : undefined) : session?.label;
+  const laterSession = weekly && session && spyMove && session.date > spyMove.to ? session : null;
 
   return (
     <div className="flex flex-col gap-6 max-w-3xl">
@@ -61,7 +78,7 @@ export default async function BriefPage({ searchParams }: { searchParams: Promis
         <div>
           <Link href="/" className="text-sm no-underline max-lg:hidden">← Today</Link>
           <h1 className="h1">{weekly ? "Weekly brief" : "Daily brief"}</h1>
-          <p className="text-muted text-sm">{weekly && spyMove ? `Week of ${shortDate(spyMove.from)} to ${shortDate(spyMove.to)}` : dateLabel}</p>
+          <p className="text-muted text-sm">{weekly && spyMove ? `Five sessions: ${shortDate(spyMove.from)} close to ${shortDate(spyMove.to)} close` : session ? session.label : dateLabel}</p>
         </div>
         <nav className="flex gap-1.5 text-sm" aria-label="Period">
           <Link href="/brief" aria-current={!weekly ? "page" : undefined} className={`min-h-11 px-3.5 active:opacity-70 inline-flex items-center rounded-full border no-underline ${!weekly ? "bg-ink text-ground border-ink" : "border-line-strong text-ink"}`}>Day</Link>
@@ -81,15 +98,16 @@ export default async function BriefPage({ searchParams }: { searchParams: Promis
         ) : (
           <p className="text-[16px] leading-relaxed">{daySentences.join(" ")}</p>
         )}
-        <p className="text-xs text-muted">{weekly ? "Hypothetical: today's share counts at last week's prices, so trades and deposits during the week are not reflected. " : ""}Estimated investable capital {usd(p.total)}; savings excluded.</p>
+        <p className="text-xs text-muted">{weekly ? "Hypothetical: today's share counts at last week's prices, so trades and deposits during the week are not reflected. " : ""}Percentages are of the invested portfolio, {verifiedWord(p)} {usd(p.total)} (holdings plus cash in the investment accounts; savings excluded).</p>
         {weekly && weekAgo && recordedNow && (
-          <p className="text-sm">Recorded value: {usd(weekAgo.investable)} on {shortDate(weekAgo.as_of)} → {usd(recordedNow.investable)} on {shortDate(recordedNow.as_of)} <span className="text-xs text-muted">(includes any deposits or withdrawals you recorded)</span></p>
+          <p className="text-sm">Recorded invested portfolio: {usd(weekAgo.invested + weekAgo.cash)} on {shortDate(weekAgo.as_of)} → {usd(recordedNow.invested + recordedNow.cash)} on {shortDate(recordedNow.as_of)} <span className="text-xs text-muted">(same sessions as above; savings excluded; includes any deposits or withdrawals you recorded)</span></p>
         )}
         <DataQuality p={p} compact />
       </section>
 
       <section aria-labelledby="mv-h" className={card}>
-        <h2 id="mv-h" className="font-semibold">{weekly ? "Week's moves" : "Last session's moves"}</h2>
+        <h2 id="mv-h" className="font-semibold">{weekly ? "Moves over the five sessions" : `Moves: ${session?.label ?? "last session"}`}</h2>
+        {laterSession && <p className="text-xs text-muted">The {laterSession.label.replace(/,.*$/, "")} is not in these weekly figures yet; the Daily brief covers it.</p>}
         {moves.length === 0 ? <p className="text-sm text-muted">Price history unavailable.</p> : (
           <ul className="grid gap-1 sm:grid-cols-2 font-mono text-sm">
             {moves.map((m) => <li key={m.symbol} className="flex justify-between gap-2"><Link href={`/research/${m.symbol}`} className="no-underline text-ink">{m.symbol}</Link><span className={toneOf(m.change)}>{pctStr(m.change, 1, true)}</span></li>)}
@@ -124,7 +142,7 @@ export default async function BriefPage({ searchParams }: { searchParams: Promis
 
       <Suspense fallback={<FeedSkeleton title="Company events" />}><EventAlerts symbols={symbols} now={ws.now} /></Suspense>
 
-      {newsMovers.length > 0 && <Suspense fallback={<FeedSkeleton title="Headlines behind the moves" />}><MoverHeadlines movers={newsMovers} /></Suspense>}
+      {newsMovers.length > 0 && <Suspense fallback={<FeedSkeleton title="Headlines behind the moves" />}><MoverHeadlines movers={newsMovers} window={moveWindow} periodLabel={periodLabel} /></Suspense>}
 
       <section aria-labelledby="act-h" className={card}>
         <h2 id="act-h" className="font-semibold">Your activity</h2>

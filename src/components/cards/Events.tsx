@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { EVENT_WINDOW, loadEventAlerts } from "@/lib/alerts/events";
+import { EVENT_WINDOW, loadEventAlerts, type ResearchDate } from "@/lib/alerts/events";
 import type { Alert } from "@/lib/alerts/rules";
 import { Card, CardHead, Dot, Skel } from "@/components/ui";
 import { buildItems, loadReviewState } from "@/lib/alerts/review";
@@ -13,8 +13,8 @@ const COLOR = { high: "var(--loss)", medium: "var(--warn-ink)", low: "var(--mute
  * Market Event card for held stocks, in two lists that never mix: "Coming up" holds only future
  * dates (estimated unless confirmed); "Filed recently" holds documents already filed, to review.
  */
-export async function EventsCard({ symbols, now }: { symbols: string[]; now: Date }) {
-  const { alerts } = await loadEventAlerts(symbols, now);
+export async function EventsCard({ symbols, now, dates }: { symbols: string[]; now: Date; dates?: Map<string, ResearchDate> }) {
+  const { alerts } = await loadEventAlerts(symbols, now, dates);
   const sort = (xs: Alert[]) => [...xs].sort((a, b) => ORDER[a.severity] - ORDER[b.severity]);
   const upcoming = sort(alerts.filter((a) => a.timing === "upcoming")).slice(0, 4);
   const filed = alerts.filter((a) => a.timing !== "upcoming");
@@ -30,7 +30,7 @@ export async function EventsCard({ symbols, now }: { symbols: string[]; now: Dat
           <FilingReviewList items={recent} back="/" />
         </>
       )}
-      <p className="t-xs">Expected dates are estimates from past filing dates. Filed documents are classified by form and item only; an item clears when your research has read it in full or you mark it reviewed.</p>
+      <p className="t-xs">A date marked &quot;from the research&quot; is the one the research read in the company&apos;s announcement; others are estimates from past filing dates. Filed documents are classified by form and item only; an item clears when your research has read it in full or you mark it reviewed.</p>
     </Card>
   );
 }

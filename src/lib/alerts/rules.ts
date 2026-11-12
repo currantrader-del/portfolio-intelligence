@@ -2,6 +2,7 @@
  * Monitoring rules. Each alert is a decision prompt with a reason, never a trade.
  * Pure: takes the portfolio, research and benchmarks, returns ranked alerts.
  */
+import { researchReviewLevel } from "@/lib/decision/positionMath";
 import type { PortfolioView } from "@/lib/portfolio/engine";
 import type { ResearchRecord } from "@/lib/research/records";
 import { researchAgeDays } from "@/lib/research/records";
@@ -97,6 +98,21 @@ export function evaluateAlerts(args: {
         detail: "Policy: a position above its maximum because of appreciation triggers a review, not an automatic sale.",
         href: `/decisions/review/${e.symbol}`,
       });
+    } else {
+      // Under the maximum but above the level the research in use says to trim back to: shown, never pushed.
+      const cur = research.find((x) => x.symbol === e.symbol)?.current ?? null;
+      const lvl = cur ? researchReviewLevel(cur.parsed.allocation, e.max, `research ${cur.research_as_of}`) : null;
+      if (lvl && e.total > lvl.value + 1e-9) {
+        out.push({
+          id: `research-level:${e.symbol}`,
+          severity: "medium",
+          symbol: e.symbol,
+          kind: "over_limit",
+          title: `${e.symbol} is ${(e.total * 100).toFixed(1)}% including ETFs, above the ${(lvl.value * 100).toFixed(0)}% level its research sets`,
+          detail: `The ${lvl.source} says to trim back to ${(lvl.value * 100).toFixed(0)}% if it goes above. It is under the ${(e.max * 100).toFixed(0)}% maximum. Open the review for the research-backed size.`,
+          href: `/decisions/review/${e.symbol}`,
+        });
+      }
     }
   }
 

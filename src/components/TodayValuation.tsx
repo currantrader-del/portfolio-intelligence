@@ -1,3 +1,4 @@
+import { researchReviewLevel } from "@/lib/decision/positionMath";
 import type { Workspace } from "@/lib/workspace";
 import { getQuote } from "@/lib/market/quotes";
 import { scenarioReturnsAt, zoneFor } from "@/lib/research/valuation";
@@ -69,16 +70,19 @@ export async function InvestmentSummary({ ws, symbol, brief }: { ws: Workspace; 
   const exp0 = ws.portfolio.exposures.find((e) => e.symbol === symbol);
   const lim0 = ws.policy?.companies[symbol];
   const years = v?.parsed.horizonDate ? Math.max(0.25, (new Date(v.parsed.horizonDate).getTime() - ws.now.getTime()) / (365.25 * 864e5)) : 10;
-  const cmp = v && price && check?.ok ? assessVsAlternatives(v.parsed, price, ws.now, {
+  // Saved scenarios are re-priced at today's price even when the research needs reassessment (no AI), and labelled so.
+  const cmp = v && price ? assessVsAlternatives(v.parsed, price, ws.now, {
     riskFree: riskFreeFor(years, ws.yields ?? { y2: null, y10: null }), weightNow: exp0?.total ?? null,
     limit: exp0?.hasLimit ? { normalHigh: lim0?.normal?.high ?? null, hcHigh: lim0?.highConviction?.high ?? null, max: exp0.max } : null, completeness: v.completeness, confidence: v.parsed.confidence,
   }) : null;
   const er = cmp?.expected ?? null;
-  const scen = v && price && check?.ok ? scenarioReturnsAt(v.parsed, price, ws.now) : [];
+  const stale = !!v && !check?.ok;
+  const scen = v && price ? scenarioReturnsAt(v.parsed, price, ws.now) : [];
   const zone = v && price ? zoneFor(v.parsed.zones, price) : null;
   const exp = exp0;
-  const cov = coverage(r, price, ws.now, AGE_REMINDER_DAYS);
+  const cov = coverage(r, price, ws.now, AGE_REMINDER_DAYS, filings && !("error" in filings) ? filings : null);
   const lim = lim0;
+  const reviewLvl = exp0 && v ? researchReviewLevel(v.parsed.allocation, exp0.max, `research ${shortDate(v.research_as_of)}`) : null;
   const view = companyView(cmp?.judgment);
   const today0 = v?.parsed.weightedValue && v.parsed.horizonDate ? valueToday(v.parsed.weightedValue, v.parsed.horizonDate, ws.now) : null;
   const refDay = any?.parsed.referenceDate ? marketDayOf(any.parsed.referenceDate) : null;
@@ -90,13 +94,13 @@ export async function InvestmentSummary({ ws, symbol, brief }: { ws: Workspace; 
       {any?.parsed.classification && <span className="t-xs -mt-1">Classification: <span className="text-ink">{any.parsed.classification}</span></span>}
       {any ? (
         <div className="grid grid-cols-3 gap-x-2 gap-y-3">
-          <Metric label="Company at this price" value={view ?? "—"} note={view ? "valuation only, vs VOO" : v && !check?.ok ? "not re-priced" : undefined} />
+          <Metric label="Company at this price" value={view ?? "—"} note={view ? (stale ? "from saved scenarios; reassess before relying on it" : "valuation only, vs VOO") : undefined} />
           <Metric label="For your portfolio" value={brief?.action || cap1(any.parsed.action)} note="uses your limits and cash" />
           <Metric label="Confidence" value={cap1(brief?.confidence ?? any.parsed.confidence)} />
           <Metric label="Price now" value={price ? usd(price, 2) : "—"} note={!q && h ? "statement price" : q?.asOf ? `delayed, ${quoteTime(q.asOf)}` : "delayed"} />
           <Metric label={v?.parsed.horizonDate ? `Price forecast, ${monthYear(v.parsed.horizonDate)}` : "Price forecast"} value={v?.parsed.weightedValue ? usd(v.parsed.weightedValue, 2) : "—"} note={v?.parsed.weightedValue ? "weighted scenarios, a future price" : undefined} />
           <Metric label="Value today" value={today0 !== null ? usd(today0, 2) : "—"} note={today0 !== null ? `the forecast at ${pctStr(VOO_SPAN.high)} a year` : undefined} />
-          <Metric label="Expected return" value={er === null ? "—" : `≈ ${pctStr(er)}`} note={er === null ? (v && !check?.ok ? "not re-priced" : undefined) : "a year from today's price"} />
+          <Metric label="Expected return" value={er === null ? "—" : `≈ ${pctStr(er)}`} note={er === null ? undefined : stale ? "a year, from saved scenarios at today's price; the research needs reassessment" : "a year from today's price"} />
           <Metric label="Research" value={shortDate(any.research_as_of).replace(/, \d{4}$/, "")} note={age !== null ? `${age} days old` : undefined} />
           <Metric label="Research price" value={any.parsed.referencePrice ? usd(any.parsed.referencePrice, 2) : "—"} note={refDay ? `close of ${shortDate(refDay.date).replace(/, \d{4}$/, "")}${refDay.moved ? " (market closed on the research date)" : ""}` : undefined} />
         </div>
@@ -127,7 +131,7 @@ export async function InvestmentSummary({ ws, symbol, brief }: { ws: Workspace; 
                 {st?.status === "unverified" && <span className="t-xs warn">{check?.reason}</span>}
               </>
             ) : (
-              <p className="t-sm rounded-[12px] bg-warn-bg text-warn-ink px-3 py-2">Not re-priced until the research is refreshed: {check?.reason}</p>
+              <p className="t-sm rounded-[12px] bg-warn-bg text-warn-ink px-3 py-2">The figures here re-price the saved scenarios at today&apos;s price (arithmetic, no AI), but the research needs reassessment before you rely on them: {check?.reason}</p>
             )}
           </div>
         </>
@@ -139,6 +143,8 @@ export async function InvestmentSummary({ ws, symbol, brief }: { ws: Workspace; 
           <div className="flex items-center justify-between gap-3"><span className="t-sm">Your exposure</span><span className="t-sm num text-ink">{pctStr(exp.total)} <span className="t-xs">of max {pctStr(exp.max, 0)}</span></span></div>
           <Bar thin value={exp.total} max={exp.max} markers={lim?.normal ? [lim.normal.low, lim.normal.high] : []} label={`${pctStr(exp.total)} of a ${pctStr(exp.max, 0)} maximum`} />
           {lim && (lim.normal || lim.highConviction) && <span className="t-xs">Your limits: {lim.normal ? `normal ${pctStr(lim.normal.low, 0)}–${pctStr(lim.normal.high, 0)}` : ""}{lim.normal && lim.highConviction ? " · " : ""}{lim.highConviction ? `high conviction up to ${pctStr(lim.highConviction.high, 0)}` : ""} · maximum {pctStr(exp.max, 0)}</span>}
+          {reviewLvl && <span className={`t-xs ${exp.total > reviewLvl.value + 1e-9 ? "warn" : ""}`}>Research review level: {pctStr(reviewLvl.value, 0)} ({reviewLvl.source}){exp.total > reviewLvl.value + 1e-9 ? `. It is above it: see Review this position for the research-backed size.` : ""}</span>}
+          <span className="t-xs">Percentages are of the invested portfolio ({usd(ws.portfolio.total)}), savings excluded.</span>
           <span className="t-xs">{pctStr(exp.direct)} direct · {pctStr(exp.viaEtfs)} through ETFs (approx.){exp.totalMax - exp.total > 0.0005 ? `; could be up to ${pctStr(exp.totalMax)} in total because fund holdings are only partly published` : ""} · room {usd(exp.headroomDollars)}{exp.totalMax - exp.total > 0.0005 ? " (on the upper figure)" : ""}</span>
         </div>
       ) : (

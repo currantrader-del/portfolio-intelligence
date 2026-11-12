@@ -22,8 +22,9 @@ import { OutdatedNotice } from "@/components/OutdatedNotice";
 import { loadContextEvents } from "@/lib/freshness/contextEvents";
 import { outdatedVerdict } from "@/lib/freshness/outdated";
 import { currentDecisionFor } from "@/lib/decision/currentPortfolio";
-import { loadDecisionFilings } from "@/lib/alerts/events";
+import { loadDecisionFilings, researchDates } from "@/lib/alerts/events";
 import { ImprovementTeaser } from "@/components/ImprovementCard";
+import { headlineTiming, sessionOfQuotes } from "@/lib/market/hours";
 import { improvementView } from "@/lib/shadow/proposals";
 import { MyActionButtons } from "@/components/eval/MyAction";
 import { actionRef, loadMyActions } from "@/lib/eval/log";
@@ -59,6 +60,9 @@ export default async function TodayPage() {
     .map((h) => ({ symbol: h.symbol, dayPct: h.dayPct, name: ws.research.find((r) => r.symbol === h.symbol)?.name ?? null }));
   const dateLabel = new Intl.DateTimeFormat("en-US", { weekday: "long", month: "long", day: "numeric", timeZone: "America/New_York" }).format(ws.now);
   const session = ws.marketOpen ? "today" : "last session";
+  // The move shown is from the previous close to the latest quote's session; headlines after it are labelled.
+  const qs = sessionOfQuotes(p.holdings.map((h) => ws.quotes.get(h.symbol)?.asOf), ws.now);
+  const moveWindow = qs ? { startIso: new Date(Date.parse(qs.closeIso) - (new Date(`${qs.date}T12:00:00Z`).getUTCDay() === 1 ? 3 : 1) * 86_400_000).toISOString(), endIso: qs.open ? ws.now.toISOString() : qs.closeIso } : undefined;
   const vsSpy = p.dayPct !== null && spy !== null ? p.dayPct - spy : null;
   const verified = p.quality.status === "verified";
   const improve = await improvementView(db, ws).catch(() => null);
@@ -94,6 +98,9 @@ export default async function TodayPage() {
           {staleAccounts.map((a) => <LinkRow key={a.id} href="/import"><span className="t-sm text-ink block">Upload the latest {a.name} statement</span><span className="t-xs block">Its figures are from {shortDate(a.asOf)} ({a.ageDays} days old), so its holdings and cash are estimates. It doesn&apos;t sync automatically.</span></LinkRow>)}
         </Card>
       )}
+
+      {/* The current decision comes first: the same answer Decisions gives (audit 2026-11-11). */}
+      <Suspense fallback={<div className="card card-tight"><Skel w="60%" /></div>}><BestAction /></Suspense>
 
       <Card labelledBy="mb-h" className="!gap-2">
         <CardHead id="mb-h" cap="Morning briefing" right={<MorningRunner label={morningCheck?.outdated ? "Rewrite with today's facts" : morning ? "Write a new one" : "Write it now"} />} />
@@ -144,7 +151,7 @@ export default async function TodayPage() {
         </Card>
 
         <div className="lg:col-span-4 max-lg:order-last flex flex-col gap-3 lg:gap-4">
-          <Suspense fallback={<EventsSkeleton />}><EventsCard symbols={p.holdings.map((h) => h.symbol)} now={ws.now} /></Suspense>
+          <Suspense fallback={<EventsSkeleton />}><EventsCard symbols={p.holdings.map((h) => h.symbol)} now={ws.now} dates={researchDates(ws.research)} /></Suspense>
         </div>
 
         <Card className="lg:col-span-7 !gap-1 !pb-1.5" labelledBy="q-h">
@@ -177,19 +184,18 @@ export default async function TodayPage() {
           {newsMovers.length > 0 && (
             <div className="border-t border-line -mb-2">
               <Disclose summary={<span>Headlines behind the moves <span className="t-xs">· unverified</span></span>}>
-                <Suspense fallback={<div className="flex flex-col gap-2"><Skel w="90%" /><Skel w="70%" /></div>}><MoverHeadlines movers={newsMovers} /></Suspense>
+                <Suspense fallback={<div className="flex flex-col gap-2"><Skel w="90%" /><Skel w="70%" /></div>}><MoverHeadlines movers={newsMovers} window={moveWindow} /></Suspense>
               </Disclose>
             </div>
           )}
         </Card>
 
-        <Suspense fallback={<div className="card card-tight lg:col-span-12"><Skel w="60%" /></div>}><BestAction /></Suspense>
       </div>
     </div>
   );
 }
 
-async function MoverHeadlines({ movers }: { movers: { symbol: string; dayPct: number | null; name?: string | null }[] }) {
+async function MoverHeadlines({ movers, window }: { movers: { symbol: string; dayPct: number | null; name?: string | null }[]; window?: { startIso: string; endIso: string } }) {
   const rows = await Promise.all(movers.map(async (m) => ({ ...m, r: await getNews(m.symbol, m.name, 2) })));
   const ok = rows.filter((x) => !("error" in x.r));
   if (!ok.length) return <p className="t-sm">Headlines are unavailable right now.</p>;
@@ -201,7 +207,7 @@ async function MoverHeadlines({ movers }: { movers: { symbol: string; dayPct: nu
           {"error" in x.r ? null : x.r.headlines.map((h) => (
             <a key={h.url} href={h.url} target="_blank" rel="noreferrer nofollow" className="t-sm no-underline hover:text-ink">
               {h.title}
-              <span className="block t-xs">{[h.publisher, h.publishedAt ? shortDate(h.publishedAt) : null].filter(Boolean).join(" · ")}</span>
+              <span className="block t-xs">{[h.publisher, h.publishedAt ? shortDate(h.publishedAt) : null].filter(Boolean).join(" · ")}{window && headlineTiming(h.publishedAt, window.startIso, window.endIso) === "after" ? <span className="warn"> · published after this move, not its cause</span> : null}</span>
             </a>
           ))}
         </div>
@@ -219,7 +225,7 @@ async function BestAction() {
   const day = ws.now.toLocaleDateString("en-CA", { timeZone: "America/New_York" });
   const mine = (await loadMyActions(db, 3).catch(() => new Map())).get(actionRef("recommendation", day)) ?? null;
   return (
-    <div className="card card-tight lg:col-span-12 !gap-2">
+    <div className="card card-tight !gap-2">
       <Link href="/decisions" className="flex items-center justify-between gap-3 no-underline">
         <span className="flex flex-col min-w-0">
           <span className="cap">Best action now</span>

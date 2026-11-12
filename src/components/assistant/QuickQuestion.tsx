@@ -8,7 +8,7 @@ import { requestPaidJSON } from "@/lib/client/request";
 export type StoredAnswer = { question: string; answer: string; at: string; ms: number; costUsd: number; searches: number } | null;
 
 /** One saved question: editable text, an Ask button, and its latest answer (summary first, full analysis collapsed). */
-export function QuickQuestion({ slot, initial, last }: { slot: number; initial: string; last: StoredAnswer }) {
+export function QuickQuestion({ slot, initial, last, stale }: { slot: number; initial: string; last: StoredAnswer; stale?: { headline: string; reasons: string[] } | null }) {
   const [q, setQ] = useState(initial);
   const [ans, setAns] = useState<StoredAnswer>(last);
   const [busy, setBusy] = useState(false);
@@ -52,7 +52,8 @@ export function QuickQuestion({ slot, initial, last }: { slot: number; initial: 
       {error && <p role="alert" className="form-note form-note-error">{error}</p>}
       {ans && (
         <div className="flex flex-col gap-1 border-t border-line pt-3">
-          {ans.question !== q && <span className="t-xs">Answer to: “{ans.question}”</span>}
+          {ans.question !== q && <span className="t-xs warn">This saved answer is to a different question: “{ans.question}”</span>}
+          {stale && ans === last && <div className="t-xs warn"><span className="font-semibold">{stale.headline}</span>{stale.reasons.length ? ` ${stale.reasons.slice(0, 3).join(" ")}` : ""} Ask again for an answer from today&apos;s facts.</div>}
           <AnswerView text={ans.answer} />
         </div>
       )}

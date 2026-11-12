@@ -13,7 +13,7 @@ export type Approval = "approved" | "provisional" | "automatic";
 export type Quality = "complete_investigation" | "incomplete_investigation" | "preliminary_ai" | "imported" | "partial";
 
 type V = VersionRow & { created_at?: string | null };
-type C = { review_state?: string; research_type?: string; not_verified?: unknown; completion?: { reasons?: unknown; kind?: string }; adoption?: { mode?: string; open_items?: unknown } };
+type C = { review_state?: string; research_type?: string; not_verified?: unknown; completion?: { reasons?: unknown; kind?: string }; adoption?: { mode?: string; open_items?: unknown; at?: string; requested_by_investor?: string; recommendation_approved?: boolean } };
 const conc = (v: V) => (v.conclusion ?? {}) as C;
 
 /**
@@ -183,4 +183,57 @@ export function updateFoundation<T extends V>(versions: T[], now: Date = new Dat
   if (used && evidenceTier(used, now) === 3) return { v: used, authority: effectiveAuthority(used, now) };
   const inv = sorted.find((v) => isInv(v) && ["awaiting_approval", "approved_full", "approved_provisional"].includes(authorityOf(v, now)));
   return inv ? { v: inv, authority: authorityOf(inv, now) } : null;
+}
+
+/**
+ * The five things the investor asked to see kept apart (audit 2026-11-11), from one record, so Research,
+ * Decisions, Plan, Today and the assistant can say the same thing:
+ *   finished     whether the investigation ran all its phases, and how many items it left open
+ *   approved     whether YOU approved it (never inferred; approval is not required for use since 2026-11-09)
+ *   inUse        whether it is the record decisions use, and what it supports
+ *   reassess     whether something material happened since (filings, price zone), from the caller's check
+ *   open         the unresolved items, listed
+ */
+export type StatusFields = {
+  finished: { ok: boolean; text: string };
+  approved: { ok: boolean; text: string };
+  inUse: { ok: boolean; text: string };
+  reassess: { needed: boolean; text: string };
+  open: string[];
+};
+
+export function statusFields(s: Standing, reassess: { status: "current" | "refresh" | "unverified"; triggers: { kind: string; detail: string }[] } | null): StatusFields | null {
+  if (!s.inUse) return null;
+  const v = s.inUse.v;
+  const c = conc(v);
+  const inv = isInvestigation(v);
+  const open = s.inUse.open;
+  const finished = inv
+    ? { ok: v.completeness === "complete", text: v.completeness === "complete" ? "Finished, nothing left open" : `Finished all its phases, with ${open.length || "some"} item${open.length === 1 ? "" : "s"} left open${c.completion?.kind === "material_uncertainty" ? " (a material question with no reliable answer yet)" : ""}` }
+    : { ok: v.completeness === "complete", text: `${QUALITY_LABEL[qualityOf(v)]}, not a full investigation` };
+  const rs = String(c.review_state ?? "");
+  const ad = (c.adoption ?? {}) as { at?: string; requested_by_investor?: string; recommendation_approved?: boolean };
+  const when = ad.at ? ` on ${shortDay(ad.at.slice(0, 10))}` : "";
+  const approved = ad.requested_by_investor
+    ? { ok: true, text: `Made the record in use${when} at your request (${ad.requested_by_investor.replace(/^\d{4}-\d{2}-\d{2} chat: /, "")})${ad.recommendation_approved === false ? "; you have not approved its recommendation" : ""}` }
+    : rs === "adopted" || rs === "adopted_provisional"
+      ? { ok: true, text: rs === "adopted" ? `Yes, you approved it${when}` : `Yes, you approved it provisionally${when}, with its open items` }
+      : { ok: false, text: "Not approved by you. Since your Nov 9 direction approval is not required: the app uses a finished investigation on its evidence" };
+  const inUse = { ok: true, text: `Yes, the record decisions use (${shortDay(v.research_as_of)}). ${s.decisions}` };
+  const real = reassess ? reassess.triggers.filter((t) => t.kind !== "unverified") : [];
+  const r = !reassess ? { needed: false, text: "Not checked on this page" }
+    : reassess.status === "refresh" ? { needed: true, text: `Yes: ${real.map((t) => t.detail).join("; ")}. A targeted update, not a full rerun` }
+    : reassess.status === "unverified" ? { needed: false, text: `Not confirmed: ${reassess.triggers.map((t) => t.detail).join("; ")}` }
+    : { needed: false, text: "No: no new results, financing, material filing or price-zone change since the research" };
+  return { finished, approved, inUse, reassess: r, open };
+}
+
+const shortDay = (d: string) => new Date(`${d}T12:00:00Z`).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric", timeZone: "UTC" });
+
+/** Stored run summaries written before approval stopped being a gate say "Awaiting your approval…": shown with a note, never rewritten. */
+export function displaySummary(text: string | null, inUse: boolean): { text: string | null; note: string | null } {
+  if (!text) return { text, note: null };
+  const stale = /Awaiting your approval before it is used\.?|Not yet reviewed or approved\.?/i;
+  if (!stale.test(text)) return { text, note: null };
+  return { text: text.replace(stale, "").trim(), note: inUse ? "The run's saved summary said it was awaiting your approval; approval is no longer required, and it is the record in use." : "The run's saved summary said it was awaiting approval; approval is no longer required." };
 }

@@ -157,9 +157,9 @@ export default async function RiskPage({ searchParams }: { searchParams: Promise
             <Disclose summary={`Recorded history${recorded.length ? ` · started ${md(recorded[0].as_of)}` : ""}`}>
               <p className="t-xs">What the app showed each day you opened it. This is your real value history; rows stay labelled estimated until accounts sync automatically.</p>
               {recorded.length >= 2 ? (
-                <LineChart label="Recorded investable capital by day" format={(v) => usd(v)} height={150} series={[{ label: "Investable capital (recorded)", points: recorded.map((d) => ({ date: d.as_of, value: d.investable })), color: "accent" }]} />
+                <LineChart label="Recorded invested portfolio by day" format={(v) => usd(v)} height={150} series={[{ label: "Invested portfolio (recorded; savings excluded)", points: recorded.map((d) => ({ date: d.as_of, value: d.invested + d.cash })), color: "accent" }]} />
               ) : (
-                <p className="t-sm">{recorded.length === 1 ? `First day recorded: ${shortDate(recorded[0].as_of)}, ${usd(recorded[0].investable)}.` : "Nothing recorded yet. Opening Today records a row each market day."}</p>
+                <p className="t-sm">{recorded.length === 1 ? `First day recorded: ${shortDate(recorded[0].as_of)}, ${usd(recorded[0].invested + recorded[0].cash)} invested portfolio.` : "Nothing recorded yet. Opening Today records a row each market day."}</p>
               )}
               {recorded.length > 0 && <p className="t-xs">{recorded.filter((d) => d.quality === "verified").length} of {recorded.length} days verified.</p>}
             </Disclose>

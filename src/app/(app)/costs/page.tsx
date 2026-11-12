@@ -25,7 +25,7 @@ export default async function CostsPage() {
         <span className="cap">Costs</span>
         <h1 className="h1">AI spending</h1>
         <p className="t-sm">What the app&apos;s AI has cost in {monthName}, by feature and by model, against your two monthly budgets. Code-only work (prices, filing checks, re-pricing research, validation) costs nothing and is not listed.</p>
-        <p className="t-sm">How the budgets are enforced: a <b className="text-ink">scheduled job</b> (morning briefing and answer, weekly plan, weekly trade scan, alert summaries, restarting a stopped investigation, the plan rebuild after research) starts only if its budget has room for its usual cost; otherwise it is skipped. A job <b className="text-ink">you start</b> that could take a budget past its limit shows a warning first and runs only if you confirm.</p>
+        <p className="t-sm">How the budgets are enforced: a <b className="text-ink">scheduled job</b> (morning briefing and answer, weekly plan, Wednesday Opportunity Radar, alert summaries and filing reads, restarting a stopped investigation; the weekly trade scan is paused during the test) starts only if its budget has room for its usual cost; otherwise it is skipped. A job <b className="text-ink">you start</b> that could take a budget past its limit shows a warning first and runs only if you confirm.</p>
       </div>
 
       {s.evaluation ? (() => {
@@ -39,6 +39,7 @@ export default async function CostsPage() {
             <span className="text-ink text-xl tabular-nums">{usd(e.spent)} <span className="t-sm">of {usd(e.ceiling)}</span></span>
             <div className="h-1.5 rounded-full bg-surface-2 overflow-hidden" aria-hidden="true"><div className="h-full" style={{ width: `${pct}%`, background: e.over ? "var(--loss)" : e.warn ? "var(--warn, var(--accent))" : "var(--accent)" }} /></div>
             <span className="t-xs">At this pace about {usd(e.projected)} by day 30. {usd(Math.max(0, e.left))} left.</span>
+            <span className="t-xs">Three periods on this page: the test total counts from when you tapped Start ({fmt(e.start)}); the monthly figures below count all of {monthName}, including spending before the test; &quot;spent today&quot; counts since midnight UTC (7 PM ET the evening before).</span>
             <table className="t-sm w-full"><tbody>
               {e.byCategory.map((c) => (
                 <tr key={c.key} className="border-b border-line last:border-b-0">

@@ -55,7 +55,9 @@ describe("new capital: evidence gates", () => {
     expect(r.lean).toMatch(/^Lean: /);
     expect(r.recommendation.illustrative).toBe(true);
     const open = r.gates.filter((g) => !g.ok).map((g) => g.key);
-    expect(open).toEqual(expect.arrayContaining(["funds", "research"]));
+    expect(open).toEqual(["funds"]);
+    // AAA's open research is listed, but it does not block money that would not go to AAA.
+    expect(r.gates.find((g) => g.key === "research")!.detail).toMatch(/Not blocking: [A-Z, ]*(AAA|BBB)/);
     expect(r.gates.map((g) => g.key)).not.toContain("assumptions");
     expect(r.toVerify.join(" ")).toMatch(/BBB: full research/);
     expect(r.options.find((o) => o.kind === "cash")!.label).toBe("Valid option");
@@ -220,7 +222,10 @@ describe("new capital: event-driven refresh and independent verdicts", () => {
   it("does not call research current when filings could not be checked", () => {
     const r = newCapital({ amount: 400, portfolio: p, research: [research("$26")], policy, now });
     expect(r.options.find((o) => o.symbol === "AAA")!.verdicts!.research.ok).toBe(false);
-    expect(r.gates.find((g) => g.key === "research")!.ok).toBe(false);
+    // Only a stock that would receive the money can block it (an unrelated stock's open question does not).
+    expect(r.recommendation.allocations.some((x) => x.symbol === "AAA")).toBe(false);
+    expect(r.gates.find((g) => g.key === "research")!.ok).toBe(true);
+    expect(r.gates.find((g) => g.key === "research")!.detail).toMatch(/Not blocking: AAA needs reassessment/);
   });
   it("does not let an old but event-free research block the decision", () => {
     const early = new Map([["AAA", { ...quiet.get("AAA")!, filings: [{ ...quiet.get("AAA")!.filings[0], filed: "2026-04-20" }] }]]);
