@@ -95,6 +95,9 @@ export default async function TodayPage() {
         </Card>
       )}
 
+      {/* The current decision comes first: the same answer Decisions gives (audit 2026-11-11). */}
+      <Suspense fallback={<div className="card card-tight"><Skel w="60%" /></div>}><BestAction /></Suspense>
+
       <Card labelledBy="mb-h" className="!gap-2">
         <CardHead id="mb-h" cap="Morning briefing" right={<MorningRunner label={morningCheck?.outdated ? "Rewrite with today's facts" : morning ? "Write a new one" : "Write it now"} />} />
         {morningSkipped.length > 0 && <p className="t-xs warn">Not done this morning: {morningSkipped.map((x) => x.replace(/^(\w+) (skipped: |failed: )?/, (_m, k: string, how?: string) => `${({ market_briefing: "market briefing", assistant_answer: "this summary", morning_answer: "this summary", portfolio_plan: "weekly plan", trade_scan: "trade scan", radar_run: "Opportunity Radar" } as Record<string, string>)[k] ?? k} ${how?.startsWith("failed") ? "failed: " : "skipped, "}`)).join("; ")}. <Link href="/costs">Costs</Link></p>}
@@ -183,7 +186,6 @@ export default async function TodayPage() {
           )}
         </Card>
 
-        <Suspense fallback={<div className="card card-tight lg:col-span-12"><Skel w="60%" /></div>}><BestAction /></Suspense>
       </div>
     </div>
   );
@@ -219,7 +221,7 @@ async function BestAction() {
   const day = ws.now.toLocaleDateString("en-CA", { timeZone: "America/New_York" });
   const mine = (await loadMyActions(db, 3).catch(() => new Map())).get(actionRef("recommendation", day)) ?? null;
   return (
-    <div className="card card-tight lg:col-span-12 !gap-2">
+    <div className="card card-tight !gap-2">
       <Link href="/decisions" className="flex items-center justify-between gap-3 no-underline">
         <span className="flex flex-col min-w-0">
           <span className="cap">Best action now</span>

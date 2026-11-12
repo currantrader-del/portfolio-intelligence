@@ -48,7 +48,7 @@ export function alertKey(a: Alert, etDay: string): string {
 export function selectNew(alerts: Alert[], sent: Set<string>, etDay: string): { alert: Alert; key: string }[] {
   const seen = new Set<string>();
   return alerts
-    .filter((a) => PUSH_KINDS.has(a.kind) && PUSH_SEVERITY.has(a.severity) && (a.kind !== "event" || a.timing === "recent"))
+    .filter((a) => PUSH_KINDS.has(a.kind) && PUSH_SEVERITY.has(a.severity) && (a.kind !== "event" || a.timing === "recent") && !a.id.startsWith("research-level:"))
     .map((alert) => ({ alert, key: alertKey(alert, etDay) }))
     .filter(({ key }) => !sent.has(key) && !seen.has(key) && seen.add(key));
 }
