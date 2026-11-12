@@ -1,3 +1,4 @@
+import { reviewPosition } from "@/lib/decision/review";
 import { AGE_REMINDER_DAYS } from "@/lib/policy/limits";
 import Link from "next/link";
 import { createClient } from "@/lib/supabase/server";
@@ -139,12 +140,12 @@ export default async function PortfolioPage({ searchParams }: { searchParams: Pr
 
           {/* Phones */}
           <div className="list lg:hidden">
-            {first.map((h) => <HoldingRow key={h.symbol} h={h} name={name(h.symbol)} />)}
+            {first.map((h) => <HoldingRow key={h.symbol} h={h} name={name(h.symbol)} verb={isEtf(h.symbol) ? null : reviewPosition(ws, h.symbol)?.now.verb ?? null} />)}
           </div>
           {rest.length > 0 && (
             <div className="lg:hidden border-t border-line">
               <Disclose summary={`Show ${rest.length} more`}>
-                <div className="list -mt-2">{rest.map((h) => <HoldingRow key={h.symbol} h={h} name={name(h.symbol)} />)}</div>
+                <div className="list -mt-2">{rest.map((h) => <HoldingRow key={h.symbol} h={h} name={name(h.symbol)} verb={isEtf(h.symbol) ? null : reviewPosition(ws, h.symbol)?.now.verb ?? null} />)}</div>
               </Disclose>
             </div>
           )}
@@ -156,7 +157,7 @@ export default async function PortfolioPage({ searchParams }: { searchParams: Pr
                 <tr>
                   <th scope="col">Holding</th><th scope="col">Bucket</th><th scope="col" className="n">Shares</th><th scope="col" className="n">Price</th>
                   <th scope="col" className="n">Value</th><th scope="col" className="n">Today</th><th scope="col" className="n">Contrib.</th><th scope="col" className="n">Weight</th>
-                  <th scope="col">Exposure vs limit</th><th scope="col" className="n">Unrealized</th><th scope="col">Research</th>
+                  <th scope="col">Exposure vs limit</th><th scope="col" className="n">Unrealized</th><th scope="col">Research</th><th scope="col">Action now</th>
                 </tr>
               </thead>
               <tbody>
@@ -183,6 +184,7 @@ export default async function PortfolioPage({ searchParams }: { searchParams: Pr
                       </td>
                       <td className={`n ${toneOf(h.unrealized)}`}>{h.unrealized === null ? <span className="t-xs">basis unknown</span> : usd(h.unrealized)}</td>
                       <td>{cov ? <Pill small tone={cov.tone} dot={cov.dot} title={cov.detail}>{cov.label}</Pill> : <span className="t-xs">ETF</span>}</td>
+                      <td>{(() => { const n = isEtf(h.symbol) ? null : reviewPosition(ws, h.symbol)?.now; return n ? <Link href={`/decisions/review/${h.symbol}`} title={`${n.headline}${n.levels ? ` Levels: ${n.levels}` : ""}`} className="no-underline"><Pill small tone={n.verb === "Hold" ? "neutral" : "warn"}>{n.verb}</Pill></Link> : <span className="t-xs">—</span>; })()}</td>
                     </tr>
                   );
                 })}
@@ -225,13 +227,13 @@ export default async function PortfolioPage({ searchParams }: { searchParams: Pr
 }
 
 /** Holding Card (compact row for phones). */
-function HoldingRow({ h, name }: { h: Holding; name: string | null }) {
+function HoldingRow({ h, name, verb }: { h: Holding; name: string | null; verb: string | null }) {
   return (
     <Link href={`/research/${h.symbol}`} className="li">
       <Tick symbol={h.symbol} />
       <span className="flex-1 min-w-0 flex flex-col">
         <span className="font-semibold">{h.symbol}</span>
-        <span className="t-xs truncate">{name ?? h.bucket}</span>
+        <span className="t-xs truncate">{verb ? <span className={verb === "Hold" ? "" : "warn"}>{verb} · </span> : null}{name ?? h.bucket}</span>
       </span>
       <span className="flex flex-col items-end shrink-0">
         <span className="num font-semibold">{usd(h.value)}</span>

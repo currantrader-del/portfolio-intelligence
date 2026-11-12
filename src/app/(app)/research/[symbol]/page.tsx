@@ -1,3 +1,6 @@
+import { actionNow, type ActionNow } from "@/lib/decision/actionNow";
+import { reviewPosition } from "@/lib/decision/review";
+import { researchVerdict, type Verdict } from "@/lib/research/verdict";
 import { loadReviews, withReviews, type ReviewAnnotations } from "@/lib/research/review";
 import { ActionForm, SubmitButton } from "@/components/forms";
 import { AGE_REMINDER_DAYS } from "@/lib/policy/limits";
@@ -128,7 +131,19 @@ export default async function CompanyPage({ params, searchParams }: { params: Pr
   const secF = etf || !record?.current ? null : await getFilings(company.symbol, ws.now).catch(() => null);
   const reassess = record?.current ? refreshState({ asOf: record.current.research_as_of, pc: record.current.parsed, price, filings: secF && !("error" in secF) ? secF : null, isEtf: etf }) : null;
   const fields = statusFields(standing, reassess);
+  // One answer and one next step, from the same plan the update button uses.
+  const verdict = etf ? null : researchVerdict({
+    inUse: standing.inUse ? { asOf: standing.inUse.v.research_as_of, isInvestigation: isInv(standing.inUse.v as Version), open: standing.inUse.open, label: QUALITY_LABEL[standing.inUse.quality] } : null,
+    plan: updatePlan, zoneChange: reassess?.triggers.find((t) => t.kind === "zone_change")?.detail.split(". ")[0] ?? null,
+  });
   const share = shareOptions(versions);
+  // The plain action at today's price: the same rule the position review and the alerts use.
+  const filingsOk = secF && !("error" in secF) ? secF : null;
+  const plainAction = etf ? null : held ? reviewPosition(ws, company.symbol, filingsOk)?.now ?? null : actionNow({
+    symbol: company.symbol, price, held: false, preliminary: !!record?.current && !record.authoritative,
+    unreadFiling: reassess?.status === "refresh" ? reassess.triggers.filter((t) => t.kind === "results" || t.kind === "financing" || t.kind === "material_event").map((t) => t.detail.replace(/^[^:]+: /, ""))[0] ?? null : null,
+    research: record?.current && record.authoritative ? { pc: record.current.parsed, asOf: record.current.research_as_of, openQuestions: standing.inUse?.open.length ?? 0 } : null, trim: null,
+  });
 
   return (
     <div className="flex flex-col gap-3 lg:gap-4">
@@ -141,7 +156,7 @@ export default async function CompanyPage({ params, searchParams }: { params: Pr
       {/* Investment view: the decision first. */}
       <div className="grid grid-cols-1 gap-3 lg:gap-4 lg:grid-cols-12 items-start">
         <div className="lg:col-span-7 flex flex-col gap-3 lg:gap-4 min-w-0">
-          <ResearchStatus s={standing} f={fields} />
+          <ResearchStatus s={standing} f={fields} verdict={verdict} now={plainAction} price={price} />
           <InvestmentSummary ws={ws} symbol={company.symbol} brief={brief} />
           {!etf && <Suspense fallback={<FeedSkeleton title="Recovery odds" />}><RecoveryCard symbol={company.symbol} price={price} priceAsOf={q?.asOf ?? null} targetsRaw={sp.targets?.slice(0, 80)} /></Suspense>}
           {!etf && <Suspense fallback={<FeedSkeleton title="Analyst reports" />}><AnalystCard symbol={company.symbol} price={price} /></Suspense>}
@@ -279,8 +294,9 @@ function briefOf(s: Standing, parsedThesis: string | null): Brief | null {
 }
 
 /** Which research decisions use, what is waiting for you, what is history, and what is still open. */
-function ResearchStatus({ s, f }: { s: Standing; f: StatusFields | null }) {
+function ResearchStatus({ s, f, verdict, now, price }: { s: Standing; f: StatusFields | null; verdict: Verdict | null; now: ActionNow | null; price: number | null }) {
   if (!s.inUse && !s.pending) return null;
+  const nx = verdict?.next;
   const row = (label: string, ok: boolean, text: string) => (
     <div className="grid grid-cols-[130px_1fr] gap-2 items-baseline"><span className="t-xs">{label}</span><span className={ok ? "text-ink" : "warn"}>{text}</span></div>
   );
@@ -288,14 +304,36 @@ function ResearchStatus({ s, f }: { s: Standing; f: StatusFields | null }) {
     <Card labelledBy="rs-h" className="!gap-2">
       <CardHead id="rs-h" cap="Research status" />
       <div className="flex flex-col gap-1.5 t-sm">
+        {verdict && (
+          <div className="flex flex-col gap-1">
+            <p className="text-ink font-semibold">{verdict.headline}.</p>
+            {verdict.detail && <p className="t-xs">{verdict.detail}</p>}
+            {now && (
+              <div className="rounded-[12px] border border-line px-3 py-2 flex flex-col gap-1">
+                <span className="t-xs">What to do{price ? ` at $${price.toFixed(2)}` : ""}</span>
+                <span className="text-ink font-semibold">{now.verb}</span>
+                <span>{now.headline}</span>
+                {now.levels && <span className="t-xs">Levels: {now.levels}</span>}
+                {now.watch.length > 0 && <span className="t-xs">What would change this: {now.watch[0]}</span>}
+              </div>
+            )}
+            {nx && (
+              <p className={`rounded-[12px] px-3 py-2 ${nx.kind === "update" || nx.kind === "full" ? "bg-warn-bg text-warn-ink" : "bg-surface-2"}`}>
+                <span className="font-semibold">Next step: </span>{nx.text}
+                {(nx.kind === "update" || nx.kind === "full") && <> About {nx.cost}. <a href="#inv-h">{nx.kind === "update" ? "Reassess now" : "Full investigation"}</a></>}
+              </p>
+            )}
+          </div>
+        )}
         {f ? (
-          <>
-            {row("Investigation", f.finished.ok, f.finished.text)}
-            {row("Your approval", true, f.approved.text)}
-            {row("Used for decisions", f.inUse.ok, f.inUse.text)}
-            {row("Reassessment", !f.reassess.needed, f.reassess.text)}
-            {row("Open items", f.open.length === 0, f.open.length ? `${f.open.length}, listed below` : "None")}
-          </>
+          <Disclose summary={<span className="t-sm">Details · approval, use, open items</span>}>
+            <div className="flex flex-col gap-1.5">
+              {row("Investigation", f.finished.ok, f.finished.text)}
+              {row("Your approval", true, f.approved.text)}
+              {row("Used for decisions", f.inUse.ok, f.inUse.text)}
+              {row("Open items", f.open.length === 0, f.open.length ? `${f.open.length}, listed below` : "None")}
+            </div>
+          </Disclose>
         ) : <div><span className="t-xs block">In use for decisions</span><span className="text-ink">None</span></div>}
         {s.pending && (
           <div><span className="t-xs block">Latest investigation</span>

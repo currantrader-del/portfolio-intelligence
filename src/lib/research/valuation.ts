@@ -16,6 +16,8 @@ export type ParsedConclusion = {
   horizonDate: string | null;
   zones: PriceZone[];
   allocation: Record<string, unknown> | null;
+  /** What the research says would change its view (thesis-breakers and add conditions), as written. */
+  wouldChange?: string[];
 };
 
 export function money(s: unknown): number | null {
@@ -70,6 +72,7 @@ export function parseConclusion(c: Record<string, unknown> | null | undefined): 
     horizonDate,
     zones,
     allocation: (c?.allocation as Record<string, unknown>) ?? null,
+    wouldChange: Array.isArray(c?.would_change) ? (c!.would_change as unknown[]).filter((x): x is string => typeof x === "string" && !!x.trim()) : [],
   };
 }
 

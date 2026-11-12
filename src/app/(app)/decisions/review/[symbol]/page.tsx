@@ -73,9 +73,19 @@ export default async function ReviewPage({ params }: { params: Promise<{ symbol:
 
         <aside className="flex-[1_1_340px] min-w-0 flex flex-col gap-6">
           <section className="bg-chrome text-chrome-ink rounded-2xl p-6 flex flex-col gap-3">
-            <h2 className="text-xs font-semibold tracking-wider text-chrome-muted">SUGGESTION · CONFIDENCE {rv.suggestion.confidence}/10</h2>
-            <div className="h1">{rv.suggestion.label}</div>
-            <p className="text-[15px] text-[#d9dbde]">{rv.suggestion.reason}</p>
+            <h2 className="text-xs font-semibold tracking-wider text-chrome-muted">WHAT TO DO AT THIS PRICE</h2>
+            <div className="h1">{rv.now.verb}</div>
+            <p className="text-[15px] text-[#d9dbde]">{rv.now.headline}</p>
+            {rv.now.zones.length > 0 && (
+              <ul className="text-sm flex flex-col gap-1">
+                {rv.now.zones.map((z) => <li key={z.label} className={z.current ? "text-chrome-ink font-semibold" : "text-chrome-muted"}>{z.current ? "▸ " : ""}{z.label}: {z.action}</li>)}
+              </ul>
+            )}
+            {rv.now.watch.length > 0 && (
+              <div className="text-sm text-[#d9dbde]"><span className="text-xs font-semibold tracking-wider text-chrome-muted block">WHAT WOULD CHANGE THIS</span>
+                <ul className="list-disc pl-4 flex flex-col gap-0.5">{rv.now.watch.map((w, i) => <li key={i}>{w}</li>)}</ul></div>
+            )}
+            <p className="text-xs text-chrome-muted">Sizing: {rv.suggestion.reason}</p>
             <div className="text-xs text-chrome-muted">Model output from your research and limits. For a written second opinion, use Deep review.</div>
           </section>
 

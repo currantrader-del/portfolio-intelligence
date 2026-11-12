@@ -18,6 +18,15 @@ import type { ResearchRecord } from "@/lib/research/records";
 import { repriceCheck, zoneFor, type PriceZone } from "@/lib/research/valuation";
 import { researchAgeDays } from "@/lib/research/records";
 import { unresolvedFiling } from "@/lib/research/status";
+import { actionNow } from "@/lib/decision/actionNow";
+
+/** The plain action at this price (with its levels), for any alert about a company. */
+function planLine(r: ResearchRecord | undefined, symbol: string, price: number | null, held: boolean, unread: string | null): { action: string; watch: string | null } {
+  const v = r?.current;
+  const open = v && v.completeness !== "complete" ? Math.max(1, ((v.conclusion as { completion?: { reasons?: unknown[] } })?.completion?.reasons ?? []).length) : 0;
+  const an = actionNow({ symbol, price, research: v && r?.authoritative ? { pc: v.parsed, asOf: v.research_as_of, openQuestions: open } : null, unreadFiling: unread ?? (v ? unresolvedFiling(v.research_as_of, r!.filingCheck) : null), trim: null, held, preliminary: !!v && !r?.authoritative });
+  return { action: `${an.headline}${an.levels ? ` Levels: ${an.levels}` : ""}`, watch: an.watch[0] ?? null };
+}
 
 export type PushCategory = "buy_opportunity" | "approaching" | "thesis_change" | "urgent_risk" | "position_review";
 export const CATEGORY_LABEL: Record<PushCategory, string> = {
@@ -113,7 +122,7 @@ export function decisionAlerts(a: DecisionInputs): DecisionAlert[] {
         title: `${r.symbol} reached its research trim range (${z.label})`,
         changed: `${r.symbol} trades at ${money(price)}, inside the ${z.label} range of the ${v.research_as_of} investigation.`,
         why: `The research's action for this range: ${short(z.action, 220)}`,
-        action: "Review a trim; it is a prompt, not an order. Check taxes and the position's weight first.",
+        action: `${planLine(r, r.symbol, price, true, null).action} It is a prompt, not an order; check taxes and the position's weight first.`,
         uncertain: r.approval === "provisional" ? "The investigation still has open questions." : "Valuation ranges are estimates.",
         verified,
       });
@@ -128,7 +137,7 @@ export function decisionAlerts(a: DecisionInputs): DecisionAlert[] {
         title: `${r.symbol} is ${((price / near.high - 1) * 100).toFixed(1)}% above its buy range (${near.label})`,
         changed: `${r.symbol} at ${money(price)} is within 5% of the ${near.label} range.`,
         why: `In that range the research says: ${short(near.action, 200)}`,
-        action: "Nothing to do yet. Check the research's conditions so you are ready if it gets there.",
+        action: `Nothing to do yet. ${planLine(r, r.symbol, price, !!h, null).action}`,
         uncertain: r.approval === "provisional" ? "The investigation still has open questions, so even inside the range new money waits for a targeted update." : "Prices can move through a range quickly; delayed quotes.",
         verified,
       });
@@ -143,13 +152,15 @@ export function decisionAlerts(a: DecisionInputs): DecisionAlert[] {
     if (!(rel <= -0.10 || (rel <= -0.07 && filedToday.has(h.symbol)))) continue;
     const r = bySymbol.get(h.symbol);
     const q = a.quotes.get(h.symbol);
+    const todays = a.events.find((e) => e.symbol === h.symbol && e.source?.filed === a.now.toISOString().slice(0, 10))?.source;
+    const plan = planLine(r, h.symbol, h.price, true, todays ? `the ${todays.form} filed today` : null);
     out.push({
       id: `risk:${h.symbol}`, category: "urgent_risk", symbol: h.symbol, href: `/decisions/review/${h.symbol}`, priority: "high", repeatAfterDays: 1,
       price: h.price, researchVersionId: r?.current?.id ?? null, researchAsOf: r?.current?.research_as_of ?? null,
       title: `${h.symbol} ${pct(h.dayPct)} today, ${pct(rel)} against the market`,
       changed: `${h.symbol} fell ${pct(h.dayPct)} while the S&P 500 moved ${pct(a.marketDayPct)}.${filedToday.has(h.symbol) ? " It filed with the SEC today." : ""}`,
-      why: `A fall this large against the market can mean the thesis changed. It is ${(h.weight * 100).toFixed(1)}% of your invested portfolio.${r?.current?.parsed.thesis ? ` Thesis on file: ${short(r.current.parsed.thesis, 160)}` : ""}`,
-      action: "Review now: find the cause before doing anything. A fall alone is not a reason to sell or to buy.",
+      why: `A fall this large against the market can mean the thesis changed. It is ${(h.weight * 100).toFixed(1)}% of your invested portfolio.${plan.watch ? ` The research said this would change its view: ${short(plan.watch, 200)}` : ""}`,
+      action: `${plan.action} A fall alone is not a reason to buy or sell.`,
       uncertain: filedToday.has(h.symbol) ? "The filing has not been read yet." : "The cause is not verified; no filing today.",
       verified: q ? `Delayed quote ${et(q.asOf)}` : "Delayed quote",
     });
@@ -167,7 +178,7 @@ export function decisionAlerts(a: DecisionInputs): DecisionAlert[] {
       title: e.title,
       changed: `${e.detail}`,
       why: `${h ? `You hold ${e.symbol} (${(h.weight * 100).toFixed(1)}%).` : `${e.symbol} is on your researched watchlist.`} Results, reports and financings are where a thesis usually changes.${r?.current?.parsed.thesis ? ` Thesis on file: ${short(r.current.parsed.thesis, 160)}` : ""}`,
-      action: "Review the filing against the thesis (company page). No trade is supported until it is read.",
+      action: planLine(r, e.symbol, a.quotes.get(e.symbol)?.price ?? h?.price ?? null, !!h, e.source ? `the ${e.source.form} filed ${e.source.filed}` : "a new filing").action,
       uncertain: "The filing has not been read by the app; its terms and impact are unknown.",
       verified: e.source ? `SEC ${e.source.form} filed ${e.source.filed}` : "SEC filing",
     });

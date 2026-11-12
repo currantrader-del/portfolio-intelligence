@@ -1,3 +1,5 @@
+import { unresolvedFiling } from "@/lib/research/status";
+import { actionNow } from "./actionNow";
 /**
  * Position review (the "material alert" workflow): add / hold / trim / exit with sizes,
  * policy limits and tax visibility. Deterministic; the AI may explain it but not change the numbers.
@@ -119,8 +121,18 @@ export function reviewPosition(ws: Workspace, symbol: string, filings?: FilingsR
       : !hasLimit ? "No company limit of its own, so no room to add." : !approvedLimit ? "Its limit is not one you approved, so no room to add." : "Nothing in the numbers calls for a change.", confidence: 5 };
   }
 
+  // The one plain action at this price, with the research's price levels (same rule as the alerts and research page).
+  const unread = (st?.status === "refresh" ? st.triggers.filter((t) => t.kind === "results" || t.kind === "financing" || t.kind === "material_event").map((t) => t.detail.replace(/^[^:]+: /, ""))[0] ?? null : null)
+    ?? (filings === undefined && v && r ? unresolvedFiling(v.research_as_of, r.filingCheck) : null);
+  const now = actionNow({
+    symbol, price: h.price, held: true, unreadFiling: unread, preliminary: !!v && !r?.authoritative,
+    research: v && r?.authoritative ? { pc: v.parsed, asOf: v.research_as_of, openQuestions: v.completeness === "complete" ? 0 : Math.max(1, ((v.conclusion as { completion?: { reasons?: unknown[] } })?.completion?.reasons ?? []).length) } : null,
+    trim: research && research.dollars > 1 ? { dollars: research.dollars, toPct: levels.researchReview!.value * 100, why: `it is ${pc(combined)} combined, above the ${pc(levels.researchReview!.value)} the ${levels.researchReview!.source} says to trim back to (proceeds stay as cash).` } : weight > max ? null : null,
+  });
+
   return {
     symbol,
+    now,
     price: h.price,
     priceSource: h.priceSource,
     dayPct: h.dayPct,

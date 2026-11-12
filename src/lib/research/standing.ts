@@ -114,7 +114,7 @@ export function qualityOf(v: V): Quality {
 
 export const QUALITY_LABEL: Record<Quality, string> = {
   complete_investigation: "Full investigation, complete",
-  incomplete_investigation: "Full investigation, incomplete",
+  incomplete_investigation: "Full investigation, finished",
   preliminary_ai: "Preliminary (automated AI research)",
   imported: "Imported from the old app",
   partial: "Partial record",

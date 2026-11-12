@@ -4,7 +4,7 @@
  */
 import { researchAgeDays, type FilingCheckInfo, type ResearchRecord, type VersionRow } from "./records";
 import { repriceCheck } from "./valuation";
-import { isInvestigation } from "./standing";
+import { isInvestigation, openItems } from "./standing";
 import { refreshState } from "@/lib/policy/evidence";
 import type { FilingsResult } from "@/lib/market/sec";
 
@@ -86,7 +86,7 @@ export function coverage(r: ResearchRecord | undefined, price: number | null, no
   if (pending) return { key: "refresh", label: "Reassess", tone: "warn", dot: "hollow", detail: `Unresolved new filing: ${pending}` };
   if (!complete && isInvestigation(v)) {
     const open = openCount(v);
-    return { key: "incomplete", label: open ? `Finished · ${open} open` : "Finished · open items", tone: "warn", dot: "hollow", detail: `A full investigation that finished all its phases with ${open || "some"} open item${open === 1 ? "" : "s"}. In use for Hold, No Add and Trim; no new money until a targeted update resolves ${open === 1 ? "it" : "them"}.` };
+    return { key: "incomplete", label: open ? `Finished · ${open} open` : "Finished · open questions", tone: "warn", dot: "hollow", detail: `A full investigation that finished all its phases with ${open || "some"} open item${open === 1 ? "" : "s"}. In use for Hold, No Add and Trim; no new money until a targeted update resolves ${open === 1 ? "it" : "them"}.` };
   }
   if (!complete) return { key: "incomplete", label: "Incomplete", tone: "warn", dot: "hollow", detail: "Partial record: some phases are missing" };
   const d = researchDepth(v, r.filingCheck);
@@ -122,7 +122,7 @@ export function suggestStage(args: { stage: string; held: boolean; coverageKey: 
   return s;
 }
 
-function openCount(v: Pick<VersionRow, "conclusion">): number {
-  const r = (v.conclusion as { completion?: { reasons?: unknown } })?.completion?.reasons;
-  return Array.isArray(r) ? r.length : 0;
+/** The same open list the company page counts, so the list badge and the page give one number. */
+function openCount(v: VersionRow): number {
+  return openItems(v as Parameters<typeof openItems>[0]).length;
 }

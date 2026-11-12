@@ -6,7 +6,8 @@
  *  - A price move alone → no AI. The saved scenarios are re-priced for free at today's price.
  *  - A full re-investigation is recommended only when the foundation itself is unreliable: there is no
  *    finished investigation to build on, the price is outside the bear-to-bull range, the research is more
- *    than a year old, or the investigation was never completed.
+ *    than a year old, or the investigation stopped before finishing its phases (open questions alone are
+ *    not a reason: a targeted update works on them).
  */
 import type { Filing } from "@/lib/market/sec";
 
@@ -42,7 +43,7 @@ export function planUpdate(a: { foundation: Foundation | null; filings: Filing[]
   if (!f) fullReasons.push("There is no finished investigation to build on; a quick screen is not a foundation for updates.");
   else {
     if (!f.isInvestigation) fullReasons.push(`The research in use (${f.label}) is not a full investigation, so an update would build on weak ground.`);
-    if (!f.complete) fullReasons.push("The investigation in use was never completed.");
+    if (!f.complete) fullReasons.push("The investigation in use stopped before finishing its phases.");
     const ageDays = Math.floor((a.now.getTime() - Date.parse(`${f.asOf}T00:00:00Z`)) / 86_400_000);
     if (ageDays > 365) fullReasons.push(`The research is ${Math.floor(ageDays / 30)} months old.`);
   }
