@@ -13,7 +13,7 @@ export type Approval = "approved" | "provisional" | "automatic";
 export type Quality = "complete_investigation" | "incomplete_investigation" | "preliminary_ai" | "imported" | "partial";
 
 type V = VersionRow & { created_at?: string | null };
-type C = { review_state?: string; research_type?: string; not_verified?: unknown; completion?: { reasons?: unknown; kind?: string }; adoption?: { mode?: string; open_items?: unknown } };
+type C = { review_state?: string; research_type?: string; not_verified?: unknown; completion?: { reasons?: unknown; kind?: string }; adoption?: { mode?: string; open_items?: unknown; at?: string; requested_by_investor?: string; recommendation_approved?: boolean } };
 const conc = (v: V) => (v.conclusion ?? {}) as C;
 
 /**
@@ -212,9 +212,13 @@ export function statusFields(s: Standing, reassess: { status: "current" | "refre
     ? { ok: v.completeness === "complete", text: v.completeness === "complete" ? "Finished, nothing left open" : `Finished all its phases, with ${open.length || "some"} item${open.length === 1 ? "" : "s"} left open${c.completion?.kind === "material_uncertainty" ? " (a material question with no reliable answer yet)" : ""}` }
     : { ok: v.completeness === "complete", text: `${QUALITY_LABEL[qualityOf(v)]}, not a full investigation` };
   const rs = String(c.review_state ?? "");
-  const approved = rs === "adopted" || rs === "adopted_provisional"
-    ? { ok: true, text: rs === "adopted" ? "Yes, you approved it" : "Yes, you approved it provisionally, with its open items" }
-    : { ok: false, text: "No. Since your Nov 9 direction approval is not required: the app uses a finished investigation on its evidence" };
+  const ad = (c.adoption ?? {}) as { at?: string; requested_by_investor?: string; recommendation_approved?: boolean };
+  const when = ad.at ? ` on ${shortDay(ad.at.slice(0, 10))}` : "";
+  const approved = ad.requested_by_investor
+    ? { ok: true, text: `Made the record in use${when} at your request (${ad.requested_by_investor.replace(/^\d{4}-\d{2}-\d{2} chat: /, "")})${ad.recommendation_approved === false ? "; you have not approved its recommendation" : ""}` }
+    : rs === "adopted" || rs === "adopted_provisional"
+      ? { ok: true, text: rs === "adopted" ? `Yes, you approved it${when}` : `Yes, you approved it provisionally${when}, with its open items` }
+      : { ok: false, text: "Not approved by you. Since your Nov 9 direction approval is not required: the app uses a finished investigation on its evidence" };
   const inUse = { ok: true, text: `Yes, the record decisions use (${shortDay(v.research_as_of)}). ${s.decisions}` };
   const real = reassess ? reassess.triggers.filter((t) => t.kind !== "unverified") : [];
   const r = !reassess ? { needed: false, text: "Not checked on this page" }

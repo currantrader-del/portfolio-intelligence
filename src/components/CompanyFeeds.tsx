@@ -1,3 +1,4 @@
+import { headlineTiming } from "@/lib/market/hours";
 import { getFilings, getFundamentals, type Metric } from "@/lib/market/sec";
 import { getNews } from "@/lib/market/news";
 import { shortDate, pctStr, toneOf } from "@/lib/format";
@@ -97,13 +98,16 @@ export async function NewsList({ symbol, name, limit = 8 }: { symbol: string; na
   );
 }
 
-export function HeadlineList({ items }: { items: { title: string; url: string; publisher: string | null; publishedAt: string | null }[] }) {
+export type MoveWindow = { startIso: string; endIso: string };
+const TIMING_NOTE = { before: "before the move", during: "during the move", after: "published after the move: later news, not its cause", unknown: "time unknown" } as const;
+
+export function HeadlineList({ items, window }: { items: { title: string; url: string; publisher: string | null; publishedAt: string | null }[]; window?: MoveWindow }) {
   return (
     <ul className="flex flex-col">
       {items.map((h) => (
         <li key={h.url} className="py-2 border-t border-line first:border-t-0">
           <a href={h.url} target="_blank" rel="noreferrer nofollow" className="t-sm no-underline hover:text-ink">{h.title}</a>
-          <div className="t-xs">{[h.publisher, h.publishedAt ? shortDate(h.publishedAt) : null].filter(Boolean).join(" · ")}</div>
+          <div className="t-xs">{[h.publisher, h.publishedAt ? shortDate(h.publishedAt) : null].filter(Boolean).join(" · ")}{window && (() => { const t = headlineTiming(h.publishedAt, window.startIso, window.endIso); return <span className={t === "after" ? "warn" : ""}> · {TIMING_NOTE[t]}</span>; })()}</div>
         </li>
       ))}
     </ul>
@@ -111,7 +115,7 @@ export function HeadlineList({ items }: { items: { title: string; url: string; p
 }
 
 /** Brief page: headlines for the holdings that moved the most. */
-export async function MoverHeadlines({ movers }: { movers: { symbol: string; dayPct: number | null; name?: string | null }[] }) {
+export async function MoverHeadlines({ movers, window, periodLabel }: { movers: { symbol: string; dayPct: number | null; name?: string | null }[]; window?: MoveWindow; periodLabel?: string }) {
   const rows = await Promise.all(movers.map(async (m) => ({ ...m, r: await getNews(m.symbol, m.name, 2) })));
   const ok = rows.filter((x) => !("error" in x.r));
   return (
@@ -120,9 +124,10 @@ export async function MoverHeadlines({ movers }: { movers: { symbol: string; day
       {ok.length === 0 ? <p className="t-sm">Headlines unavailable right now.</p> : ok.map((x) => (
         <div key={x.symbol} className="flex flex-col gap-1">
           <div className="t-sm"><span className="font-semibold text-ink">{x.symbol}</span> <span className={`num ${toneOf(x.dayPct)}`}>{pctStr(x.dayPct, 1, true)}</span></div>
-          {"error" in x.r ? null : <HeadlineList items={x.r.headlines} />}
+          {"error" in x.r ? null : <HeadlineList items={x.r.headlines} window={window} />}
         </div>
       ))}
+      {periodLabel && <p className="t-xs">Moves: {periodLabel}. Each headline says whether it came before, during or after that move; a later headline is never the cause.</p>}
     </Card>
   );
 }

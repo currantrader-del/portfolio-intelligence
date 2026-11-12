@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { eventAlerts } from "./events";
+import { eventAlerts, resultsDateFromResearch } from "./events";
 import { classifyFiling } from "@/lib/market/filingClass";
 import { parseSubmissions, type FilingsResult, type Filing } from "@/lib/market/sec";
 import iren from "@/lib/market/__fixtures__/iren-submissions-2026-11-06.json";
@@ -73,5 +73,21 @@ describe("real IREN submissions (SEC, retrieved 2026-11-06)", () => {
   it("on 2026-11-06 reports nothing as recently filed, and no past filing as coming up", () => {
     const fr: FilingsResult = { cik: "1878848", company, filings, lastEarnings: filings.find((x) => x.isEarnings) ?? null, nextEarningsEstimate: null, source: "", fetchedAt: "" };
     expect(eventAlerts(new Map([["IREN", fr]]), now)).toEqual([]);
+  });
+});
+
+describe("results dates from the research (audit 2026-11-11: Nov 17 vs an estimated Nov 25)", () => {
+  it("reads a company-announced date next to a results word, on or after the research date", () => {
+    expect(resultsDateFromResearch(["Hold, no add. Re-assess after the Nov 17 results and the probe findings."], "2026-11-10")).toBe("2026-11-17");
+    expect(resultsDateFromResearch(["Nov 17: Q3 revenue at or above ~$106B"], "2026-11-10")).toBe("2026-11-17");
+    expect(resultsDateFromResearch(["Bought on Nov 3, then held."], "2026-11-10")).toBeNull();
+    expect(resultsDateFromResearch(["Feb 25 results"], "2026-11-10")).toBe("2027-02-25");
+  });
+  it("prefers the research's date over the filing-cadence estimate, and labels it", () => {
+    const fr = res([f({ filed: "2026-08-27", items: ["2.02"], description: "Earnings results" })], "2026-11-25");
+    const a = eventAlerts(new Map([["AAA", fr]]), new Date("2026-11-12T15:00:00Z"), new Map([["AAA", { date: "2026-11-17", asOf: "2026-11-10" }]]));
+    const up = a.find((x) => x.timing === "upcoming")!;
+    expect(up.title).toBe("AAA results on 2026-11-17 (from the research)");
+    expect(up.detail).toMatch(/filing-cadence estimate \(2026-11-25\) is not used/);
   });
 });

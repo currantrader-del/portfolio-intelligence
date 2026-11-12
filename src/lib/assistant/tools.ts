@@ -17,7 +17,7 @@ import { getNews } from "@/lib/market/news";
 import { screenCompany } from "@/lib/research/screen";
 import { getHistories } from "@/lib/market/history";
 import { buildRisk } from "@/lib/portfolio/risk";
-import { loadEventAlerts } from "@/lib/alerts/events";
+import { loadEventAlerts, researchDates } from "@/lib/alerts/events";
 import { newCapital, parseSource, ruleRowsOf } from "@/lib/decision/newCapital";
 import { expectedReturnAt, repriceCheck, scenarioReturnsAt, zoneFor } from "@/lib/research/valuation";
 import { researchAgeDays } from "@/lib/research/records";
@@ -332,7 +332,7 @@ export async function runTool(name: string, input: Record<string, unknown>, ws: 
       };
     }
     case "get_events": {
-      const { alerts } = await loadEventAlerts(p.holdings.map((h) => h.symbol), ws.now);
+      const { alerts } = await loadEventAlerts(p.holdings.map((h) => h.symbol), ws.now, researchDates(ws.research));
       return { layer: "external_data", provider: "SEC EDGAR", events: alerts.map((a) => ({ symbol: a.symbol, timing: a.timing, severity: a.severity, title: a.title, detail: a.detail, source: a.source })) };
     }
     case "get_pipeline": {

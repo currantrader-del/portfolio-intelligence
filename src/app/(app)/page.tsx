@@ -22,8 +22,9 @@ import { OutdatedNotice } from "@/components/OutdatedNotice";
 import { loadContextEvents } from "@/lib/freshness/contextEvents";
 import { outdatedVerdict } from "@/lib/freshness/outdated";
 import { currentDecisionFor } from "@/lib/decision/currentPortfolio";
-import { loadDecisionFilings } from "@/lib/alerts/events";
+import { loadDecisionFilings, researchDates } from "@/lib/alerts/events";
 import { ImprovementTeaser } from "@/components/ImprovementCard";
+import { headlineTiming, sessionOfQuotes } from "@/lib/market/hours";
 import { improvementView } from "@/lib/shadow/proposals";
 import { MyActionButtons } from "@/components/eval/MyAction";
 import { actionRef, loadMyActions } from "@/lib/eval/log";
@@ -59,6 +60,9 @@ export default async function TodayPage() {
     .map((h) => ({ symbol: h.symbol, dayPct: h.dayPct, name: ws.research.find((r) => r.symbol === h.symbol)?.name ?? null }));
   const dateLabel = new Intl.DateTimeFormat("en-US", { weekday: "long", month: "long", day: "numeric", timeZone: "America/New_York" }).format(ws.now);
   const session = ws.marketOpen ? "today" : "last session";
+  // The move shown is from the previous close to the latest quote's session; headlines after it are labelled.
+  const qs = sessionOfQuotes(p.holdings.map((h) => ws.quotes.get(h.symbol)?.asOf), ws.now);
+  const moveWindow = qs ? { startIso: new Date(Date.parse(qs.closeIso) - (new Date(`${qs.date}T12:00:00Z`).getUTCDay() === 1 ? 3 : 1) * 86_400_000).toISOString(), endIso: qs.open ? ws.now.toISOString() : qs.closeIso } : undefined;
   const vsSpy = p.dayPct !== null && spy !== null ? p.dayPct - spy : null;
   const verified = p.quality.status === "verified";
   const improve = await improvementView(db, ws).catch(() => null);
@@ -147,7 +151,7 @@ export default async function TodayPage() {
         </Card>
 
         <div className="lg:col-span-4 max-lg:order-last flex flex-col gap-3 lg:gap-4">
-          <Suspense fallback={<EventsSkeleton />}><EventsCard symbols={p.holdings.map((h) => h.symbol)} now={ws.now} /></Suspense>
+          <Suspense fallback={<EventsSkeleton />}><EventsCard symbols={p.holdings.map((h) => h.symbol)} now={ws.now} dates={researchDates(ws.research)} /></Suspense>
         </div>
 
         <Card className="lg:col-span-7 !gap-1 !pb-1.5" labelledBy="q-h">
@@ -180,7 +184,7 @@ export default async function TodayPage() {
           {newsMovers.length > 0 && (
             <div className="border-t border-line -mb-2">
               <Disclose summary={<span>Headlines behind the moves <span className="t-xs">· unverified</span></span>}>
-                <Suspense fallback={<div className="flex flex-col gap-2"><Skel w="90%" /><Skel w="70%" /></div>}><MoverHeadlines movers={newsMovers} /></Suspense>
+                <Suspense fallback={<div className="flex flex-col gap-2"><Skel w="90%" /><Skel w="70%" /></div>}><MoverHeadlines movers={newsMovers} window={moveWindow} /></Suspense>
               </Disclose>
             </div>
           )}
@@ -191,7 +195,7 @@ export default async function TodayPage() {
   );
 }
 
-async function MoverHeadlines({ movers }: { movers: { symbol: string; dayPct: number | null; name?: string | null }[] }) {
+async function MoverHeadlines({ movers, window }: { movers: { symbol: string; dayPct: number | null; name?: string | null }[]; window?: { startIso: string; endIso: string } }) {
   const rows = await Promise.all(movers.map(async (m) => ({ ...m, r: await getNews(m.symbol, m.name, 2) })));
   const ok = rows.filter((x) => !("error" in x.r));
   if (!ok.length) return <p className="t-sm">Headlines are unavailable right now.</p>;
@@ -203,7 +207,7 @@ async function MoverHeadlines({ movers }: { movers: { symbol: string; dayPct: nu
           {"error" in x.r ? null : x.r.headlines.map((h) => (
             <a key={h.url} href={h.url} target="_blank" rel="noreferrer nofollow" className="t-sm no-underline hover:text-ink">
               {h.title}
-              <span className="block t-xs">{[h.publisher, h.publishedAt ? shortDate(h.publishedAt) : null].filter(Boolean).join(" · ")}</span>
+              <span className="block t-xs">{[h.publisher, h.publishedAt ? shortDate(h.publishedAt) : null].filter(Boolean).join(" · ")}{window && headlineTiming(h.publishedAt, window.startIso, window.endIso) === "after" ? <span className="warn"> · published after this move, not its cause</span> : null}</span>
             </a>
           ))}
         </div>
