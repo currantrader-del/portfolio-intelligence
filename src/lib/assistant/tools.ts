@@ -1,3 +1,4 @@
+import { reviewPosition } from "@/lib/decision/review";
 import { AUTHORITY_LABEL } from "@/lib/research/standing";
 /**
  * Tools the assistant may call. Every number it can cite comes from one of these,
@@ -169,7 +170,15 @@ export async function runTool(name: string, input: Record<string, unknown>, ws: 
           bucket: h.bucket, accounts: h.accounts,
         })),
         buckets: p.buckets.map((b) => ({ bucket: b.bucket, weight: r4(b.weight), normal: b.normal, hard_max: b.hardMax, status: b.status, meaning: b.status === "below" ? "information only: never a reason to buy, to rebuild toward, or to wait for" : b.status === "above" ? "a reason to review, not to sell" : undefined })),
-        company_exposure: p.exposures.map((e) => ({ symbol: e.symbol, direct: r4(e.direct), via_etfs: r4(e.viaEtfs), total: r4(e.total), max: e.max, limit_status: ws.policy?.companies[e.symbol]?.status ?? "none", limit_source: ws.policy?.companies[e.symbol]?.source ?? null, headroom_dollars: e.headroomDollars })),
+        // The same position review Decisions shows: combined exposure, the levels kept apart, and trim/exit sizes that
+        // keep fund exposure (proceeds stay as brokerage cash). Room under a limit is never a reason to add.
+        company_exposure: p.exposures.map((e) => {
+          const rv = reviewPosition(ws, e.symbol);
+          return { symbol: e.symbol, direct: r4(e.direct), via_etfs: r4(e.viaEtfs), total: r4(e.total), max: e.max, limit_status: ws.policy?.companies[e.symbol]?.status ?? "none", limit_source: ws.policy?.companies[e.symbol]?.source ?? null, headroom_dollars: e.headroomDollars,
+            levels: rv ? { normal: rv.levels.normal, research_review: rv.levels.researchReview, hard_max: rv.levels.hardMax, state: rv.levelState.text } : null,
+            review: rv ? { suggestion: rv.suggestion.label, reason: rv.suggestion.reason, options: rv.options.map((o) => ({ option: o.label, basis: o.basis, dollars: o.dollars, combined_after: r4(o.weightAfter), note: o.note })) } : null };
+        }),
+        denominator: "Every weight is of the invested portfolio (holdings plus cash in the investment accounts); savings are excluded.",
         lookthrough_weights_as_of: LOOKTHROUGH_AS_OF,
       };
     case "get_exposure": {
