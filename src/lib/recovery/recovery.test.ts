@@ -56,11 +56,15 @@ describe("calibration check", () => {
     expect(c.cases).toBeGreaterThan(500);
     expect(c.byKind.touch.meanGap).toBeLessThan(0.06);
     expect(c.limits.length).toBeGreaterThan(2);
+    // Each period is judged on its own, and the list of periods to show matches those verdicts.
+    expect(c.horizonsPassed!.length).toBeGreaterThan(0);
+    for (const [k, h] of Object.entries(c.byHorizon)) expect(c.horizonsPassed!.includes(k as never)).toBe(!!h.passed);
   }, 60_000);
   it("fails when the future is nothing like the past", () => {
     // Calm for years, then a steady crash: past volatility says nothing about the move that came.
     const crash = (seed: number) => { const base = walk(seed, 900, 0.004); const last = base[base.length - 1]; return [...base, ...Array.from({ length: 360 }, (_, i) => last * Math.exp(-0.004 * (i + 1)))]; };
     const c = calibrate(Array.from({ length: 12 }, (_, i) => ({ symbol: `C${i}`, closes: crash(300 + i) })), new Date(), 150);
     expect(c.passed).toBe(false);
+    expect(c.horizonsPassed!.length).toBeLessThan(4);
   }, 60_000);
 });
