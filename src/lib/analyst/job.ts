@@ -15,7 +15,7 @@ import { ANALYST_SYSTEM, ANALYST_VERSION, parseReport, researchFacts, type Analy
 const MODEL = { id: "claude-sonnet-5-5", inPerM: 2, outPerM: 10 };
 export const ANALYST_RUNNING_MIN = 10;
 
-export type StoredAnalyst = { ok: true; report: AnalystReport } | { ok: false; error: string; symbol: string; fileName: string; costUsd: number; at: string };
+export type StoredAnalyst = { ok: true; report: AnalystReport } | { ok: false; error: string; symbol: string; fileName: string; costUsd: number; at: string; stopReason?: string | null; replyChars?: number; outputTokens?: number };
 
 export async function startAnalyst(db: SupabaseClient, origin: string, token: string, r: { symbol: string; documentId: string; storagePath: string; fileName: string }): Promise<string> {
   const requestId = await save(db, "analyst_request", ANALYST_VERSION, { symbol: r.symbol, document_id: r.documentId, storage_path: r.storagePath, file_name: r.fileName }, {});
@@ -38,7 +38,7 @@ export async function runAnalystJob(db: SupabaseClient, requestId: string): Prom
     const q = await getQuote(i.symbol).catch(() => null);
     const facts = researchFacts(i.symbol, rec?.current?.parsed ?? null, rec?.current?.research_as_of ?? null, q?.price ?? null);
     const res = await new Anthropic().messages.create({
-      model: MODEL.id, max_tokens: 5000, system: ANALYST_SYSTEM,
+      model: MODEL.id, max_tokens: 12000, system: ANALYST_SYSTEM,
       messages: [{ role: "user", content: [
         { type: "document", source: { type: "base64", media_type: "application/pdf", data } },
         { type: "text", text: `The investor uploaded this report for ${i.symbol}.\n\nTHE APP'S RESEARCH (for the comparison)\n${facts}\n\nRead the report and reply with the JSON.` },
@@ -47,7 +47,14 @@ export async function runAnalystJob(db: SupabaseClient, requestId: string): Prom
     const cost = (res.usage.input_tokens * MODEL.inPerM + res.usage.output_tokens * MODEL.outPerM) / 1e6;
     const text = res.content.flatMap((b) => (b.type === "text" ? [b.text] : [])).join("\n");
     const report = parseReport(extractJson(text), { symbol: i.symbol, fileName: i.file_name, documentId: i.document_id, costUsd: cost, model: MODEL.id, now });
-    if (!report) return store({ ok: false, error: "The report could not be read into ratings, values or estimates. Is it an analyst report, and not a scan?", symbol: i.symbol, fileName: i.file_name, costUsd: cost, at: now.toISOString() }, cost);
+    if (!report) {
+      // Say why, and what it cost: a reply cut off at the length limit is the app's fault, not the file's.
+      const cut = res.stop_reason === "max_tokens";
+      const why = cut
+        ? `The AI's reply was cut off before it finished (the report has more figures than the reader allowed), so nothing was saved. This was the app's limit, not your file. Charged $${cost.toFixed(2)}.`
+        : `The report could not be read into ratings, values or estimates. Is it an analyst report, and not a scan? Charged $${cost.toFixed(2)}.`;
+      return store({ ok: false, error: why, symbol: i.symbol, fileName: i.file_name, costUsd: cost, at: now.toISOString(), stopReason: res.stop_reason ?? null, replyChars: text.length, outputTokens: res.usage.output_tokens } as StoredAnalyst, cost);
+    }
     // A report about another company is kept under the company it is about.
     return store({ ok: true, report }, cost);
   } catch (e) {

@@ -41,7 +41,7 @@ export function researchFacts(symbol: string, p: ParsedConclusion | null, asOf: 
   ].filter(Boolean).join("\n");
 }
 
-export const ANALYST_SYSTEM = `You read one analyst research report (a PDF the investor is licensed to use) for a private long-term investor, and compare it with the app's own research. Use only what the report says; never fill a gap from memory. Give the page number for each estimate.
+export const ANALYST_SYSTEM = `You read one analyst research report (a PDF the investor is licensed to use) for a private long-term investor, and compare it with the app's own research. Use only what the report says; never fill a gap from memory. Give the page number for each estimate. Keep the reply short enough to finish: at most 20 estimates, chosen as revenue, EPS, free cash flow and operating margin for the next three fiscal years first; never copy whole financial tables.
 
 Reply with exactly one JSON object in a \`\`\`json fenced block and nothing else:
 {
@@ -77,7 +77,7 @@ export function parseReport(raw: unknown, ctx: { symbol: string; fileName: strin
     const value = num(x.value), metric = str(x.metric, 60), period = str(x.period, 30);
     if (value === null || !metric || !period) return [];
     return [{ metric: metric.toLowerCase(), period: period.toUpperCase().replace(/\s+/g, " "), value, unit: str(x.unit, 20) ?? "", page: num(x.page) }];
-  }).slice(0, 40);
+  }).slice(0, 25);
   const date = str(r.report_date, 10);
   const out: AnalystReport = {
     symbol: (str(r.symbol, 10) ?? ctx.symbol).toUpperCase(),
