@@ -157,14 +157,18 @@ export default async function CompanyPage({ params, searchParams }: { params: Pr
       <div className="grid grid-cols-1 gap-3 lg:gap-4 lg:grid-cols-12 items-start">
         <div className="lg:col-span-7 flex flex-col gap-3 lg:gap-4 min-w-0">
           <ResearchStatus s={standing} f={fields} verdict={verdict} now={plainAction} price={price} />
-          <InvestmentSummary ws={ws} symbol={company.symbol} brief={brief} />
-          {!etf && <Suspense fallback={<FeedSkeleton title="Recovery odds" />}><RecoveryCard symbol={company.symbol} price={price} priceAsOf={q?.asOf ?? null} targetsRaw={sp.targets?.slice(0, 80)} /></Suspense>}
-          {!etf && <Suspense fallback={<FeedSkeleton title="Analyst reports" />}><AnalystCard symbol={company.symbol} price={price} /></Suspense>}
+          <Card flush>
+            <Disclose summary={<span className="t-sm">The numbers behind it · valuation, your exposure, thesis</span>}>
+              <InvestmentSummary ws={ws} symbol={company.symbol} brief={brief} />
+            </Disclose>
+          </Card>
           {pendingInv && <InvestigationConclusion symbol={company.symbol} v={pendingInv as unknown as InvVersion} inUse={inUseLabel} usedId={usedId} validation={(valRow?.outputs as ValidationReport | undefined) ?? null} />}
         </div>
 
         <div className="lg:col-span-5 flex flex-col gap-3 lg:gap-4 min-w-0">
           {!etf && <InvestigationRunner symbol={company.symbol} hasResearch={versions.some((v) => v.is_current || isInv(v))} hasInvestigation={investigations.some((v) => v.is_current)} plan={updatePlan} />}
+          {!etf && <Suspense fallback={<FeedSkeleton title="Analyst reports" />}><AnalystCard symbol={company.symbol} price={price} /></Suspense>}
+          {!etf && <Suspense fallback={<FeedSkeleton title="Recovery odds" />}><RecoveryCard symbol={company.symbol} price={price} priceAsOf={q?.asOf ?? null} targetsRaw={sp.targets?.slice(0, 80)} /></Suspense>}
           {!etf && <ResearchButton symbol={company.symbol} hasResearch={versions.length > 0} needsResearch={!latestInv && coverage(record, price, ws.now, AGE_REMINDER_DAYS).key !== "current"} />}
           {!etf && <ShareResearchCard symbol={company.symbol} latest={share.latest} approved={share.approved} />}
           <Card labelledBy="tv-h" className="!gap-1.5">
@@ -295,65 +299,75 @@ function briefOf(s: Standing, parsedThesis: string | null): Brief | null {
 
 /** Which research decisions use, what is waiting for you, what is history, and what is still open. */
 function ResearchStatus({ s, f, verdict, now, price }: { s: Standing; f: StatusFields | null; verdict: Verdict | null; now: ActionNow | null; price: number | null }) {
-  if (!s.inUse && !s.pending) return null;
+  if (!s.inUse && !s.pending && !now) return null;
   const nx = verdict?.next;
   const row = (label: string, ok: boolean, text: string) => (
-    <div className="grid grid-cols-[130px_1fr] gap-2 items-baseline"><span className="t-xs">{label}</span><span className={ok ? "text-ink" : "warn"}>{text}</span></div>
+    <div className="grid grid-cols-[110px_1fr] gap-2 items-baseline"><span className="t-xs">{label}</span><span className={ok ? "text-ink" : "warn"}>{text}</span></div>
   );
+  // The verb is shown big, so the sentence under it starts with the reason, not the verb again.
+  const reason = now ? now.headline.replace(/^(Hold|Trim|Buy more|No action)(?: about \$[\d,]+)?(?: at \$[\d.,]+)?(?: for now)?:\s*/, "").replace(/^Reassess first, and /, "").replace(/^./, (c) => c.toUpperCase()) : "";
+  const tone = now?.verb === "Hold" ? "text-ink" : now?.verb === "Buy more" ? "gain" : "warn";
   return (
-    <Card labelledBy="rs-h" className="!gap-2">
-      <CardHead id="rs-h" cap="Research status" />
-      <div className="flex flex-col gap-1.5 t-sm">
-        {verdict && (
-          <div className="flex flex-col gap-1">
-            <p className="text-ink font-semibold">{verdict.headline}.</p>
+    <Card labelledBy="rs-h" className="!gap-3">
+      <CardHead id="rs-h" cap={`What to do${price ? ` · $${price.toFixed(2)}` : ""}`} />
+      {now && (
+        <div className="flex flex-col gap-2">
+          <p className={`text-[28px] leading-tight font-semibold ${tone}`}>{now.verb}</p>
+          <p className="text-[16px] leading-snug text-ink">{reason}</p>
+          {now.zones.length > 0 && (
+            <ul className="flex flex-col rounded-[12px] border border-line overflow-hidden" aria-label="Price levels from the research">
+              {now.zones.map((z) => (
+                <li key={z.label} className={`flex flex-col gap-0.5 px-3 py-2 border-b border-line last:border-b-0 ${z.current ? "bg-surface-2" : ""}`}>
+                  <span className={`t-sm font-semibold ${z.current ? "text-ink" : ""}`}>{z.label}{z.current ? " · now" : ""}</span>
+                  <span className="t-xs">{z.action}</span>
+                </li>
+              ))}
+            </ul>
+          )}
+          {now.priceAnswer && <p className="t-sm"><span className="text-ink font-semibold">Good price to buy? </span>{now.priceAnswer}</p>}
+          {now.downside && <p className="t-sm"><span className="text-ink font-semibold">Why it could go lower: </span>{now.downside}</p>}
+          {(now.risks.length > 0 || now.watch.length > 0) && (
+            <Disclose summary={<span className="t-sm">Main risks and what would change this</span>}>
+              <ul className="t-xs list-disc pl-4 flex flex-col gap-1">
+                {now.risks.map((x, i) => <li key={`r${i}`}>{x}</li>)}
+                {now.watch.map((x, i) => <li key={`w${i}`}>Would change the view: {x}</li>)}
+              </ul>
+            </Disclose>
+          )}
+        </div>
+      )}
+      {nx && (nx.kind === "update" || nx.kind === "full") && (
+        <p className="t-sm rounded-[12px] px-3 py-2 bg-warn-bg text-warn-ink">
+          <span className="font-semibold">Next step: </span>{nx.text} About {nx.cost}. <a href="#inv-h">{nx.kind === "update" ? "Reassess now" : "Full investigation"}</a>
+        </p>
+      )}
+      {verdict && (
+        <Disclose summary={<span className="t-sm">{verdict.headline}</span>}>
+          <div className="flex flex-col gap-1.5 t-sm">
             {verdict.detail && <p className="t-xs">{verdict.detail}</p>}
-            {now && (
-              <div className="rounded-[12px] border border-line px-3 py-2 flex flex-col gap-1">
-                <span className="t-xs">What to do{price ? ` at $${price.toFixed(2)}` : ""}</span>
-                <span className="text-ink font-semibold">{now.verb}</span>
-                <span>{now.headline}</span>
-                {now.priceAnswer && <span className="t-sm">{now.priceAnswer}</span>}
-                {now.downside && <span className="t-sm">Why it could go lower: {now.downside}{now.risks.length ? ` Main risks: ${now.risks.join(" · ")}` : ""}</span>}
-                {now.levels && <span className="t-xs">Levels: {now.levels}</span>}
-                {now.watch.length > 0 && <span className="t-xs">What would change this: {now.watch[0]}</span>}
-              </div>
-            )}
-            {nx && (
-              <p className={`rounded-[12px] px-3 py-2 ${nx.kind === "update" || nx.kind === "full" ? "bg-warn-bg text-warn-ink" : "bg-surface-2"}`}>
-                <span className="font-semibold">Next step: </span>{nx.text}
-                {(nx.kind === "update" || nx.kind === "full") && <> About {nx.cost}. <a href="#inv-h">{nx.kind === "update" ? "Reassess now" : "Full investigation"}</a></>}
-              </p>
-            )}
-          </div>
-        )}
-        {f ? (
-          <Disclose summary={<span className="t-sm">Details · approval, use, open items</span>}>
-            <div className="flex flex-col gap-1.5">
+            {nx && nx.kind !== "update" && nx.kind !== "full" && <p className="t-xs">{nx.text}</p>}
+            {f && <>
               {row("Investigation", f.finished.ok, f.finished.text)}
               {row("Your approval", true, f.approved.text)}
               {row("Used for decisions", f.inUse.ok, f.inUse.text)}
-              {row("Open items", f.open.length === 0, f.open.length ? `${f.open.length}, listed below` : "None")}
-            </div>
-          </Disclose>
-        ) : <div><span className="t-xs block">In use for decisions</span><span className="text-ink">None</span></div>}
-        {s.pending && (
-          <div><span className="t-xs block">Latest investigation</span>
-            <span className="text-ink">{shortDate(s.pending.v.research_as_of)} · {s.pending.state === "running" ? "in progress" : `${s.pending.complete ? "complete" : s.pending.kind === "material_uncertainty" ? "incomplete: a material question has no reliable answer" : "incomplete"} · not in use: it has unfinished work`}{s.pending.open.length ? ` · ${s.pending.open.length} open item${s.pending.open.length === 1 ? "" : "s"}` : ""}</span>
+            </>}
+            {s.pending && (
+              <div><span className="t-xs block">Latest investigation</span>
+                <span className="text-ink">{shortDate(s.pending.v.research_as_of)} · {s.pending.state === "running" ? "in progress" : `${s.pending.complete ? "complete" : s.pending.kind === "material_uncertainty" ? "incomplete: a material question has no reliable answer" : "incomplete"} · not in use: it has unfinished work`}{s.pending.open.length ? ` · ${s.pending.open.length} open item${s.pending.open.length === 1 ? "" : "s"}` : ""}</span>
+              </div>
+            )}
+            {s.history.length > 0 && <p className="t-xs">{s.history.length} earlier record{s.history.length === 1 ? "" : "s"}, kept unchanged (under Research history).</p>}
+            {s.inUse && s.inUse.open.length > 0 && <>
+              <span className="t-xs">Open questions ({s.inUse.open.length}):</span>
+              <ul className="t-xs list-disc pl-4 flex flex-col gap-0.5">{s.inUse.open.slice(0, 20).map((x, i) => <li key={i}>{x}</li>)}</ul>
+            </>}
+            {s.pending && s.pending.open.length > 0 && <>
+              <span className="t-xs">Open items in the new investigation ({s.pending.open.length}):</span>
+              <ul className="t-xs list-disc pl-4 flex flex-col gap-0.5">{s.pending.open.slice(0, 20).map((x, i) => <li key={i}>{x}</li>)}</ul>
+            </>}
           </div>
-        )}
-        {s.history.length > 0 && <div><span className="t-xs block">History</span><span>{s.history.length} earlier record{s.history.length === 1 ? "" : "s"}, kept unchanged (listed under Research history)</span></div>}
-        {s.inUse && s.inUse.open.length > 0 && (
-          <Disclose summary={<span className="t-sm">Open questions · {s.inUse.open.length} · a targeted update resolves them</span>}>
-            <ul className="t-xs list-disc pl-4 flex flex-col gap-0.5">{s.inUse.open.slice(0, 20).map((x, i) => <li key={i}>{x}</li>)}</ul>
-          </Disclose>
-        )}
-        {s.pending && s.pending.open.length > 0 && (
-          <Disclose summary={<span className="t-sm">Open items in the new investigation · {s.pending.open.length}</span>}>
-            <ul className="t-xs list-disc pl-4 flex flex-col gap-0.5">{s.pending.open.slice(0, 20).map((x, i) => <li key={i}>{x}</li>)}</ul>
-          </Disclose>
-        )}
-      </div>
+        </Disclose>
+      )}
     </Card>
   );
 }
