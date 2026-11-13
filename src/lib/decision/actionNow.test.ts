@@ -18,7 +18,7 @@ describe("one plain action at today's price, with its levels", () => {
   it("a fall into the hold band says hold, and names the prices that would change it", () => {
     const a = actionNow({ symbol: "NVDA", price: 148, research, unreadFiling: null, trim: null, held: true });
     expect(a.verb).toBe("Hold");
-    expect(a.headline).toMatch(/^Hold at \$148\.00: the 2026-11-10 research says for \$135–\$170: hold/);
+    expect(a.headline).toMatch(/^Hold at \$148\.00: the Nov 10 research says for \$135–\$170: hold/);
     expect(a.levels).toMatch(/Hold while \$135–\$170 \(price \$148\.00\)\. Below \$135: no add by default.*Above \$170: trim back to 15%/);
     expect(a.watch[0]).toMatch(/CEO leaving/);
     expect(a.zones.find((z) => z.current)?.label).toBe("$135–$170");

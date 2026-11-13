@@ -60,7 +60,7 @@ export function actionNow(a: {
 
   const levels = levelText(zones, z, price);
   const at = price ? ` at ${money(price)}` : "";
-  const research = `the ${a.research!.asOf} research`;
+  const research = `the ${new Date(`${a.research!.asOf}T12:00:00Z`).toLocaleDateString("en-US", { month: "short", day: "numeric", timeZone: "UTC" })} research`;
 
   if (a.unreadFiling) {
     return {

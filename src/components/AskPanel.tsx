@@ -158,9 +158,10 @@ export function AskPanel() {
     <>
       {!open && (
         <button ref={fabRef} type="button" onClick={() => setOpen(true)} aria-haspopup="dialog" aria-label={symbol ? `Ask about ${symbol}` : "Ask the assistant"}
-          className="fixed z-40 right-4 lg:right-6 bottom-[calc(var(--tabbar-h)+env(safe-area-inset-bottom)+14px)] lg:bottom-6 h-12 px-[18px] rounded-full bg-ink text-ground font-semibold inline-flex items-center gap-2 shadow-[0_8px_24px_rgba(0,0,0,.5)] hover:bg-white active:scale-[0.95] active:bg-[#cfd2d7] transition-transform">
+          className="fixed z-40 right-4 lg:right-6 bottom-[calc(var(--tabbar-h)+env(safe-area-inset-bottom)+14px)] lg:bottom-6 h-12 px-[18px] max-lg:min-w-12 max-lg:justify-center rounded-full bg-ink text-ground font-semibold inline-flex items-center gap-2 shadow-[0_8px_24px_rgba(0,0,0,.5)] hover:bg-white active:scale-[0.95] active:bg-[#cfd2d7] transition-transform">
           {busy ? <Spinner /> : <svg viewBox="0 0 20 20" width="18" height="18" fill="none" stroke="currentColor" strokeWidth="1.7" aria-hidden="true"><path d="M4 15l-1 3 3.5-1.5A7 7 0 1 0 4 15z" /></svg>}
-          {busy ? "Answering…" : unread ? "Answer ready" : symbol ? `Ask about ${symbol}` : "Ask"}
+          {/* On phones the idle button is a small round icon, so it doesn't cover the page's text. */}
+          <span className={busy || unread ? "" : "max-lg:sr-only"}>{busy ? "Answering…" : unread ? "Answer ready" : symbol ? `Ask about ${symbol}` : "Ask"}</span>
           {unread && !busy && <span className="w-2 h-2 rounded-full bg-[var(--accent)]" aria-hidden="true" />}
           <span className="hidden lg:inline text-xs font-medium opacity-60">⌘J</span>
         </button>
