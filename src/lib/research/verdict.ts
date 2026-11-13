@@ -34,7 +34,7 @@ export function researchVerdict(a: {
   if (p.recommend === "full") return { researched: true, headline, detail, next: { kind: "full", text: `A full investigation is needed: ${p.fullReasons[0]}`, cost: usd(p.estimates.full) } };
   if (p.recommend === "update") {
     const f = p.newEvidence;
-    const what = f.length === 1 ? `${f[0].label} filed ${day(f[0].filed)}` : `${f.length} filings since ${day(p.foundation!.asOf)} (latest ${day(f[0].filed)})`;
+    const what = f.length === 1 ? `${f[0].label} ${f[0].category === "analyst" ? "uploaded" : "filed"} ${day(f[0].filed)}` : `${f.length} new items since ${day(p.foundation!.asOf)} (latest ${day(f[0].filed)})`;
     return { researched: true, headline, detail, next: { kind: "update", text: `Reassess: ${what}. A targeted update reads only what is new${n ? " and works on the open questions" : ""}, builds on this research, and replaces it only if it finishes.`, cost: usd(p.estimates.update) } };
   }
   if (p.summary.startsWith("SEC filings could not be checked")) return { researched: true, headline, detail, next: { kind: "unknown", text: "SEC filings could not be checked just now, so the app can't tell whether anything new was filed. Try again later; no AI run starts until it can." } };

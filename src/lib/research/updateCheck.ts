@@ -1,3 +1,4 @@
+import { analystEvidence, type AnalystReport } from "@/lib/analyst/report";
 /** Builds the "Update research" plan for a company from its saved versions (used by the page and the server). */
 import { getFilings } from "@/lib/market/sec";
 import { shortDate } from "@/lib/format";
@@ -7,7 +8,7 @@ import type { VersionRow } from "./records";
 
 const num = (x: unknown) => (typeof x === "number" && Number.isFinite(x) ? x : typeof x === "string" && x.trim() && Number.isFinite(Number(x.replace(/[$,]/g, ""))) ? Number(x.replace(/[$,]/g, "")) : null);
 
-export async function updatePlanFor(symbol: string, versions: (VersionRow & { created_at?: string | null })[], price: number | null, estimates?: Partial<UpdatePlan["estimates"]>, now = new Date()): Promise<{ plan: UpdatePlan; filingsChecked: boolean }> {
+export async function updatePlanFor(symbol: string, versions: (VersionRow & { created_at?: string | null })[], price: number | null, estimates?: Partial<UpdatePlan["estimates"]>, now = new Date(), analyst: AnalystReport[] = []): Promise<{ plan: UpdatePlan; filingsChecked: boolean }> {
   const found = updateFoundation(versions);
   const filingsRes = await getFilings(symbol).catch(() => null);
   const filings = filingsRes && !("error" in filingsRes) ? filingsRes.filings : null;
@@ -21,7 +22,7 @@ export async function updatePlanFor(symbol: string, versions: (VersionRow & { cr
       scenarios: { bear: num(fv.bear_value), base: num(fv.base_value), bull: num(fv.bull_value), pBear: num(fv.bear_probability), pBase: num(fv.base_probability), pBull: num(fv.bull_probability) },
       reviewedAccessions: [],
     } : null,
-    filings, price, now, estimates,
+    filings, price, now, estimates, analyst: found ? analystEvidence(analyst, found.v.research_as_of) : [],
   });
   return { plan, filingsChecked: filings !== null };
 }

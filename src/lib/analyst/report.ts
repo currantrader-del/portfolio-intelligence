@@ -21,6 +21,8 @@ export type AnalystReport = {
   priceAtReport: number | null; uncertainty: string | null; moat: string | null;
   estimates: Estimate[]; points: string[]; risks: string[];
   comparison: { agree: string[]; differ: string[]; notInResearch: string[]; summary: string };
+  /** Whether the report holds information that should change the app's conclusion (missing on reports read before 2026-11-13). */
+  bearing?: { changesView: "yes" | "maybe" | "no"; why: string } | null;
   fileName: string; documentId: string | null; pages: number | null;
   costUsd: number; model: string; at: string;
 };
@@ -65,6 +67,10 @@ Reply with exactly one JSON object in a \`\`\`json fenced block and nothing else
     "differ": string[],                // where they differ, with the numbers on both sides and the likely reason (different horizon, growth or margin assumption, discount rate...)
     "not_in_research": string[],       // facts or risks in the report that the app's research does not cover
     "summary": string                  // 2-3 sentences: how the report's value compares with the app's, after putting them on the same basis (a 12-month target or today's fair value is not a price several years out)
+  },
+  "bearing": {
+    "changes_view": "yes" | "maybe" | "no", // should the app's research conclusion (action, scenario values or weights, price levels) change because of FACTS in this report it does not have? A different opinion, rating, discount rate or longer horizon alone is "no".
+    "why": string                      // one or two sentences: which facts, and what they would change; or why the conclusion stands
   }
 }`;
 
@@ -86,6 +92,7 @@ export function parseReport(raw: unknown, ctx: { symbol: string; fileName: strin
     priceAtReport: num(r.price_at_report), uncertainty: str(r.uncertainty, 40), moat: str(r.moat, 40),
     estimates, points: list(r.points, 5), risks: list(r.risks, 5),
     comparison: { agree: list(c.agree, 6), differ: list(c.differ, 6, 500), notInResearch: list(c.not_in_research, 6), summary: str(c.summary, 900) ?? "" },
+    bearing: (() => { const b = (r.bearing ?? {}) as Record<string, unknown>; const v = str(b.changes_view, 8)?.toLowerCase(); return v === "yes" || v === "maybe" || v === "no" ? { changesView: v, why: str(b.why, 500) ?? "" } : null; })(),
     fileName: ctx.fileName, documentId: ctx.documentId, pages: null, costUsd: ctx.costUsd, model: ctx.model, at: ctx.now.toISOString(),
   };
   if (!out.rating && out.priceTarget === null && out.fairValue === null && !out.estimates.length && !out.points.length) return null;
@@ -106,4 +113,24 @@ export function estimateHistory(reports: Pick<AnalystReport, "publisher" | "repo
   }
   return [...m.entries()].map(([key, v]) => ({ key, ...v, points: v.points.sort((a, b) => a.date.localeCompare(b.date)) }))
     .sort((a, b) => b.points.length - a.points.length || a.metric.localeCompare(b.metric) || a.period.localeCompare(b.period));
+}
+
+/** The analyst reports as context for a research run: secondary views to weigh, never verified facts. */
+export function analystContext(reports: AnalystReport[], since: string | null): string {
+  const use = reports.filter((r) => !since || (r.reportDate ?? r.at.slice(0, 10)) >= since).slice(0, 3);
+  if (!use.length) return "";
+  return use.map((r) => [
+    `${r.publisher ?? "Analyst"}${r.reportDate ? ` (${r.reportDate})` : ""}: ${[r.rating, r.fairValue !== null ? `fair value $${r.fairValue}` : null, r.priceTarget !== null ? `target $${r.priceTarget}${r.horizon ? ` (${r.horizon})` : ""}` : null, r.valueBasis].filter(Boolean).join("; ")}`,
+    r.points.length ? `Main points: ${r.points.join(" | ")}` : null,
+    r.risks.length ? `Risks: ${r.risks.join(" | ")}` : null,
+    r.comparison.notInResearch.length ? `Facts in the report the earlier research lacked: ${r.comparison.notInResearch.join(" | ")}` : null,
+    r.comparison.differ.length ? `Where it differs from the earlier research: ${r.comparison.differ.join(" | ")}` : null,
+  ].filter(Boolean).join("\n")).join("\n\n").slice(0, 6000);
+}
+
+/** Reports read after the research date whose facts may change the conclusion: these make an update worthwhile. */
+export function analystEvidence(reports: AnalystReport[], researchAsOf: string): { label: string; filed: string; category: string }[] {
+  return reports
+    .filter((r) => (r.reportDate ?? r.at.slice(0, 10)) >= researchAsOf && r.at.slice(0, 10) >= researchAsOf && (r.bearing?.changesView === "yes" || r.bearing?.changesView === "maybe"))
+    .map((r) => ({ label: `Analyst report: ${r.publisher ?? r.fileName}${r.bearing?.why ? ` (${r.bearing.why.slice(0, 160)})` : ""}`, filed: r.at.slice(0, 10), category: "analyst" }));
 }

@@ -36,7 +36,7 @@ const r2 = (n: number) => Math.round(n * 100) / 100;
 /** Defaults until the app has measured enough runs of each kind. */
 export const DEFAULT_ESTIMATES = { update: { low: 1, high: 2.5, basis: "estimate (no updates measured yet)" }, full: { low: 3, high: 6, basis: "estimate" } } as const;
 
-export function planUpdate(a: { foundation: Foundation | null; filings: Filing[] | null; price: number | null; now: Date; estimates?: Partial<UpdatePlan["estimates"]> }): UpdatePlan {
+export function planUpdate(a: { foundation: Foundation | null; filings: Filing[] | null; price: number | null; now: Date; estimates?: Partial<UpdatePlan["estimates"]>; analyst?: { label: string; filed: string; category: string }[] }): UpdatePlan {
   const estimates = { update: a.estimates?.update ?? { ...DEFAULT_ESTIMATES.update }, full: a.estimates?.full ?? { ...DEFAULT_ESTIMATES.full } };
   const f = a.foundation;
   const fullReasons: string[] = [];
@@ -67,16 +67,23 @@ export function planUpdate(a: { foundation: Foundation | null; filings: Filing[]
     ? a.filings.filter((x) => x.filed > f.asOf && MATERIAL.has(x.category) && !(x.accession && reviewed.has(x.accession))).map((x) => ({ label: `${x.form} ${x.description}`.trim(), filed: x.filed, category: x.category }))
     : [];
 
-  const recommend: UpdatePlan["recommend"] = fullReasons.length ? "full" : newEvidence.length ? "update" : "nothing_new";
+  // An analyst report you uploaded whose facts may change the conclusion is new evidence too (read in the update).
+  const evidence: UpdatePlan["newEvidence"] = [...newEvidence, ...(f && a.analyst?.length ? a.analyst : [])];
+  const recommend: UpdatePlan["recommend"] = fullReasons.length ? "full" : evidence.length ? "update" : "nothing_new";
   const usd = (c: CostRange) => `$${c.low.toFixed(c.low < 10 ? 2 : 0)}–$${c.high.toFixed(c.high < 10 ? 2 : 0)}`;
   const summary = recommend === "full"
     ? `A full investigation is recommended: ${fullReasons[0]} About ${usd(estimates.full)}.`
     : recommend === "update"
-      ? `${newEvidence.length} new filing${newEvidence.length === 1 ? "" : "s"} since ${f!.asOf}. An update reads only these, builds on the saved evidence and model, and costs about ${usd(estimates.update)}.`
+      ? `${describe(evidence)} since ${f!.asOf}. An update reads only these, builds on the saved evidence and model, and costs about ${usd(estimates.update)}.`
       : a.filings === null
         ? "SEC filings could not be checked just now; try again later. Price changes are re-priced for free below."
         : `Nothing new filed since ${f!.asOf}. No AI is needed; the price change is re-priced for free.`;
-  return { foundation: f ? { versionId: f.versionId, asOf: f.asOf, label: f.label } : null, newEvidence, reprice, recommend, fullReasons, estimates, summary };
+  return { foundation: f ? { versionId: f.versionId, asOf: f.asOf, label: f.label } : null, newEvidence: evidence, reprice, recommend, fullReasons, estimates, summary };
+}
+
+function describe(e: { category: string }[]): string {
+  const filings = e.filter((x) => x.category !== "analyst").length, analyst = e.length - filings;
+  return [filings ? `${filings} new filing${filings === 1 ? "" : "s"}` : null, analyst ? `${analyst} analyst report${analyst === 1 ? "" : "s"} with facts the research lacks` : null].filter(Boolean).join(" and ");
 }
 
 /** Cost range from measured runs: the middle 80% of what past runs of this kind cost, or the default. */

@@ -1,3 +1,5 @@
+import { loadAnalyst } from "@/lib/analyst/job";
+import type { AnalystReport } from "@/lib/analyst/report";
 import { actionNow, type ActionNow } from "@/lib/decision/actionNow";
 import { reviewPosition } from "@/lib/decision/review";
 import { researchVerdict, type Verdict } from "@/lib/research/verdict";
@@ -116,7 +118,8 @@ export default async function CompanyPage({ params, searchParams }: { params: Pr
   const latestInv = shownInv;
   // "Update research": what is new since the research it would build on, and the free re-pricing.
   const estimates = etf ? null : await measuredEstimates(supabase).catch(() => null);
-  const updatePlan = etf ? null : (await updatePlanFor(company.symbol, versions as unknown as (VersionRow & { created_at?: string | null })[], price, estimates ?? undefined)).plan;
+  const analyst = etf ? { reports: [] as AnalystReport[] } : await loadAnalyst(supabase, company.symbol).catch(() => ({ reports: [] as AnalystReport[] }));
+  const updatePlan = etf ? null : (await updatePlanFor(company.symbol, versions as unknown as (VersionRow & { created_at?: string | null })[], price, estimates ?? undefined, ws.now, analyst.reports)).plan;
   // The code-only check of the investigation, saved separately from the research record.
   const { data: valRow } = latestInv
     ? await supabase.from("model_runs").select("outputs").eq("kind", "research_validation").eq("inputs->>version_id", latestInv.id).order("computed_at", { ascending: false }).limit(1).maybeSingle()
@@ -156,7 +159,7 @@ export default async function CompanyPage({ params, searchParams }: { params: Pr
       {/* Investment view: the decision first. */}
       <div className="grid grid-cols-1 gap-3 lg:gap-4 lg:grid-cols-12 items-start">
         <div className="lg:col-span-7 flex flex-col gap-3 lg:gap-4 min-w-0">
-          <ResearchStatus s={standing} f={fields} verdict={verdict} now={plainAction} price={price} />
+          <ResearchStatus s={standing} f={fields} verdict={verdict} now={plainAction} price={price} analyst={analyst.reports[0] ?? null} researchAsOf={standing.inUse?.v.research_as_of ?? null} />
           <Card flush>
             <Disclose summary={<span className="t-sm">The numbers behind it · valuation, your exposure, thesis</span>}>
               <InvestmentSummary ws={ws} symbol={company.symbol} brief={brief} />
@@ -298,7 +301,7 @@ function briefOf(s: Standing, parsedThesis: string | null): Brief | null {
 }
 
 /** Which research decisions use, what is waiting for you, what is history, and what is still open. */
-function ResearchStatus({ s, f, verdict, now, price }: { s: Standing; f: StatusFields | null; verdict: Verdict | null; now: ActionNow | null; price: number | null }) {
+function ResearchStatus({ s, f, verdict, now, price, analyst, researchAsOf }: { s: Standing; f: StatusFields | null; verdict: Verdict | null; now: ActionNow | null; price: number | null; analyst: AnalystReport | null; researchAsOf: string | null }) {
   if (!s.inUse && !s.pending && !now) return null;
   const nx = verdict?.next;
   const row = (label: string, ok: boolean, text: string) => (
@@ -336,6 +339,7 @@ function ResearchStatus({ s, f, verdict, now, price }: { s: Standing; f: StatusF
           )}
         </div>
       )}
+      {analyst && <AnalystLine r={analyst} researchAsOf={researchAsOf} />}
       {nx && (nx.kind === "update" || nx.kind === "full") && (
         <p className="t-sm rounded-[12px] px-3 py-2 bg-warn-bg text-warn-ink">
           <span className="font-semibold">Next step: </span>{nx.text} About {nx.cost}. <a href="#inv-h">{nx.kind === "update" ? "Reassess now" : "Full investigation"}</a>
@@ -385,5 +389,21 @@ function Header({ symbol, name, kicker, price, day }: { symbol: string; name: st
         {day !== null ? <span className={`t-xs num ${toneOf(day)}`}>{pctStr(day, 1, true)} today</span> : <DataLabel kind="delayed" small />}
       </div>
     </div>
+  );
+}
+
+/** The latest analyst report, folded into the decision: its view, and whether it changes the app's conclusion. */
+function AnalystLine({ r, researchAsOf }: { r: AnalystReport; researchAsOf: string | null }) {
+  const who = `${r.publisher ?? "Analyst report"}${r.reportDate ? ` (${new Date(`${r.reportDate}T12:00:00Z`).toLocaleDateString("en-US", { month: "short", day: "numeric", timeZone: "UTC" })})` : ""}`;
+  const view = [r.rating, r.fairValue !== null ? `fair value $${r.fairValue}` : null, r.priceTarget !== null ? `target $${r.priceTarget}` : null].filter(Boolean).join(", ");
+  // Read into the research already when the research is newer than the upload.
+  const folded = !!researchAsOf && r.at.slice(0, 10) < researchAsOf;
+  const b = r.bearing?.changesView;
+  const verdict = folded ? "Already weighed in the research in use."
+    : b === "no" ? `Doesn't change the app's conclusion${r.bearing?.why ? `: ${r.bearing.why}` : "."}`
+    : b === "yes" || b === "maybe" ? `${b === "yes" ? "Has facts that should change" : "May change"} the conclusion${r.bearing?.why ? `: ${r.bearing.why}` : "."} The next research update reads it.`
+    : r.comparison.summary || "Compared with the research below.";
+  return (
+    <p className="t-sm"><span className="text-ink font-semibold">Analyst view: </span>{who}{view ? `: ${view}` : ""}. {verdict}</p>
   );
 }

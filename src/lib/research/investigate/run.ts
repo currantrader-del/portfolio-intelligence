@@ -1,3 +1,5 @@
+import { loadAnalyst } from "@/lib/analyst/job";
+import { analystContext } from "@/lib/analyst/report";
 /**
  * Runs a research investigation as a chain of background steps. Each step does one piece of work
  * (build the reading list, find the transcript and presentation, read every document in full, one
@@ -158,6 +160,14 @@ async function stepInventory(db: SupabaseClient, s: RunState) {
     const head = `Research dated ${base.research_as_of} (${base.origin}${c.research_type ? `, ${c.research_type}` : ""}, ${base.completeness}${base.is_current ? ", current" : ""}). Action: ${c.action ?? "none"}. Confidence: ${c.confidence ?? "n/a"}. Thesis: ${c.thesis ?? "n/a"}. Reference price: ${c.reference_price ?? "n/a"} on ${c.reference_date ?? "n/a"}. Scenarios: bear ${val.bear_value ?? "?"} (${val.bear_probability ?? "?"}), base ${val.base_value ?? "?"} (${val.base_probability ?? "?"}), bull ${val.bull_value ?? "?"} (${val.bull_probability ?? "?"}) by ${val.terminal_date ?? "?"}; method: ${String(val.method ?? "").slice(0, 600)}. Open items it listed: ${(Array.isArray(c.not_verified) ? c.not_verified : []).join(" | ").slice(0, 1500)}`;
     const phases = s.type === "material_event_refresh" ? [...(base.research_phases ?? [])].sort((a, b) => a.phase_number - b.phase_number).map((p) => `--- Phase ${p.phase_number} ${p.title ?? ""}\n${(p.body_markdown ?? "").slice(0, 5000)}`).join("\n") : "";
     s.base = { versionId: base.id, research_as_of: base.research_as_of, origin: base.origin, type: (c.research_type as string) ?? null, summary: phases ? `${head}\n${phases}` : head };
+  }
+  // Analyst reports you uploaded: secondary views and facts to weigh (and check against filings), never verified on their own.
+  const an = await loadAnalyst(db, s.symbol).catch(() => ({ reports: [] }));
+  const anText = analystContext(an.reports, null);
+  if (anText) {
+    const block = `ANALYST REPORTS THE INVESTOR UPLOADED (secondary sources: weigh their facts, check them against filings where you can, cite as "analyst report: <publisher>"; an analyst's rating or fair value is an opinion, not evidence):\n${anText}`;
+    s.base = s.base ? { ...s.base, summary: `${s.base.summary}\n\n${block}` } : { versionId: "", research_as_of: "", origin: "", type: null, summary: block };
+    note(s, "inventory", `Analyst reports included as secondary input: ${an.reports.slice(0, 3).map((r) => r.publisher ?? r.fileName).join(", ")}.`);
   }
   const inv = await buildInventory({ symbol: s.symbol, type: s.type, today: s.today, since: s.type === "material_event_refresh" ? base!.research_as_of : null });
   if ("error" in inv) throw new Error(inv.error);
