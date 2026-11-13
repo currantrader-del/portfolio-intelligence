@@ -106,9 +106,9 @@ export function Card({ children, className, tight, flush, as: As = "section", id
 /** A card heading row: title on the left, an optional pill, note or action on the right. */
 export function CardHead({ title, cap, id, right }: { title?: ReactNode; cap?: ReactNode; id?: string; right?: ReactNode }) {
   return (
-    <div className="flex items-center justify-between gap-3 min-w-0">
-      {cap ? <Cap as="h2" id={id}>{cap}</Cap> : <h2 id={id} className="h2 min-w-0">{title}</h2>}
-      {right && <div className="flex items-center gap-2 shrink-0 text-right">{right}</div>}
+    <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-1.5 min-w-0">
+      {cap ? <Cap as="h2" id={id}>{cap}</Cap> : <h2 id={id} className="h2 min-w-0 flex-[1_1_14rem]">{title}</h2>}
+      {right && <div className="flex flex-wrap items-center gap-2 text-right">{right}</div>}
     </div>
   );
 }
