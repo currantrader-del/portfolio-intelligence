@@ -42,7 +42,9 @@ describe("analyst reports folded into the research", () => {
   it("a different opinion alone, or a report older than the research, is not", async () => {
     const { analystEvidence } = await import("./report");
     expect(analystEvidence([{ ...base, bearing: { changesView: "no", why: "Only a longer horizon." } }], "2026-11-12")).toEqual([]);
-    expect(analystEvidence([{ ...base, bearing: null }], "2026-11-12")).toEqual([]);
+    expect(analystEvidence([{ ...base, bearing: null, comparison: { ...base.comparison, notInResearch: [] } }], "2026-11-12")).toEqual([]);
+    // Read before the bearing question existed, but it lists facts the research lacked: counts as "maybe".
+    expect(analystEvidence([{ ...base, bearing: null }], "2026-11-12")[0].label).toBe("Analyst report: Morningstar (it has 1 fact the research lacked, e.g. Gross margin guide 74%)");
     expect(analystEvidence([{ ...base, bearing: { changesView: "yes", why: "" }, at: "2026-11-01T00:00:00Z", reportDate: "2026-11-01" }], "2026-11-12")).toEqual([]);
   });
   it("research runs get the reports as labelled secondary input", async () => {

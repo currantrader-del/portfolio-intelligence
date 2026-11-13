@@ -131,6 +131,14 @@ export function analystContext(reports: AnalystReport[], since: string | null): 
 /** Reports read after the research date whose facts may change the conclusion: these make an update worthwhile. */
 export function analystEvidence(reports: AnalystReport[], researchAsOf: string): { label: string; filed: string; category: string }[] {
   return reports
-    .filter((r) => (r.reportDate ?? r.at.slice(0, 10)) >= researchAsOf && r.at.slice(0, 10) >= researchAsOf && (r.bearing?.changesView === "yes" || r.bearing?.changesView === "maybe"))
-    .map((r) => ({ label: `Analyst report: ${r.publisher ?? r.fileName}${r.bearing?.why ? ` (${r.bearing.why.slice(0, 160)})` : ""}`, filed: r.at.slice(0, 10), category: "analyst" }));
+    .map((r) => ({ r, b: bearingOf(r) }))
+    .filter(({ r, b }) => (r.reportDate ?? r.at.slice(0, 10)) >= researchAsOf && r.at.slice(0, 10) >= researchAsOf && b && b.changesView !== "no")
+    .map(({ r, b }) => ({ label: `Analyst report: ${r.publisher ?? r.fileName}${b!.why ? ` (${b!.why.slice(0, 160)})` : ""}`, filed: r.at.slice(0, 10), category: "analyst" }));
+}
+
+/** The report's bearing on the conclusion. Reports read before the bearing question existed count as "maybe" when they list facts the research lacked. */
+export function bearingOf(r: AnalystReport): { changesView: "yes" | "maybe" | "no"; why: string } | null {
+  if (r.bearing) return r.bearing;
+  const n = r.comparison.notInResearch;
+  return n.length ? { changesView: "maybe", why: `it has ${n.length} fact${n.length === 1 ? "" : "s"} the research lacked, e.g. ${n[0].replace(/\s*\(p\.[^)]*\)/g, "").slice(0, 120)}` } : null;
 }

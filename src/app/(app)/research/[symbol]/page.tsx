@@ -1,5 +1,5 @@
 import { loadAnalyst } from "@/lib/analyst/job";
-import type { AnalystReport } from "@/lib/analyst/report";
+import { bearingOf, type AnalystReport } from "@/lib/analyst/report";
 import { actionNow, type ActionNow } from "@/lib/decision/actionNow";
 import { reviewPosition } from "@/lib/decision/review";
 import { researchVerdict, type Verdict } from "@/lib/research/verdict";
@@ -398,10 +398,11 @@ function AnalystLine({ r, researchAsOf }: { r: AnalystReport; researchAsOf: stri
   const view = [r.rating, r.fairValue !== null ? `fair value $${r.fairValue}` : null, r.priceTarget !== null ? `target $${r.priceTarget}` : null].filter(Boolean).join(", ");
   // Read into the research already when the research is newer than the upload.
   const folded = !!researchAsOf && r.at.slice(0, 10) < researchAsOf;
-  const b = r.bearing?.changesView;
+  const bo = bearingOf(r);
+  const b = bo?.changesView;
   const verdict = folded ? "Already weighed in the research in use."
-    : b === "no" ? `Doesn't change the app's conclusion${r.bearing?.why ? `: ${r.bearing.why}` : "."}`
-    : b === "yes" || b === "maybe" ? `${b === "yes" ? "Has facts that should change" : "May change"} the conclusion${r.bearing?.why ? `: ${r.bearing.why}` : "."} The next research update reads it.`
+    : b === "no" ? `Doesn't change the app's conclusion${bo?.why ? `: ${bo.why}` : "."}`
+    : b === "yes" || b === "maybe" ? `${b === "yes" ? "Has facts that should change" : "May change"} the conclusion${bo?.why ? `: ${bo.why}` : "."} The next research update reads it.`
     : r.comparison.summary || "Compared with the research below.";
   return (
     <p className="t-sm"><span className="text-ink font-semibold">Analyst view: </span>{who}{view ? `: ${view}` : ""}. {verdict}</p>
