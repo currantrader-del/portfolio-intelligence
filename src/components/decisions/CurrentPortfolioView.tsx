@@ -31,11 +31,12 @@ export async function CurrentPortfolioView({ ws, confirmed }: { ws: Workspace; c
           <CardHead id="best-h" cap="Best action now" right={!d.allocations.length ? <Pill>No action needed</Pill> : wait ? <Pill tone="warn">Conditional · confirm first</Pill> : <DataLabel kind="recommendation">Ready to execute</DataLabel>} />
           <div className="flex flex-col gap-1.5">
             <span className="text-[20px] font-semibold tracking-tight leading-snug">{d.headline}</span>
-            <span className="t-sm">{d.why}</span>
+            <span className="t-sm max-lg:hidden">{d.why}</span>
             {d.allocations.length > 0 && (
               <span className="t-sm num text-ink">{d.allocations.map((x) => `${usd(x.amount)} ${x.symbol}`).join(" + ")} <span className="t-xs">· funded by: {d.funding.detail}</span></span>
             )}
-            <span className="t-xs">Based on your recorded holdings, approved research, today&apos;s prices, your limits and the cash you have. No new research or AI was used. Keeping cash is always a valid choice{d.allocations.length ? `; confidence ${r.recommendation.confidence}/10` : ""}.</span>
+            <details className="lg:hidden t-sm"><summary className="cursor-pointer text-ink-2">Why</summary><p className="mt-1">{d.why}</p></details>
+            <span className="t-xs max-lg:hidden">Based on your recorded holdings, approved research, today&apos;s prices, your limits and the cash you have. No new research or AI was used. Keeping cash is always a valid choice{d.allocations.length ? `; confidence ${r.recommendation.confidence}/10` : ""}.</span>
           </div>
         </Card>
 
@@ -44,16 +45,16 @@ export async function CurrentPortfolioView({ ws, confirmed }: { ws: Workspace; c
             <CardHead id="pj-h" title="Projected allocation" right={<span className="t-xs">before → after</span>} />
             <div className="overflow-x-auto -mx-1">
               <table className="w-full t-xs num">
-                <thead><tr className="text-muted"><th className="text-left font-normal px-1"></th><th className="text-right font-normal px-1">Of invested portfolio</th><th className="text-right font-normal px-1">Of all investable</th><th className="text-right font-normal px-1">Limit</th></tr></thead>
+                <thead><tr className="text-muted"><th className="text-left font-normal px-1"></th><th className="text-right font-normal px-1">Of invested</th><th className="text-right font-normal px-1 max-sm:hidden">Of all investable</th><th className="text-right font-normal px-1">Limit</th></tr></thead>
                 <tbody>
                   {d.projected.rows.map((x) => (
                     <tr key={x.symbol} className="border-t border-line"><td className="text-left px-1 py-1 text-ink">{usd(x.amount)} {x.symbol}{x.lookthrough ? "*" : ""}</td>
                       <td className="text-right px-1">{pctStr(x.before)} → <span className={x.limit !== null && x.afterInvested > x.limit + 0.0005 ? "warn" : "text-ink"}>{pctStr(x.afterInvested)}</span></td>
-                      <td className="text-right px-1">{pctStr(x.beforeInvestable)} → {pctStr(x.afterInvestable)}</td>
-                      <td className="text-right px-1">{x.limit !== null ? `${pctStr(x.limit, 0)} of invested` : "—"}</td></tr>
+                      <td className="text-right px-1 max-sm:hidden">{pctStr(x.beforeInvestable)} → {pctStr(x.afterInvestable)}</td>
+                      <td className="text-right px-1">{x.limit !== null ? pctStr(x.limit, 0) : "—"}</td></tr>
                   ))}
-                  <tr className="border-t border-line"><td className="text-left px-1 py-1">Invested portfolio</td><td className="text-right px-1">{usd(d.projected.invested.before)} → {usd(d.projected.invested.after)}</td><td className="text-right px-1">{usd(d.projected.investable.before)} (unchanged)</td><td /></tr>
-                  <tr className="border-t border-line"><td className="text-left px-1 py-1">Savings</td><td className="text-right px-1" colSpan={2}>{usd(d.projected.savingsAboveReserve.before)} → {usd(d.projected.savingsAboveReserve.after)}</td><td /></tr>
+                  <tr className="border-t border-line"><td className="text-left px-1 py-1">Invested portfolio</td><td className="text-right px-1">{usd(d.projected.invested.before)} → {usd(d.projected.invested.after)}</td><td className="text-right px-1 max-sm:hidden">{usd(d.projected.investable.before)} (unchanged)</td><td /></tr>
+                  <tr className="border-t border-line"><td className="text-left px-1 py-1">Savings</td><td className="text-right px-1">{usd(d.projected.savingsAboveReserve.before)} → {usd(d.projected.savingsAboveReserve.after)}</td><td className="max-sm:hidden" /><td /></tr>
                 </tbody>
               </table>
             </div>

@@ -32,3 +32,25 @@ describe("analyst reports", () => {
     expect(t).toMatch(/by 2029-12-31/);
   });
 });
+
+describe("analyst reports folded into the research", () => {
+  const base = { symbol: "NVDA", publisher: "Morningstar", analyst: null, reportDate: "2026-11-12", rating: "4 stars", priceTarget: null, fairValue: 250, valueBasis: "DCF", horizon: null, priceAtReport: null, uncertainty: null, moat: null, estimates: [], points: ["Wide moat"], risks: ["CEO exit"], comparison: { agree: [], differ: ["Value: $250 vs $162"], notInResearch: ["Gross margin guide 74%"], summary: "More bullish." }, fileName: "m.pdf", documentId: null, pages: null, costUsd: 0.22, model: "m", at: "2026-11-13T02:55:00Z" };
+  it("a report whose facts may change the view, read after the research, is evidence for an update", async () => {
+    const { analystEvidence } = await import("./report");
+    expect(analystEvidence([{ ...base, bearing: { changesView: "maybe", why: "New margin guide." } }], "2026-11-12")).toEqual([{ label: "Analyst report: Morningstar (New margin guide.)", filed: "2026-11-13", category: "analyst" }]);
+  });
+  it("a different opinion alone, or a report older than the research, is not", async () => {
+    const { analystEvidence } = await import("./report");
+    expect(analystEvidence([{ ...base, bearing: { changesView: "no", why: "Only a longer horizon." } }], "2026-11-12")).toEqual([]);
+    expect(analystEvidence([{ ...base, bearing: null, comparison: { ...base.comparison, notInResearch: [] } }], "2026-11-12")).toEqual([]);
+    // Read before the bearing question existed, but it lists facts the research lacked: counts as "maybe".
+    expect(analystEvidence([{ ...base, bearing: null }], "2026-11-12")[0].label).toBe("Analyst report: Morningstar (it has 1 fact the research lacked, e.g. Gross margin guide 74%)");
+    expect(analystEvidence([{ ...base, bearing: { changesView: "yes", why: "" }, at: "2026-11-01T00:00:00Z", reportDate: "2026-11-01" }], "2026-11-12")).toEqual([]);
+  });
+  it("research runs get the reports as labelled secondary input", async () => {
+    const { analystContext } = await import("./report");
+    const t = analystContext([{ ...base, bearing: null }], null);
+    expect(t).toMatch(/^Morningstar \(2026-11-12\): 4 stars; fair value \$250; DCF/);
+    expect(t).toMatch(/Facts in the report the earlier research lacked: Gross margin guide 74%/);
+  });
+});

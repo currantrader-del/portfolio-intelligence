@@ -1,3 +1,4 @@
+import { loadAnalyst } from "@/lib/analyst/job";
 /**
  * Research investigations (src/lib/research/investigate): a full initial investigation or a
  * material-event refresh, run as a chain of background steps.
@@ -55,7 +56,8 @@ export async function POST(req: Request) {
   if (type === "material_event_refresh") {
     if (!updateFoundation(versions)) return Response.json({ error: "There is no finished investigation to update yet (a quick screen is not enough). Run a full investigation first." }, { status: 400 });
     // Checked here, not only in the browser: an update starts only when something new has been filed.
-    const { plan, filingsChecked } = await updatePlanFor(symbol, versions, null);
+    const an = await loadAnalyst(db, symbol).catch(() => ({ reports: [] }));
+    const { plan, filingsChecked } = await updatePlanFor(symbol, versions, null, undefined, new Date(), an.reports);
     const allowed = updateAllowed(plan, filingsChecked);
     if (!allowed.ok) return Response.json({ error: allowed.message, nothingNew: true }, { status: 409 });
   } else if (body?.confirmFull !== true) {

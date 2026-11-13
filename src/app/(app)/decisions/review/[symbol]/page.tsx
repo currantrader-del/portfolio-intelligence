@@ -19,6 +19,30 @@ export default async function ReviewPage({ params }: { params: Promise<{ symbol:
   const alerts = ws.alerts.filter((a) => a.symbol === sym);
   const spy = ws.benchmarks.find((b) => b.symbol === "SPY")?.dayPct ?? null;
 
+  const whatToDo = (
+    <section className="bg-chrome text-chrome-ink rounded-2xl p-5 sm:p-6 flex flex-col gap-3">
+      <h2 className="text-xs font-semibold tracking-wider text-chrome-muted">WHAT TO DO AT THIS PRICE</h2>
+      <div className="h1">{rv.now.verb}</div>
+      <p className="text-[15px] text-[#d9dbde]">{rv.now.headline}</p>
+      {rv.now.priceAnswer && <p className="text-sm text-[#d9dbde]">{rv.now.priceAnswer}</p>}
+      {rv.now.downside && (
+        <div className="text-sm text-[#d9dbde]"><span className="text-xs font-semibold tracking-wider text-chrome-muted block">WHY IT COULD GO LOWER</span>
+          <p>{rv.now.downside}</p>
+          {rv.now.risks.length > 0 && <ul className="list-disc pl-4 flex flex-col gap-0.5">{rv.now.risks.map((x, i) => <li key={i}>{x}</li>)}</ul>}</div>
+      )}
+      {rv.now.zones.length > 0 && (
+        <ul className="text-sm flex flex-col gap-1">
+          {rv.now.zones.map((z) => <li key={z.label} className={z.current ? "text-chrome-ink font-semibold" : "text-chrome-muted"}>{z.current ? "▸ " : ""}{z.label}: {z.action}</li>)}
+        </ul>
+      )}
+      {rv.now.watch.length > 0 && (
+        <div className="text-sm text-[#d9dbde]"><span className="text-xs font-semibold tracking-wider text-chrome-muted block">WHAT WOULD CHANGE THIS</span>
+          <ul className="list-disc pl-4 flex flex-col gap-0.5">{rv.now.watch.map((w, i) => <li key={i}>{w}</li>)}</ul></div>
+      )}
+      <details className="text-xs text-chrome-muted"><summary className="cursor-pointer">How the size was worked out</summary><p className="mt-1">{rv.suggestion.reason}</p></details>
+      <div className="text-xs text-chrome-muted">Model output from your research and limits. For a written second opinion, use Deep review.</div>
+    </section>
+  );
   return (
     <div className="flex flex-col gap-6">
       <div className="flex flex-wrap items-end justify-between gap-4">
@@ -35,6 +59,7 @@ export default async function ReviewPage({ params }: { params: Promise<{ symbol:
 
       <div className="flex flex-wrap gap-6 items-start">
         <div className="flex-[999_1_560px] min-w-0 flex flex-col gap-6">
+          <div className="lg:hidden">{whatToDo}</div>
           <section aria-labelledby="what-h" className="bg-surface border border-line rounded-2xl p-6">
             <h2 id="what-h" className="font-semibold mb-2">What happened</h2>
             <ul className="list-disc pl-5 flex flex-col gap-1.5 text-[15px]">
@@ -56,10 +81,10 @@ export default async function ReviewPage({ params }: { params: Promise<{ symbol:
 
           {rv.repriceNote && <p className="rounded-lg border border-warn-ink/30 bg-warn-bg text-warn-ink px-3 py-2 text-sm">{rv.repriceNote}</p>}
           {rv.scenarios.length > 0 && (
-            <section aria-labelledby="val-h" className="bg-surface border border-line rounded-2xl p-6 overflow-x-auto">
+            <section aria-labelledby="val-h" className="bg-surface border border-line rounded-2xl p-4 sm:p-6 overflow-x-auto">
               <h2 id="val-h" className="font-semibold mb-3">Valuation at today&apos;s price</h2>
-              <table className="w-full min-w-[460px] text-sm">
-                <thead><tr className="text-left text-muted"><th className="py-1.5 font-medium">Scenario</th><th className="py-1.5 font-medium">Probability</th><th className="py-1.5 font-medium">Value</th><th className="py-1.5 font-medium">Annual return from {usd(rv.price, 2)}</th></tr></thead>
+              <table className="w-full text-sm">
+                <thead><tr className="text-left text-muted"><th className="py-1.5 font-medium">Scenario</th><th className="py-1.5 font-medium">Chance</th><th className="py-1.5 font-medium">Value</th><th className="py-1.5 font-medium">Per year<span className="max-sm:hidden"> from {usd(rv.price, 2)}</span></th></tr></thead>
                 <tbody className="font-mono">
                   {rv.scenarios.map((s) => <tr key={s.name} className="border-t border-line"><td className="py-2 font-sans capitalize">{s.name}</td><td className="py-2">{pctStr(s.probability, 0)}</td><td className="py-2">{usd(s.value, 2)}</td><td className="py-2">{pctStr(s.annualized)}</td></tr>)}
                   <tr className="border-t border-line-strong font-medium"><td className="py-2 font-sans">Weighted</td><td /><td /><td className="py-2">{pctStr(rv.expectedReturn)}</td></tr>
@@ -72,28 +97,7 @@ export default async function ReviewPage({ params }: { params: Promise<{ symbol:
         </div>
 
         <aside className="flex-[1_1_340px] min-w-0 flex flex-col gap-6">
-          <section className="bg-chrome text-chrome-ink rounded-2xl p-6 flex flex-col gap-3">
-            <h2 className="text-xs font-semibold tracking-wider text-chrome-muted">WHAT TO DO AT THIS PRICE</h2>
-            <div className="h1">{rv.now.verb}</div>
-            <p className="text-[15px] text-[#d9dbde]">{rv.now.headline}</p>
-            {rv.now.priceAnswer && <p className="text-sm text-[#d9dbde]">{rv.now.priceAnswer}</p>}
-            {rv.now.downside && (
-              <div className="text-sm text-[#d9dbde]"><span className="text-xs font-semibold tracking-wider text-chrome-muted block">WHY IT COULD GO LOWER</span>
-                <p>{rv.now.downside}</p>
-                {rv.now.risks.length > 0 && <ul className="list-disc pl-4 flex flex-col gap-0.5">{rv.now.risks.map((x, i) => <li key={i}>{x}</li>)}</ul>}</div>
-            )}
-            {rv.now.zones.length > 0 && (
-              <ul className="text-sm flex flex-col gap-1">
-                {rv.now.zones.map((z) => <li key={z.label} className={z.current ? "text-chrome-ink font-semibold" : "text-chrome-muted"}>{z.current ? "▸ " : ""}{z.label}: {z.action}</li>)}
-              </ul>
-            )}
-            {rv.now.watch.length > 0 && (
-              <div className="text-sm text-[#d9dbde]"><span className="text-xs font-semibold tracking-wider text-chrome-muted block">WHAT WOULD CHANGE THIS</span>
-                <ul className="list-disc pl-4 flex flex-col gap-0.5">{rv.now.watch.map((w, i) => <li key={i}>{w}</li>)}</ul></div>
-            )}
-            <p className="text-xs text-chrome-muted">Sizing: {rv.suggestion.reason}</p>
-            <div className="text-xs text-chrome-muted">Model output from your research and limits. For a written second opinion, use Deep review.</div>
-          </section>
+          <div className="max-lg:hidden">{whatToDo}</div>
 
           <section aria-labelledby="lv-h" className="bg-surface border border-line rounded-2xl p-5 flex flex-col gap-2">
             <h2 id="lv-h" className="font-semibold">Exposure and limits</h2>

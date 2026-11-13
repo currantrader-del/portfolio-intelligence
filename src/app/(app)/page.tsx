@@ -230,7 +230,7 @@ async function BestAction() {
         <span className="flex flex-col min-w-0">
           <span className="cap">Best action now</span>
           <span className="font-semibold text-ink">{d.headline}</span>
-          <span className="t-xs">From your holdings, research in use, cash and standing transfer limit. No AI. Open Decisions for the alternatives and what to confirm.</span>
+          <span className="t-xs max-lg:hidden">From your holdings, research in use, cash and standing transfer limit. No AI. Open Decisions for the alternatives and what to confirm.</span>
         </span>
         <Chevron />
       </Link>
