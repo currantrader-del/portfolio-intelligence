@@ -10,6 +10,9 @@ export type ZoneView = { low: number; high: number | null; label: string; action
  */
 export function zoneKind(action: string): "add" | "hold" | "trim" {
   const a = action.toLowerCase();
+  // The band's own first instruction decides: "Hold, no add. ... after the print, trim to 12% unless ..." is a hold band.
+  if (/^\s*(hold|no add|no new|wait|watch|avoid|do not|don't|no trade|re-review)\b/.test(a)) return "hold";
+  if (/^\s*(trim|sell|reduce|exit)\b/.test(a)) return "trim";
   if (/\b(trim\w*|sell|reduc\w*|take profits?)\b/.test(a) && !/\b(no|not|don't|never)\s+(trim|sell|reduce)/.test(a)) return "trim";
   if (/^\s*(watch|hold|avoid|no add|no new|do not|don't)\b/.test(a) || /\b(no add|no new money|no position|avoid chasing)\b/.test(a)) return "hold";
   if (/\b(add|buy|accumulate|starter|start a position|initiate)\b/.test(a)) return "add";
