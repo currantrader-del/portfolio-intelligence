@@ -41,6 +41,17 @@ describe("one plain action at today's price, with its levels", () => {
     expect(actionNow({ symbol: "X", price: 45, research: { pc: buy, asOf: "2026-11-01", openQuestions: 2 }, unreadFiling: null, trim: null, held: true }).verb).toBe("Hold");
   });
 
+  it("a hold zone that mentions a later, conditional trim is still hold", () => {
+    const pc2 = parseConclusion({ price_framework: [
+      { price_zone: "< $137", action: "Re-review only." },
+      { price_zone: "$137–$190", action: "Hold, no add. After the print, trim to about 12% unless the Nov 17 tests all pass." },
+      { price_zone: "> $190", action: "Trim toward 12% look-through even if the tests pass." },
+    ] });
+    const a = actionNow({ symbol: "NVDA", price: 162.85, research: { pc: pc2, asOf: "2026-11-12", openQuestions: 2 }, unreadFiling: null, trim: null, held: true });
+    expect(a.verb).toBe("Hold");
+    expect(actionNow({ symbol: "NVDA", price: 195, research: { pc: pc2, asOf: "2026-11-12", openQuestions: 2 }, unreadFiling: null, trim: null, held: true }).verb).toBe("Trim");
+  });
+
   it("above the research weight level: trim with the size", () => {
     const a = actionNow({ symbol: "NVDA", price: 175, research, unreadFiling: null, trim: { dollars: 96, toPct: 15, why: "above 15%." }, held: true });
     expect(a.verb).toBe("Trim");

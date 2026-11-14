@@ -210,6 +210,12 @@ export function researchStance(pc: ParsedConclusion, price: number | null): Rese
 
 /** The research's own recommended action, simplified so a change of zone can be detected. */
 export function zoneKind(action: string): "buy" | "hold" | "trim" {
+  // The zone's own instruction comes first: "Hold, no add. ... After the print, trim to 12% unless ..." is a hold zone,
+  // with a later, conditional trim (2026-11-14: NVDA $137-$190 showed "Trim" while the research said hold).
+  const lead = action.trim().slice(0, 40);
+  if (/^(hold|no add|wait|watch|do nothing|no trade)\b/i.test(lead)) return "hold";
+  if (/^(trim|sell|exit|reduce)\b/i.test(lead)) return "trim";
+  if (/^(buy|add|accumulate|starter)\b/i.test(lead)) return "buy";
   if (/trim|sell|exit|reduce|re-underwrite/i.test(action)) return "trim";
   if (/hold|no add|watch|wait/i.test(action)) return "hold";
   if (/buy|add|accumulate|starter/i.test(action)) return "buy";
