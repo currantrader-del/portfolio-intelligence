@@ -60,7 +60,7 @@ function ReviewItem({ item: i, back }: { item: EventItem; back: string }) {
             <input type="hidden" name="back" value={back} />
             <SubmitButton className="btn btn-sm" pendingText="Saving…">Reviewed, no change</SubmitButton>
           </form>
-          <Link href={`/research/${i.symbol}#inv-h`} className="btn btn-sm">Update research with it</Link>
+          <Link href={`/research/${i.symbol}?tab=research#inv-h`} className="btn btn-sm">Update research with it</Link>
         </div>
         <p className="t-xs">&ldquo;Reviewed&rdquo; is free and just clears this item. &ldquo;Update research&rdquo; opens {i.symbol}&apos;s research, which shows what an update would read and its cost before anything runs; nothing replaces your research until you approve it. For a quick question, use Ask.</p>
       </div>

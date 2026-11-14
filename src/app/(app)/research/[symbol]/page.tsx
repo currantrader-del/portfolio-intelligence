@@ -36,7 +36,7 @@ import { researchStanding, qualityOf, QUALITY_LABEL, approvalOf, statusFields, d
 import { refreshState } from "@/lib/policy/evidence";
 import { getFilings } from "@/lib/market/sec";
 import { pctStr, shortDate, toneOf, usd } from "@/lib/format";
-import { Card, CardHead, Chevron, DataLabel, Disclose, LinkRow, Pill, SourceRef } from "@/components/ui";
+import { Card, CardHead, Chevron, DataLabel, Disclose, LinkRow, Pill, Seg, SourceRef } from "@/components/ui";
 
 type Phase = { phase_number: number; title: string | null; extraction: string; body_markdown: string | null; details?: Record<string, unknown> | null };
 type Version = {
@@ -55,7 +55,7 @@ const ERRORS: Record<string, string> = {
 };
 const SAVED: Record<string, string> = { full: "Approved in full: the research in use is no longer provisional. The open items you accepted stay listed on the record.", adopted: "Approved: the investigation is now your research in use. The earlier research stays on file.", provisional: "Approved provisionally: the investigation is in use with its open items listed, and no new money is suggested until they are resolved. The earlier research stays on file.", set_aside: "Kept your current research. The investigation stays on file, marked as set aside.", stage: "Stage saved.", screen: "Screen updated.", filing: "SEC filing checked and the result stored." };
 
-export default async function CompanyPage({ params, searchParams }: { params: Promise<{ symbol: string }>; searchParams: Promise<{ error?: string; saved?: string; targets?: string }> }) {
+export default async function CompanyPage({ params, searchParams }: { params: Promise<{ symbol: string }>; searchParams: Promise<{ error?: string; saved?: string; targets?: string; tab?: string }> }) {
   const { symbol: raw } = await params;
   const sp = await searchParams;
   const symbol = decodeURIComponent(raw).toUpperCase().replace(/[^A-Z0-9.\-]/g, "").slice(0, 10);
@@ -156,106 +156,130 @@ export default async function CompanyPage({ params, searchParams }: { params: Pr
       )}
       {sp.saved && SAVED[sp.saved] && <p role="status" className="t-sm rounded-[12px] bg-surface-2 px-3 py-2">{SAVED[sp.saved]}</p>}
 
-      {/* Investment view: the decision first. */}
-      <div className="grid grid-cols-1 gap-3 lg:gap-4 lg:grid-cols-12 items-start">
-        <div className="lg:col-span-7 flex flex-col gap-3 lg:gap-4 min-w-0">
-          <ResearchStatus s={standing} f={fields} verdict={verdict} now={plainAction} price={price} analyst={analyst.reports.slice(0, 3)} researchAt={(standing.inUse?.v as { created_at?: string | null } | undefined)?.created_at ?? standing.inUse?.v.research_as_of ?? null} />
-          <Card flush>
-            <Disclose summary={<span className="t-sm">The numbers behind it · valuation, your exposure, thesis</span>}>
-              <InvestmentSummary ws={ws} symbol={company.symbol} brief={brief} />
-            </Disclose>
-          </Card>
-          {pendingInv && <InvestigationConclusion symbol={company.symbol} v={pendingInv as unknown as InvVersion} inUse={inUseLabel} usedId={usedId} validation={(valRow?.outputs as ValidationReport | undefined) ?? null} />}
-        </div>
+      {/* Three tabs on one page (2026-11-14, Brendan: "still difficult to navigate"): the action, the research behind it, and outside reports and news. */}
+      {(() => {
+        const tab: "now" | "research" | "reports" = sp.tab === "research" || sp.tab === "reports" ? sp.tab : sp.error ? "research" : "now";
+        const base = `/research/${encodeURIComponent(company.symbol)}`;
+        const nReports = analyst.reports.length;
+        return (
+          <>
+            <div className="lg:max-w-md">
+              <Seg label="Company view" current={tab} items={[
+                { key: "now", label: "What to do", href: base },
+                { key: "research", label: "Research", href: `${base}?tab=research` },
+                { key: "reports", label: <>Reports{nReports ? <span className="num opacity-70 ml-1">{nReports}</span> : null}</>, href: `${base}?tab=reports` },
+              ]} />
+            </div>
 
-        <div className="lg:col-span-5 flex flex-col gap-3 lg:gap-4 min-w-0">
-          {!etf && <InvestigationRunner symbol={company.symbol} hasResearch={versions.some((v) => v.is_current || isInv(v))} hasInvestigation={investigations.some((v) => v.is_current)} plan={updatePlan} />}
-          {!etf && <Suspense fallback={<FeedSkeleton title="Analyst reports" />}><AnalystCard symbol={company.symbol} price={price} /></Suspense>}
-          {!etf && <Suspense fallback={<FeedSkeleton title="Recovery odds" />}><RecoveryCard symbol={company.symbol} price={price} priceAsOf={q?.asOf ?? null} targetsRaw={sp.targets?.slice(0, 80)} /></Suspense>}
-          {!etf && <ResearchButton symbol={company.symbol} hasResearch={versions.length > 0} needsResearch={!latestInv && coverage(record, price, ws.now, AGE_REMINDER_DAYS).key !== "current"} />}
-          {!etf && <ShareResearchCard symbol={company.symbol} latest={share.latest} approved={share.approved} />}
-          <Card labelledBy="tv-h" className="!gap-1.5">
-            <CardHead id="tv-h" cap="Trading view · separate" />
-            <p className="t-xs">Short-term trade ideas are tracked on their own page as paper trades. They never change the investment view, research or limits on this page.</p>
-            <LinkRow href="/trades">Trade ideas</LinkRow>
-          </Card>
-        </div>
-      </div>
-
-      {/* Supporting research: everything behind the summary, collapsed. */}
-      <h2 className="cap mt-2 lg:mt-3">Supporting research</h2>
-      <div className="grid grid-cols-1 gap-3 lg:gap-4 lg:grid-cols-12 items-start">
-        <div className="lg:col-span-7 flex flex-col gap-3 lg:gap-4 min-w-0">
-          {latestInv && (
-            <Card labelledBy="ev-h" className="!gap-2">
-              <CardHead id="ev-h" title={`${latestInv.conclusion?.research_type === "material_event_refresh" ? "Material-event refresh" : "Full investigation"} · ${shortDate(latestInv.research_as_of)}`} right={<InvestigationPills v={latestInv as unknown as InvVersion} usedId={usedId} />} />
-              <div className="flex flex-col rounded-[12px] border border-line px-3">
-                {!pendingInv && (
-                  <Disclose summary={<span className="t-sm">Full conclusion · reasons, valuation, portfolio fit, reviewer corrections</span>}>
-                    <InvestigationConclusion bare symbol={company.symbol} v={latestInv as unknown as InvVersion} inUse={inUseLabel} usedId={usedId} validation={(valRow?.outputs as ValidationReport | undefined) ?? null} />
-                  </Disclose>
-                )}
-                <InvestigationEvidence v={latestInv as unknown as InvVersion} sources={latestInv.research_sources ?? []} />
+            {tab === "now" && (
+              <div className="grid grid-cols-1 gap-3 lg:gap-4 lg:grid-cols-12 items-start">
+                <div className="lg:col-span-7 flex flex-col gap-3 lg:gap-4 min-w-0">
+                  <ResearchStatus s={standing} f={fields} verdict={verdict} now={plainAction} price={price} analyst={analyst.reports.slice(0, 3)} researchAt={(standing.inUse?.v as { created_at?: string | null } | undefined)?.created_at ?? standing.inUse?.v.research_as_of ?? null} updateHref={`${base}?tab=research#inv-h`} />
+                  {pendingInv && <InvestigationConclusion symbol={company.symbol} v={pendingInv as unknown as InvVersion} inUse={inUseLabel} usedId={usedId} validation={(valRow?.outputs as ValidationReport | undefined) ?? null} />}
+                </div>
+                <div className="lg:col-span-5 flex flex-col gap-3 lg:gap-4 min-w-0">
+                  <Card flush>
+                    <Disclose summary={<span className="t-sm">The numbers behind it · valuation, your exposure, thesis</span>}>
+                      <InvestmentSummary ws={ws} symbol={company.symbol} brief={brief} />
+                    </Disclose>
+                  </Card>
+                  <Card labelledBy="tv-h" className="!gap-1.5">
+                    <CardHead id="tv-h" cap="Trading view · separate" />
+                    <p className="t-xs">Short-term trade ideas are tracked on their own page as paper trades. They never change the investment view, research or limits on this page.</p>
+                    <LinkRow href="/trades">Trade ideas</LinkRow>
+                  </Card>
+                  <AskButton question={`What has to be true for ${company.symbol} to reach the base case, and what would break the thesis?`} className="btn">Ask about the thesis</AskButton>
+                </div>
               </div>
-            </Card>
-          )}
-          {versions.length > 0 && (
-            <Card flush>
-              <Disclose summary={`Research history · ${versions.length} record${versions.length > 1 ? "s" : ""}${phases ? `, ${phases} phases` : ""}`}>
-                {versions.map((v) => {
-                  const c = v.conclusion as Record<string, string | number | null>;
-                  return (
-                    <div key={v.id} className="flex flex-col gap-2 pb-3 border-b border-line last:border-b-0 last:pb-0">
-                      <div className="flex flex-wrap items-center gap-1.5">
-                        <span className="text-ink font-semibold mr-1">{shortDate(v.research_as_of)}</span>
-                        {v.id === usedId && <Pill small tone={approvalOf(v) === "automatic" ? "warn" : "gain"} dot="solid">{approvalOf(v) === "automatic" ? "In use, preliminary" : "In use for decisions"}</Pill>}
-                        <Pill small tone={qualityOf(v) === "complete_investigation" || qualityOf(v) === "imported" ? "neutral" : "warn"}>{v.completeness === "in_progress" ? "In progress" : QUALITY_LABEL[qualityOf(v)]}</Pill>
-                        <Pill small>{v.conclusion?.research_type === "preliminary_screen" ? "Preliminary screen" : v.conclusion?.research_type === "full_investigation" ? "Full investigation" : v.conclusion?.research_type === "material_event_refresh" ? "Material-event refresh" : ORIGIN_LABEL[v.origin] ?? v.origin}</Pill>
-                        {v.conclusion?.review_state === "set_aside" && <Pill small>Set aside</Pill>}
-                        {v.id !== usedId && v !== standing.pending?.v && <Pill small>History</Pill>}
-                      </div>
-                      <div className="grid grid-cols-2 gap-x-4 gap-y-1 t-sm">
-                        {(["action", "confidence", "classification", "reference_price"] as const).map((k) => (
-                          <div key={k} className="min-w-0"><span className="t-xs block capitalize">{k.replace("_", " ")}</span><span className="text-ink">{c[k] ?? "—"}</span></div>
-                        ))}
-                      </div>
-                      {v.change_summary && (() => { const d = displaySummary(v.change_summary, v.id === usedId); return <>{d.text && <p className="t-sm">{d.text}</p>}{d.note && <p className="t-xs">{d.note}</p>}</>; })()}
-                      {v.source_documents && <SourceRef kind="Source">{v.source_documents.file_name} · {v.source_documents.sha256.slice(0, 10)}…</SourceRef>}
-                      {v.research_phases?.length > 0 && (
-                        <div className="flex flex-col rounded-[12px] border border-line px-3">
-                          {[...v.research_phases].sort((a, b) => a.phase_number - b.phase_number).map((p) => (
-                            <Disclose key={p.phase_number} summary={<span className="t-sm">Phase {p.phase_number}{p.title ? ` · ${p.title}` : ""} <span className={`t-xs ${p.extraction === "verbatim" ? "" : "warn"}`}>· {EXTRACTION_LABEL[p.extraction] ?? p.extraction}</span></span>}>
-                              <pre className="whitespace-pre-wrap font-sans t-sm max-h-[420px] overflow-auto">{p.body_markdown ?? "No text preserved."}</pre>
-                            </Disclose>
-                          ))}
-                        </div>
-                      )}
-                    </div>
-                  );
-                })}
-              </Disclose>
-            </Card>
-          )}
-          {!etf && <Suspense fallback={<FeedSkeleton title="Reported financials" />}><FundamentalsCard symbol={company.symbol} /></Suspense>}
-        </div>
+            )}
 
-        <div className="lg:col-span-5 flex flex-col gap-3 lg:gap-4 min-w-0">
-          {record && !etf && (
-            <ResearchSummary r={record} held={held} price={price} now={ws.now} freshDays={AGE_REMINDER_DAYS} error={sp.error ? ERRORS[sp.error] : undefined} />
-          )}
-          {!etf && versions.length > 0 && (
-            <Card flush>
-              <Disclose summary={<span className="t-sm">SEC filing check <span className="t-xs">· optional, AI research covers it</span></span>}>
-                <FilingCheckCard symbol={company.symbol} run={(lastCheck as StoredFilingCheck | null) ?? null} />
-              </Disclose>
-            </Card>
-          )}
-          {feeds(company.name)}
-          <div className="flex gap-2">
-            <AskButton question={`What has to be true for ${company.symbol} to reach the base case, and what would break the thesis?`} className="btn flex-1">Ask about the thesis</AskButton>
-          </div>
-        </div>
-      </div>
+            {tab === "research" && (
+              <div className="grid grid-cols-1 gap-3 lg:gap-4 lg:grid-cols-12 items-start">
+                <div className="lg:col-span-7 flex flex-col gap-3 lg:gap-4 min-w-0">
+                  {!etf && <InvestigationRunner symbol={company.symbol} hasResearch={versions.some((v) => v.is_current || isInv(v))} hasInvestigation={investigations.some((v) => v.is_current)} plan={updatePlan} />}
+                {latestInv && (
+                  <Card labelledBy="ev-h" className="!gap-2">
+                    <CardHead id="ev-h" title={`${latestInv.conclusion?.research_type === "material_event_refresh" ? "Material-event refresh" : "Full investigation"} · ${shortDate(latestInv.research_as_of)}`} right={<InvestigationPills v={latestInv as unknown as InvVersion} usedId={usedId} />} />
+                    <div className="flex flex-col rounded-[12px] border border-line px-3">
+                      {!pendingInv && (
+                        <Disclose summary={<span className="t-sm">Full conclusion · reasons, valuation, portfolio fit, reviewer corrections</span>}>
+                          <InvestigationConclusion bare symbol={company.symbol} v={latestInv as unknown as InvVersion} inUse={inUseLabel} usedId={usedId} validation={(valRow?.outputs as ValidationReport | undefined) ?? null} />
+                        </Disclose>
+                      )}
+                      <InvestigationEvidence v={latestInv as unknown as InvVersion} sources={latestInv.research_sources ?? []} />
+                    </div>
+                  </Card>
+                )}
+                {versions.length > 0 && (
+                  <Card flush>
+                    <Disclose summary={`Research history · ${versions.length} record${versions.length > 1 ? "s" : ""}${phases ? `, ${phases} phases` : ""}`}>
+                      {versions.map((v) => {
+                        const c = v.conclusion as Record<string, string | number | null>;
+                        return (
+                          <div key={v.id} className="flex flex-col gap-2 pb-3 border-b border-line last:border-b-0 last:pb-0">
+                            <div className="flex flex-wrap items-center gap-1.5">
+                              <span className="text-ink font-semibold mr-1">{shortDate(v.research_as_of)}</span>
+                              {v.id === usedId && <Pill small tone={approvalOf(v) === "automatic" ? "warn" : "gain"} dot="solid">{approvalOf(v) === "automatic" ? "In use, preliminary" : "In use for decisions"}</Pill>}
+                              <Pill small tone={qualityOf(v) === "complete_investigation" || qualityOf(v) === "imported" ? "neutral" : "warn"}>{v.completeness === "in_progress" ? "In progress" : QUALITY_LABEL[qualityOf(v)]}</Pill>
+                              <Pill small>{v.conclusion?.research_type === "preliminary_screen" ? "Preliminary screen" : v.conclusion?.research_type === "full_investigation" ? "Full investigation" : v.conclusion?.research_type === "material_event_refresh" ? "Material-event refresh" : ORIGIN_LABEL[v.origin] ?? v.origin}</Pill>
+                              {v.conclusion?.review_state === "set_aside" && <Pill small>Set aside</Pill>}
+                              {v.id !== usedId && v !== standing.pending?.v && <Pill small>History</Pill>}
+                            </div>
+                            <div className="grid grid-cols-2 gap-x-4 gap-y-1 t-sm">
+                              {(["action", "confidence", "classification", "reference_price"] as const).map((k) => (
+                                <div key={k} className="min-w-0"><span className="t-xs block capitalize">{k.replace("_", " ")}</span><span className="text-ink">{c[k] ?? "—"}</span></div>
+                              ))}
+                            </div>
+                            {v.change_summary && (() => { const d = displaySummary(v.change_summary, v.id === usedId); return <>{d.text && <p className="t-sm">{d.text}</p>}{d.note && <p className="t-xs">{d.note}</p>}</>; })()}
+                            {v.source_documents && <SourceRef kind="Source">{v.source_documents.file_name} · {v.source_documents.sha256.slice(0, 10)}…</SourceRef>}
+                            {v.research_phases?.length > 0 && (
+                              <div className="flex flex-col rounded-[12px] border border-line px-3">
+                                {[...v.research_phases].sort((a, b) => a.phase_number - b.phase_number).map((p) => (
+                                  <Disclose key={p.phase_number} summary={<span className="t-sm">Phase {p.phase_number}{p.title ? ` · ${p.title}` : ""} <span className={`t-xs ${p.extraction === "verbatim" ? "" : "warn"}`}>· {EXTRACTION_LABEL[p.extraction] ?? p.extraction}</span></span>}>
+                                    <pre className="whitespace-pre-wrap font-sans t-sm max-h-[420px] overflow-auto">{p.body_markdown ?? "No text preserved."}</pre>
+                                  </Disclose>
+                                ))}
+                              </div>
+                            )}
+                          </div>
+                        );
+                      })}
+                    </Disclose>
+                  </Card>
+                )}
+                </div>
+                <div className="lg:col-span-5 flex flex-col gap-3 lg:gap-4 min-w-0">
+                  {record && !etf && (
+                    <ResearchSummary r={record} held={held} price={price} now={ws.now} freshDays={AGE_REMINDER_DAYS} error={sp.error ? ERRORS[sp.error] : undefined} />
+                  )}
+                  {!etf && <ResearchButton symbol={company.symbol} hasResearch={versions.length > 0} needsResearch={!latestInv && coverage(record, price, ws.now, AGE_REMINDER_DAYS).key !== "current"} />}
+                  {!etf && <ShareResearchCard symbol={company.symbol} latest={share.latest} approved={share.approved} />}
+                  {!etf && <Suspense fallback={<FeedSkeleton title="Recovery odds" />}><RecoveryCard symbol={company.symbol} price={price} priceAsOf={q?.asOf ?? null} targetsRaw={sp.targets?.slice(0, 80)} /></Suspense>}
+                  {!etf && versions.length > 0 && (
+                    <Card flush>
+                      <Disclose summary={<span className="t-sm">SEC filing check <span className="t-xs">· optional, AI research covers it</span></span>}>
+                        <FilingCheckCard symbol={company.symbol} run={(lastCheck as StoredFilingCheck | null) ?? null} />
+                      </Disclose>
+                    </Card>
+                  )}
+                </div>
+              </div>
+            )}
+
+            {tab === "reports" && (
+              <div className="grid grid-cols-1 gap-3 lg:gap-4 lg:grid-cols-12 items-start">
+                <div className="lg:col-span-7 flex flex-col gap-3 lg:gap-4 min-w-0">
+                  {!etf && <Suspense fallback={<FeedSkeleton title="Analyst reports" />}><AnalystCard symbol={company.symbol} price={price} /></Suspense>}
+                  {!etf && <Suspense fallback={<FeedSkeleton title="Reported financials" />}><FundamentalsCard symbol={company.symbol} /></Suspense>}
+                </div>
+                <div className="lg:col-span-5 flex flex-col gap-3 lg:gap-4 min-w-0">
+                  {feeds(company.name)}
+                </div>
+              </div>
+            )}
+          </>
+        );
+      })()}
     </div>
   );
 }
@@ -301,7 +325,7 @@ function briefOf(s: Standing, parsedThesis: string | null): Brief | null {
 }
 
 /** Which research decisions use, what is waiting for you, what is history, and what is still open. */
-function ResearchStatus({ s, f, verdict, now, price, analyst, researchAt }: { s: Standing; f: StatusFields | null; verdict: Verdict | null; now: ActionNow | null; price: number | null; analyst: AnalystReport[]; researchAt: string | null }) {
+function ResearchStatus({ s, f, verdict, now, price, analyst, researchAt, updateHref }: { s: Standing; f: StatusFields | null; verdict: Verdict | null; now: ActionNow | null; price: number | null; analyst: AnalystReport[]; researchAt: string | null; updateHref: string }) {
   if (!s.inUse && !s.pending && !now) return null;
   const nx = verdict?.next;
   const row = (label: string, ok: boolean, text: string) => (
@@ -342,7 +366,7 @@ function ResearchStatus({ s, f, verdict, now, price, analyst, researchAt }: { s:
       {analyst.length > 0 && <div className="flex flex-col gap-1">{analyst.map((r) => <AnalystLine key={r.at} r={r} researchAt={researchAt} />)}</div>}
       {nx && (nx.kind === "update" || nx.kind === "full") && (
         <p className="t-sm rounded-[12px] px-3 py-2 bg-warn-bg text-warn-ink">
-          <span className="font-semibold">Next step: </span>{nx.text} About {nx.cost}. <a href="#inv-h">{nx.kind === "update" ? "Reassess now" : "Full investigation"}</a>
+          <span className="font-semibold">Next step: </span>{nx.text} About {nx.cost}. <Link href={updateHref}>{nx.kind === "update" ? "Reassess now" : "Full investigation"}</Link>
         </p>
       )}
       {verdict && (
