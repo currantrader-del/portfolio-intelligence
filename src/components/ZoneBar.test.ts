@@ -18,5 +18,7 @@ describe("zoneKind", () => {
   it("marks trim and sell bands", () => {
     expect(zoneKind("Trim review: consider reducing")).toBe("trim");
     expect(zoneKind("Hold; do not sell on volatility")).toBe("hold");
+    expect(zoneKind("Hold, no add. After the print, trim to about 12% unless the Nov 17 tests all pass.")).toBe("hold");
+    expect(zoneKind("Trim toward 12% look-through even if the tests pass.")).toBe("trim");
   });
 });
