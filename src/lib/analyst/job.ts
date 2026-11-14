@@ -72,7 +72,9 @@ export async function loadAnalyst(db: SupabaseClient, symbol: string) {
   const done = new Set(all.map((r) => r.inputs.request_id));
   const mine = all.filter((r) => (r.outputs.ok ? r.outputs.report.symbol : r.outputs.symbol) === symbol || r.inputs.symbol === symbol);
   const reports = mine.flatMap((r) => (r.outputs.ok ? [{ ...r.outputs.report, id: r.id }] : [])).sort((a, b) => (b.reportDate ?? b.at).localeCompare(a.reportDate ?? a.at));
-  const failed = mine.flatMap((r) => (!r.outputs.ok ? [{ id: r.id, ...r.outputs }] : [])).filter((f) => Date.parse(f.at) > Date.now() - 3 * 86_400_000);
+  // A failed read stops showing once a later upload for the company was read (it was usually a retry of the same report).
+  const lastOk = Math.max(0, ...reports.map((x) => Date.parse(x.at)).filter(Number.isFinite));
+  const failed = mine.flatMap((r) => (!r.outputs.ok ? [{ id: r.id, ...r.outputs }] : [])).filter((f) => Date.parse(f.at) > Date.now() - 3 * 86_400_000 && Date.parse(f.at) > lastOk);
   const running = ((reqs ?? []) as { id: string; computed_at: string }[]).some((r) => !done.has(r.id) && Date.now() - Date.parse(r.computed_at) < ANALYST_RUNNING_MIN * 60_000);
   return { reports, failed, running };
 }

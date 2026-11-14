@@ -22,7 +22,7 @@ export async function updatePlanFor(symbol: string, versions: (VersionRow & { cr
       scenarios: { bear: num(fv.bear_value), base: num(fv.base_value), bull: num(fv.bull_value), pBear: num(fv.bear_probability), pBase: num(fv.base_probability), pBull: num(fv.bull_probability) },
       reviewedAccessions: [],
     } : null,
-    filings, price, now, estimates, analyst: found ? analystEvidence(analyst, found.v.research_as_of) : [],
+    filings, price, now, estimates, analyst: found ? analystEvidence(analyst, (found.v as { created_at?: string | null }).created_at ?? found.v.research_as_of) : [],
   });
   return { plan, filingsChecked: filings !== null };
 }

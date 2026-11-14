@@ -46,6 +46,10 @@ describe("analyst reports folded into the research", () => {
     // Read before the bearing question existed, but it lists facts the research lacked: counts as "maybe".
     expect(analystEvidence([{ ...base, bearing: null }], "2026-11-12")[0].label).toBe("Analyst report: Morningstar (it has 1 fact the research lacked, e.g. Gross margin guide 74%)");
     expect(analystEvidence([{ ...base, bearing: { changesView: "yes", why: "" }, at: "2026-11-01T00:00:00Z", reportDate: "2026-11-01" }], "2026-11-12")).toEqual([]);
+    // Already read: the research was saved after the upload (database timestamp format).
+    expect(analystEvidence([{ ...base, bearing: { changesView: "maybe", why: "x" } }], "2026-11-13 03:17:36.538892+00")).toEqual([]);
+    // Dated before the research but uploaded after it was saved: never read, so it counts.
+    expect(analystEvidence([{ ...base, reportDate: "2026-11-11", at: "2026-11-14T03:19:56Z", bearing: { changesView: "maybe", why: "x" } }], "2026-11-13 03:17:36.538892+00")).toHaveLength(1);
   });
   it("research runs get the reports as labelled secondary input", async () => {
     const { analystContext } = await import("./report");

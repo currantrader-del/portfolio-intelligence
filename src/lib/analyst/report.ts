@@ -128,11 +128,19 @@ export function analystContext(reports: AnalystReport[], since: string | null): 
   ].filter(Boolean).join("\n")).join("\n\n").slice(0, 6000);
 }
 
-/** Reports read after the research date whose facts may change the conclusion: these make an update worthwhile. */
-export function analystEvidence(reports: AnalystReport[], researchAsOf: string): { label: string; filed: string; category: string }[] {
+/** True when the report was uploaded after the research was saved, so that research has not read it. */
+export function uploadedAfter(r: AnalystReport, researchSavedAt: string | null): boolean {
+  if (!researchSavedAt) return true;
+  const t = Date.parse(researchSavedAt.replace(" ", "T").replace(/\+00$/, "Z"));
+  return !Number.isFinite(t) || Date.parse(r.at) > t;
+}
+
+/** Reports uploaded after the research was saved whose facts may change the conclusion: these make an update worthwhile.
+ *  The upload time counts, not the report's own date: a report dated before the research but uploaded after it was never read. */
+export function analystEvidence(reports: AnalystReport[], researchSavedAt: string): { label: string; filed: string; category: string }[] {
   return reports
     .map((r) => ({ r, b: bearingOf(r) }))
-    .filter(({ r, b }) => (r.reportDate ?? r.at.slice(0, 10)) >= researchAsOf && r.at.slice(0, 10) >= researchAsOf && b && b.changesView !== "no")
+    .filter(({ r, b }) => uploadedAfter(r, researchSavedAt) && b && b.changesView !== "no")
     .map(({ r, b }) => ({ label: `Analyst report: ${r.publisher ?? r.fileName}${b!.why ? ` (${b!.why.slice(0, 160)})` : ""}`, filed: r.at.slice(0, 10), category: "analyst" }));
 }
 
