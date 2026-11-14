@@ -1,0 +1,139 @@
+import { ActionForm, SubmitButton } from "@/components/forms";
+import Link from "next/link";
+import { notFound } from "next/navigation";
+import { getWorkspace } from "@/lib/workspace";
+import { reviewPosition } from "@/lib/decision/review";
+import { getFilings } from "@/lib/market/sec";
+import { Tag } from "@/components/Tag";
+import { AskButton } from "@/components/AskPanel";
+import { pctStr, shortDate, toneOf, usd } from "@/lib/format";
+import { recordReview } from "../../actions";
+
+export default async function ReviewPage({ params }: { params: Promise<{ symbol: string }> }) {
+  const { symbol } = await params;
+  const ws = await getWorkspace();
+  const sym = symbol.toUpperCase();
+  const f = await getFilings(sym, ws.now).catch(() => null);
+  const rv = reviewPosition(ws, sym, f && !("error" in f) ? f : null);
+  if (!rv) notFound();
+  const alerts = ws.alerts.filter((a) => a.symbol === sym);
+  const spy = ws.benchmarks.find((b) => b.symbol === "SPY")?.dayPct ?? null;
+
+  const whatToDo = (
+    <section className="bg-chrome text-chrome-ink rounded-2xl p-5 sm:p-6 flex flex-col gap-3">
+      <h2 className="text-xs font-semibold tracking-wider text-chrome-muted">WHAT TO DO AT THIS PRICE</h2>
+      <div className="h1">{rv.now.verb}</div>
+      <p className="text-[15px] text-[#d9dbde]">{rv.now.headline}</p>
+      {rv.now.priceAnswer && <p className="text-sm text-[#d9dbde]">{rv.now.priceAnswer}</p>}
+      {rv.now.downside && (
+        <div className="text-sm text-[#d9dbde]"><span className="text-xs font-semibold tracking-wider text-chrome-muted block">WHY IT COULD GO LOWER</span>
+          <p>{rv.now.downside}</p>
+          {rv.now.risks.length > 0 && <ul className="list-disc pl-4 flex flex-col gap-0.5">{rv.now.risks.map((x, i) => <li key={i}>{x}</li>)}</ul>}</div>
+      )}
+      {rv.now.zones.length > 0 && (
+        <ul className="text-sm flex flex-col gap-1">
+          {rv.now.zones.map((z) => <li key={z.label} className={z.current ? "text-chrome-ink font-semibold" : "text-chrome-muted"}>{z.current ? "▸ " : ""}{z.label}: {z.action}</li>)}
+        </ul>
+      )}
+      {rv.now.watch.length > 0 && (
+        <div className="text-sm text-[#d9dbde]"><span className="text-xs font-semibold tracking-wider text-chrome-muted block">WHAT WOULD CHANGE THIS</span>
+          <ul className="list-disc pl-4 flex flex-col gap-0.5">{rv.now.watch.map((w, i) => <li key={i}>{w}</li>)}</ul></div>
+      )}
+      <details className="text-xs text-chrome-muted"><summary className="cursor-pointer">How the size was worked out</summary><p className="mt-1">{rv.suggestion.reason}</p></details>
+      <div className="text-xs text-chrome-muted">Model output from your research and limits. For a written second opinion, use Deep review.</div>
+    </section>
+  );
+  return (
+    <div className="flex flex-col gap-6">
+      <div className="flex flex-wrap items-end justify-between gap-4">
+        <div>
+          <Link href="/" className="text-sm no-underline max-lg:hidden">← Today</Link>
+          <h1 className="h1 mt-1">Review {sym}</h1>
+          <div className="text-sm text-muted">
+            <span className="font-mono">{usd(rv.price, 2)} <span className={toneOf(rv.dayPct)}>{pctStr(rv.dayPct, 1, true)}</span></span>
+            {rv.priceSource === "statement" && " (statement price)"} · {pctStr(rv.weight)} of your invested portfolio including funds ({usd(rv.snapshot.direct)} direct + {usd(rv.snapshot.viaFunds)} through funds, of {usd(rv.snapshot.invested)})
+          </div>
+        </div>
+        {alerts[0] && <Tag tone={alerts[0].severity === "high" ? "alert" : alerts[0].severity === "medium" ? "warn" : "neutral"}>{alerts[0].severity.toUpperCase()}</Tag>}
+      </div>
+
+      <div className="flex flex-wrap gap-6 items-start">
+        <div className="flex-[999_1_560px] min-w-0 flex flex-col gap-6">
+          <div className="lg:hidden">{whatToDo}</div>
+          <section aria-labelledby="what-h" className="bg-surface border border-line rounded-2xl p-6">
+            <h2 id="what-h" className="font-semibold mb-2">What happened</h2>
+            <ul className="list-disc pl-5 flex flex-col gap-1.5 text-[15px]">
+              {alerts.map((a) => <li key={a.id}><span className="font-medium">{a.title}.</span> {a.detail}</li>)}
+              {rv.dayPct !== null && spy !== null && <li>Today {pctStr(rv.dayPct, 1, true)} against {pctStr(spy, 1, true)} for the S&amp;P 500. <span className="text-xs text-muted">Market data</span></li>}
+              {!alerts.length && <li>No alerts on {sym} right now.</li>}
+            </ul>
+            <div className="mt-3"><AskButton question={`Has anything material happened to ${sym} recently (filings, financing, guidance)? What does it mean for the thesis?`} className="btn btn-sm">Ask what caused it</AskButton></div>
+          </section>
+
+          <section aria-labelledby="th-h" className="bg-surface border border-line rounded-2xl p-6 flex flex-col gap-3">
+            <div className="flex flex-wrap items-center gap-2">
+              <h2 id="th-h" className="font-semibold mr-1">Thesis on file</h2>
+              {rv.researchAsOf ? <><Tag tone={rv.completeness === "complete" ? "accent" : "warn"}>{rv.completeness === "complete" ? "finished" : rv.completeness === "partial" ? "finished, open items" : rv.completeness}</Tag><Tag>{shortDate(rv.researchAsOf)} · {rv.researchAge} days old</Tag></> : <Tag tone="warn">No current research</Tag>}
+            </div>
+            {rv.thesis ? <p className="text-[16px] leading-relaxed">{rv.thesis}</p> : <p className="text-ink-2">Nothing stored. <Link href={`/research/${sym}`}>Open research</Link></p>}
+            {rv.researchAction && <p className="text-sm text-muted">Research action then: {rv.researchAction} at {usd(rv.referencePrice, 2)}.</p>}
+          </section>
+
+          {rv.repriceNote && <p className="rounded-lg border border-warn-ink/30 bg-warn-bg text-warn-ink px-3 py-2 text-sm">{rv.repriceNote}</p>}
+          {rv.scenarios.length > 0 && (
+            <section aria-labelledby="val-h" className="bg-surface border border-line rounded-2xl p-4 sm:p-6 overflow-x-auto">
+              <h2 id="val-h" className="font-semibold mb-3">Valuation at today&apos;s price</h2>
+              <table className="w-full text-sm">
+                <thead><tr className="text-left text-muted"><th className="py-1.5 font-medium">Scenario</th><th className="py-1.5 font-medium">Chance</th><th className="py-1.5 font-medium">Value</th><th className="py-1.5 font-medium">Per year<span className="max-sm:hidden"> from {usd(rv.price, 2)}</span></th></tr></thead>
+                <tbody className="font-mono">
+                  {rv.scenarios.map((s) => <tr key={s.name} className="border-t border-line"><td className="py-2 font-sans capitalize">{s.name}</td><td className="py-2">{pctStr(s.probability, 0)}</td><td className="py-2">{usd(s.value, 2)}</td><td className="py-2">{pctStr(s.annualized)}</td></tr>)}
+                  <tr className="border-t border-line-strong font-medium"><td className="py-2 font-sans">Weighted</td><td /><td /><td className="py-2">{pctStr(rv.expectedReturn)}</td></tr>
+                </tbody>
+              </table>
+              {rv.zone && <p className="text-sm mt-3">Today&apos;s band: <span className="font-medium">{rv.zone.label}</span> · {rv.zone.action}</p>}
+              <p className="text-xs text-muted mt-2">Scenario values from stored research; re-priced by the app.</p>
+            </section>
+          )}
+        </div>
+
+        <aside className="flex-[1_1_340px] min-w-0 flex flex-col gap-6">
+          <div className="max-lg:hidden">{whatToDo}</div>
+
+          <section aria-labelledby="lv-h" className="bg-surface border border-line rounded-2xl p-5 flex flex-col gap-2">
+            <h2 id="lv-h" className="font-semibold">Exposure and limits</h2>
+            <dl className="grid grid-cols-[1fr_auto] gap-x-3 gap-y-1 text-sm">
+              <dt>Combined exposure now</dt><dd className="font-mono text-right">{pctStr(rv.weight)}</dd>
+              {rv.levels.normal && <><dt>Normal range (a guide, not a target)</dt><dd className="font-mono text-right">{pctStr(rv.levels.normal.low, 0)}–{pctStr(rv.levels.normal.high, 0)}</dd></>}
+              {rv.levels.researchReview && <><dt>Research review level ({rv.levels.researchReview.source})</dt><dd className="font-mono text-right">{pctStr(rv.levels.researchReview.value, 0)}</dd></>}
+              {rv.levels.hardMax !== null && <><dt>Portfolio maximum</dt><dd className="font-mono text-right">{pctStr(rv.levels.hardMax, 0)}</dd></>}
+            </dl>
+            <p className="text-sm">{rv.levelState.text}.</p>
+            <p className="text-xs text-muted">All percentages are of the invested portfolio ({usd(rv.snapshot.invested)}: holdings plus cash in the investment accounts; savings excluded), counting shares held through funds.</p>
+          </section>
+
+          <section className="bg-surface border border-line rounded-2xl p-5 flex flex-col gap-3">
+            <h2 className="font-semibold">Your options</h2>
+            <ActionForm action={recordReview} success="Decision recorded" className="flex flex-col gap-2">
+              <input type="hidden" name="symbol" value={sym} />
+              {rv.options.map((o) => (
+                <label key={o.key} className={`grid grid-cols-[20px_92px_1fr] gap-2 items-start p-3 rounded-lg border ${o.key === rv.suggestion.key ? "border-accent bg-accent-soft" : "border-line"} ${o.available ? "" : "opacity-50"}`}>
+                  <input type="radio" name="chosen" value={o.key} required disabled={!o.available} className="mt-1" />
+                  <span className="font-semibold">{o.label}{o.basis === "research" && <span className="block text-xs font-normal text-accent">research-backed</span>}{o.basis === "hypothetical" && <span className="block text-xs font-normal text-muted">hypothetical</span>}{o.basis === "blocked" && <span className="block text-xs font-normal text-muted">not supported</span>}</span>
+                  <span className="text-sm">
+                    {o.key === "hold" ? o.note : `${o.key === "add" ? "+" : "−"}${usd(o.dollars)} → ${pctStr(o.weightAfter)} combined`}
+                    <span className="block text-xs text-muted">{o.key !== "hold" ? o.note + " · " : ""}{o.tax}</span>
+                  </span>
+                </label>
+              ))}
+              <label htmlFor="rnote" className="text-sm text-muted mt-1">Note (optional)</label>
+              <textarea id="rnote" name="note" rows={2} className="rounded-lg border border-line-strong bg-ground px-3 py-2" />
+              <SubmitButton className="btn btn-primary">Record my decision</SubmitButton>
+            </ActionForm>
+            <AskButton question={`Deep review of ${sym}: given the research, today's price and my limits, should I add, hold, trim or exit? Give the strongest case each way.`} className="min-h-11 px-4 rounded-lg border border-line-strong font-medium">Deep review</AskButton>
+            <p className="text-xs text-muted">Sizes assume sale proceeds stay as cash in the brokerage, so the invested portfolio stays {usd(rv.snapshot.invested)} and fund holdings are unchanged. Recording saves your choice; it does not trade. Place any order yourself at Schwab.</p>
+          </section>
+        </aside>
+      </div>
+    </div>
+  );
+}

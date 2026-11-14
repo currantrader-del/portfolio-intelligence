@@ -1,0 +1,113 @@
+"use server";
+
+import { redirect } from "next/navigation";
+import { revalidatePath } from "next/cache";
+import { fail, type ActionResult } from "@/lib/action-result";
+import { createClient } from "@/lib/supabase/server";
+
+const money = (v: FormDataEntryValue | null) => {
+  const n = Number(String(v ?? "").replace(/[$,\s]/g, ""));
+  return Number.isFinite(n) ? n : NaN;
+};
+const isoDate = (v: FormDataEntryValue | null) => {
+  const s = String(v ?? "");
+  return /^\d{4}-\d{2}-\d{2}$/.test(s) ? s : null;
+};
+
+/** Records today's savings balance as a dated manual entry. Earlier entries stay as history. */
+export async function saveSavings(formData: FormData): Promise<ActionResult> {
+  const balance = money(formData.get("balance"));
+  const date = isoDate(formData.get("as_of"));
+  const accountId = String(formData.get("account_id") ?? "");
+  const name = String(formData.get("name") ?? "").trim().slice(0, 80) || "Savings";
+  if (!(balance >= 0) || !date) return fail("Enter a balance (for example 3000) and a date.");
+  const db = await createClient();
+  // Update the account you chose. A new savings account is created only when you ask for one, so a balance
+  // update can never add a second copy of the same account (which would double-count savings).
+  let acct: { id: string } | null = null;
+  if (accountId && accountId !== "new") {
+    acct = (await db.from("accounts").select("id").eq("account_role", "cash").eq("id", accountId).maybeSingle()).data;
+    if (!acct) return fail("That savings account is not on file.");
+  } else {
+    if (accountId === "new" && !String(formData.get("name") ?? "").trim()) return fail("Name the new savings account.");
+    acct = (await db.from("accounts").select("id").eq("account_role", "cash").eq("name", name).maybeSingle()).data;
+  }
+  if (!acct) {
+    const ins = await db.from("accounts").insert({ name, institution: "Bank (entered by you)", account_role: "cash" }).select("id").single();
+    if (ins.error) throw ins.error;
+    acct = ins.data;
+  }
+  const { error } = await db.from("holding_snapshots").insert({
+    account_id: acct!.id, as_of: `${date}T23:59:00Z`, source_kind: "manual", total_value: balance, cash_value: balance,
+  });
+  if (error) throw error;
+  revalidatePath("/", "layout");
+  redirect("/portfolio/reconcile?saved=savings");
+}
+
+const KINDS = ["buy", "sell", "deposit", "withdrawal", "dividend", "interest", "fee", "transfer_in", "transfer_out"] as const;
+
+/** Adds one trade or cash flow after a statement, so holdings roll forward. */
+export async function recordTransaction(formData: FormData): Promise<ActionResult> {
+  const kind = String(formData.get("kind")) as (typeof KINDS)[number];
+  const accountId = String(formData.get("account_id") ?? "");
+  const date = isoDate(formData.get("trade_date"));
+  if (!KINDS.includes(kind) || !accountId || !date) return fail("Choose an account, a type and a date.");
+  const symbol = String(formData.get("symbol") ?? "").trim().toUpperCase() || null;
+  const quantity = money(formData.get("quantity"));
+  const price = money(formData.get("price"));
+  const note = String(formData.get("note") ?? "").slice(0, 500) || null;
+  let amount: number;
+  if (kind === "buy" || kind === "sell") {
+    if (!symbol || !(quantity > 0) || !(price >= 0)) return fail("A buy or sell needs a symbol, a share count above 0 and a price.");
+    amount = (kind === "buy" ? -1 : 1) * Math.round(quantity * price * 100) / 100;
+  } else {
+    const raw = Math.abs(money(formData.get("amount")));
+    if (!(raw > 0)) return fail("Enter an amount above 0.");
+    amount = ["withdrawal", "fee", "transfer_out"].includes(kind) ? -raw : raw;
+  }
+  const db = await createClient();
+  const { error } = await db.from("transactions").insert({
+    account_id: accountId, trade_date: date, kind, symbol, quantity: kind === "buy" || kind === "sell" ? quantity : null,
+    price: kind === "buy" || kind === "sell" ? price : null, amount, source_kind: "manual", note,
+  });
+  if (error) throw error;
+  revalidatePath("/", "layout");
+  redirect("/portfolio/reconcile?saved=trade");
+}
+
+/**
+ * Confirms a brokerage account's cash as you see it in the broker's app. When it matches the worked-out
+ * figure (statement plus recorded trades), the app treats that cash as confirmed for the next 7 days.
+ */
+export async function confirmCash(formData: FormData): Promise<ActionResult> {
+  const accountId = String(formData.get("account_id") ?? "");
+  const cash = money(formData.get("cash"));
+  if (!accountId || !(cash >= 0)) return fail("Enter the cash shown in the broker's app (for example 221.24).");
+  const db = await createClient();
+  const { data: acct } = await db.from("accounts").select("id").eq("id", accountId).maybeSingle();
+  if (!acct) return fail("That account is not on file.");
+  const { save } = await import("@/lib/intel/jobs");
+  const at = new Date().toISOString();
+  await save(db, "cash_confirmation", "cash-confirmation@1", { account_id: accountId, at }, { account_id: accountId, cash: Math.round(cash * 100) / 100, at });
+  revalidatePath("/", "layout");
+}
+
+/** Reads your Schwab balances and positions now (read-only) and saves them as a new snapshot. */
+export async function syncSchwabNow(): Promise<ActionResult> {
+  const { syncSchwab } = await import("@/lib/schwab/sync");
+  const { syncSchwabTrades } = await import("@/lib/schwab/market");
+  const db = await createClient();
+  const r = await syncSchwab(db);
+  const t = r.ok ? await syncSchwabTrades(db) : null;
+  revalidatePath("/", "layout");
+  if (!r.ok) return fail(`Schwab sync failed: ${r.error ?? "unknown error"}`);
+  if (t && !t.ok) return fail(`Positions synced, but trades could not be read: ${t.error ?? "unknown error"}`);
+}
+
+/** Forgets the stored Schwab sign-in. Snapshots already saved stay. */
+export async function disconnectSchwab(): Promise<ActionResult> {
+  const { disconnect } = await import("@/lib/schwab/client");
+  await disconnect(await createClient());
+  revalidatePath("/portfolio");
+}

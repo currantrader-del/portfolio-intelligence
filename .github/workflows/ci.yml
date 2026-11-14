@@ -1,0 +1,58 @@
+# Checks every change before it can be merged into the live branch. Both production crashes on 2026-11-09
+# came from changes that were never built and tested before merge; this runs the same build Netlify runs.
+name: Checks
+
+on:
+  pull_request:
+  push:
+    branches: [stage-1-foundation]
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  checks:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - name: Type check
+        run: npm run typecheck
+      - name: Lint
+        run: npm run lint
+      - name: Tests
+        run: npm test
+      - name: Production build (the same command Netlify runs)
+        run: npm run build
+        env:
+          # Placeholders: the build needs the variables to exist, not real values.
+          NEXT_PUBLIC_SUPABASE_URL: https://example.supabase.co
+          NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY: build-only-placeholder
+      - name: Bundle guard (the PDF engine must never reach the Next.js server)
+        run: |
+          if grep -rlE "@react-pdf|pdfkit" .next/server; then
+            echo "::error::PDF engine code found in the Next.js server bundle. This crashed production on 2026-11-09."
+            exit 1
+          fi
+          test -f public/share-pdf/renderer.js || { echo "::error::The browser PDF renderer was not built."; exit 1; }
+      - name: Server starts and pages answer
+        run: |
+          npx next start -p 3100 > server.log 2>&1 &
+          for i in $(seq 1 30); do curl -sf -o /dev/null http://localhost:3100/login && break; sleep 1; done
+          fail=0
+          for path in /login / /alerts /costs /decisions; do
+            code=$(curl -s -o /dev/null -w "%{http_code}" http://localhost:3100$path)
+            echo "$path -> $code"
+            # Signed-out pages redirect to login (3xx); a 5xx means the server crashed rendering it.
+            case "$code" in 2*|3*) ;; *) fail=1 ;; esac
+          done
+          if [ $fail = 1 ]; then cat server.log; exit 1; fi
+        env:
+          NEXT_PUBLIC_SUPABASE_URL: https://example.supabase.co
+          NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY: build-only-placeholder

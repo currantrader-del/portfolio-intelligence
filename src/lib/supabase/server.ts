@@ -1,0 +1,26 @@
+import { createServerClient } from "@supabase/ssr";
+import { cookies } from "next/headers";
+import { supabaseEnv } from "./env";
+
+import type { SupabaseClient } from "@supabase/supabase-js";
+import { FIXTURE, fixtureDb } from "@/lib/dev/fixture";
+
+export async function createClient(): Promise<SupabaseClient> {
+  if (FIXTURE) return fixtureDb() as unknown as SupabaseClient;
+  const cookieStore = await cookies();
+  const { url, key } = supabaseEnv();
+  return createServerClient(url, key, {
+    cookies: {
+      getAll() {
+        return cookieStore.getAll();
+      },
+      setAll(toSet) {
+        try {
+          toSet.forEach(({ name, value, options }) => cookieStore.set(name, value, options));
+        } catch {
+          // Called from a Server Component; the middleware refreshes the session instead.
+        }
+      },
+    },
+  });
+}
