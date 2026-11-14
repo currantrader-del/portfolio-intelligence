@@ -124,7 +124,8 @@ function OwnedCard({ o, stage }: { o: OwnedItem; stage?: string | null }) {
         </span>
         <span className="t-xs shrink-0">{o.researchAsOf ? `Research ${o.researchAsOf}` : ""}</span>
       </div>
-      {(o.coverage.key === "current" || o.coverage.key === "unapproved") && o.zones.length > 0 && <ZoneBar zones={o.zones} price={o.price} held={o.held} unapproved={o.coverage.key === "unapproved"} />}
+      {/* Finished research with open questions, or due a refresh, still sets the levels in use (2026-11-14: NVDA had no bar). */}
+      {(o.coverage.key === "current" || o.coverage.key === "unapproved" || o.coverage.key === "incomplete" || o.coverage.key === "refresh") && o.zones.length > 0 && <ZoneBar zones={o.zones} price={o.price} held={o.held} unapproved={o.coverage.key === "unapproved"} />}
       {o.coverage.key === "refresh" && <span className="t-xs line-clamp-2">Not re-priced: {o.coverage.detail.split(". ")[0].replace(/^Price is/, "price is")}.</span>}
       {o.exposure && <span className="t-xs">{o.exposure}</span>}
     </Link>
