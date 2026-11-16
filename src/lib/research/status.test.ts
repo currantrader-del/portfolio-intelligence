@@ -14,9 +14,16 @@ describe("research coverage label", () => {
   it("is current for complete, fresh research near its reference price", () => {
     expect(coverage(rec(), 104, now, 120).key).toBe("current");
   });
-  it("asks for a refresh when the price has moved far from the reference, up or down", () => {
-    expect(coverage(rec(), 70, now, 120).key).toBe("refresh");
-    expect(coverage(rec(), 140, now, 120).key).toBe("refresh");
+  it("asks for a refresh when the price leaves the research's bear-to-bull range, up or down", () => {
+    expect(coverage(rec(), 55, now, 120).key).toBe("refresh");
+    expect(coverage(rec(), 230, now, 120).key).toBe("refresh");
+  });
+  it("re-prices a large move inside the bear-to-bull range instead of asking to reassess (IREN, 2026-11-16)", () => {
+    for (const p of [70, 140]) {
+      const c = coverage(rec(), p, now, 120);
+      expect(c.key).toBe("current");
+      expect(c.label).not.toMatch(/reassess/i);
+    }
   });
   it("does not ask for research just because there is no live price", () => {
     expect(coverage(rec(), null, now, 120).key).toBe("current");

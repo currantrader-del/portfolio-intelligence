@@ -113,8 +113,17 @@ export const REPRICE_LIMIT = 0.15;
 export function repriceCheck(p: ParsedConclusion, price: number | null, ageDays?: number | null, reminderDays = 120): { ok: boolean; reason: string | null; drift: number | null; note?: string } {
   if (!price || !p.referencePrice) return { ok: false, reason: "No reference price to compare", drift: null };
   const drift = price / p.referencePrice - 1;
+  // A large move inside the research's own bear-to-bull range is re-priced from the saved scenarios at no cost, the same rule
+  // the research page's update check uses (2026-11-16: IREN said "Reassess" while that page said "Up to date").
+  // Only a price outside the range, or something filed since (refreshState), needs new research.
+  const bear = p.scenarios.find((s) => s.name === "bear")?.value, bull = p.scenarios.find((s) => s.name === "bull")?.value;
+  const inRange = bear != null && bull != null && price >= bear && price <= bull;
+  if (Math.abs(drift) > REPRICE_LIMIT && inRange) {
+    const age = ageDays != null && ageDays > reminderDays ? ` ${ageDays} days since the research: check what has been filed since.` : "";
+    return { ok: true, drift, reason: null, note: `Re-priced at today's price: ${Math.round(Math.abs(drift) * 100)}% ${drift < 0 ? "below" : "above"} the $${p.referencePrice} research reference, still inside its $${bear}-$${bull} bear-to-bull range.${age}` };
+  }
   if (Math.abs(drift) > REPRICE_LIMIT) {
-    return { ok: false, drift, reason: `Price is ${Math.round(Math.abs(drift) * 100)}% ${drift < 0 ? "below" : "above"} the $${p.referencePrice} research reference. The scenarios need a refresh before they can be re-priced; a lower price is not a buy signal by itself.` };
+    return { ok: false, drift, reason: `Price is ${Math.round(Math.abs(drift) * 100)}% ${drift < 0 ? "below" : "above"} the $${p.referencePrice} research reference. That is outside its bear-to-bull range, so the scenarios need a refresh before they can be re-priced; a lower price is not a buy signal by itself.` };
   }
   // Age alone never blocks re-pricing: events do (see refreshState in policy/evidence). Old research only earns a reminder.
   if (ageDays != null && ageDays > reminderDays) return { ok: true, drift, reason: null, note: `${ageDays} days since the research: check what has been filed since.` };
