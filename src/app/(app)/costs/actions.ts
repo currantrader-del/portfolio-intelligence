@@ -20,6 +20,23 @@ export async function saveCostSettings(formData: FormData): Promise<ActionResult
 }
 
 /**
+ * Changes the 30-day test ceiling and warning level without restarting it (your click; a new settings row,
+ * earlier ones stay as history). The test window and everything spent in it are unchanged.
+ */
+export async function setEvaluationCeiling(formData: FormData): Promise<ActionResult> {
+  const n = (k: string) => Number(String(formData.get(k) ?? "").replace(/[^0-9.]/g, ""));
+  const ceiling = n("ceiling"), warnAt = n("warn");
+  if (!(ceiling >= 5 && ceiling <= 200)) return fail("Test ceiling: enter $5 to $200.");
+  if (!(warnAt > 0 && warnAt < ceiling)) return fail("Warning level: enter an amount below the ceiling.");
+  const db = await createClient();
+  const before = (await loadSpend(db)).settings;
+  if (!before.evalStart) return fail("The 30-day test has not started.");
+  await save(db, "cost_settings", "costs@1", { before, action: "set_evaluation_ceiling" }, { ...before, evalCeiling: ceiling, evalWarnAt: warnAt });
+  revalidatePath("/costs");
+  revalidatePath("/");
+}
+
+/**
  * Starts the 30-day test now (your click): from this moment all AI spending counts against one ceiling,
  * with a phone warning at the warning level. Starting again restarts the window.
  */

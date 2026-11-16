@@ -12,7 +12,7 @@ import { createClient } from "@/lib/supabase/server";
 import { dispatchJob, save } from "@/lib/intel/jobs";
 import { AGENT_VERSION } from "@/lib/assistant/agent";
 import { DEMO_QUESTIONS, type AskRequest } from "@/lib/assistant/jobs";
-import { DAILY_CAP, MORNING_QUESTION, spentToday } from "@/lib/intel/start";
+import { confirmBlock, dailyCapBlock, MORNING_QUESTION, spentToday } from "@/lib/intel/start";
 
 export const runtime = "nodejs";
 export const maxDuration = 30;
@@ -38,9 +38,10 @@ export async function POST(req: Request) {
     return id;
   };
   const spent = await spentToday(db);
-  if (spent.answers >= DAILY_CAP.answers || spent.total >= DAILY_CAP.total) return Response.json({ error: `Today's cost limit is reached ($${spent.total.toFixed(2)} spent; limits $${DAILY_CAP.answers} for questions, $${DAILY_CAP.total} in all). It resets at midnight UTC.` }, { status: 429 });
+  const daily = dailyCapBlock(spent);
   const gate = manualGate(await loadSpend(db), "assistant_answer", body?.confirm === true);
-  if (!gate.ok) return Response.json({ error: gate.message, needsConfirm: gate.needsConfirm }, { status: 409 });
+  const block = confirmBlock(daily, gate, body?.confirm === true);
+  if (block) return Response.json({ error: block, needsConfirm: true }, { status: 409 });
   try {
     if (body?.action === "morning") {
       const requestId = await start({ question: MORNING_QUESTION, mode: "app", purpose: "morning" });
