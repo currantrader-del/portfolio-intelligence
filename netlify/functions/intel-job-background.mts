@@ -9,6 +9,7 @@ import { desksSettled, dispatchJob, runDeskJob, runSynthesisJob } from "../../sr
 import { DESKS, type DeskKey } from "../../src/lib/intel/desks";
 import { runAskJob } from "../../src/lib/assistant/jobs";
 import { runResearchJob } from "../../src/lib/research/aiResearchJob";
+import { runEtfCheck } from "../../src/lib/research/etfJob";
 import { resumeIfStalled, runInvestigationStep, stalledInvestigations } from "../../src/lib/research/investigate/run";
 import { runPlanJob, startPlan } from "../../src/lib/plan/job";
 import { automatedAllowed, loadSpend } from "../../src/lib/costs/spend";
@@ -138,6 +139,9 @@ export default async (req: Request) => {
     } else if (body.job === "improve" && body.requestId) {
       const r = await runImprovementJob(db);
       console.log(`intel job: improvement check: ${r.outcome}`);
+    } else if (body.job === "etf_check" && body.requestId) {
+      const id = await runEtfCheck(db, body.requestId);
+      console.log(`intel job: ETF check saved ${id}`);
     } else if (body.job === "plan" && body.requestId) {
       const id = await runPlanJob(db, body.requestId);
       console.log(`intel job: plan saved ${id}`);
