@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Card, CardHead, Disclose, Pill } from "@/components/ui";
 import type { ReviewResult } from "@/lib/exposure/reviewJob";
+import { requestPaidJSON } from "@/lib/client/request";
 
 type Status =
   | { status: "none" }
@@ -44,9 +45,8 @@ export function ExposureReview() {
     setError(null);
     setStarting(true);
     try {
-      const res = await fetch("/api/exposure", { method: "POST" });
-      const j = (await res.json().catch(() => ({}))) as { error?: string };
-      if (!res.ok) { setError(j.error ?? "The analysis did not start. Try again."); return; }
+      const r = await requestPaidJSON("/api/exposure", { json: {} });
+      if (!r.ok) { setError(r.error || "The analysis did not start. Try again."); return; }
       setSt({ status: "running", startedAt: new Date().toISOString() });
       setNow(Date.now());
       if (timer.current) clearTimeout(timer.current);

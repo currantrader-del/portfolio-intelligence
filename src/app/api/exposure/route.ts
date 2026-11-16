@@ -5,7 +5,7 @@
  */
 import { createClient } from "@/lib/supabase/server";
 import { dispatchJob, save } from "@/lib/intel/jobs";
-import { DAILY_CAP, spentToday } from "@/lib/intel/start";
+import { dailyCapBlock, spentToday } from "@/lib/intel/start";
 import { REVIEW_KIND, REVIEW_VERSION } from "@/lib/exposure/review";
 import { RUNNING_WINDOW_MIN } from "@/lib/exposure/reviewJob";
 
@@ -30,7 +30,9 @@ export async function POST(req: Request) {
   if (!auth.user || !token) return Response.json({ error: "Sign in first." }, { status: 401 });
   if ((await latest(db)).status === "running") return Response.json({ error: "An analysis is already running." }, { status: 409 });
   const spent = await spentToday(db);
-  if (spent.answers >= DAILY_CAP.answers || spent.total >= DAILY_CAP.total) return Response.json({ error: `Today's cost limit is reached ($${spent.total.toFixed(2)} spent). It resets at midnight UTC.` }, { status: 429 });
+  const body = (await req.json().catch(() => ({}))) as { confirm?: boolean };
+  const daily = dailyCapBlock(spent);
+  if (daily && body.confirm !== true) return Response.json({ error: daily, needsConfirm: true }, { status: 409 });
   try {
     const requestId = await save(db, REVIEW_KIND.request, REVIEW_VERSION, { at: new Date().toISOString() }, {});
     await dispatchJob(new URL(req.url).origin, { job: "exposure", requestId, token });

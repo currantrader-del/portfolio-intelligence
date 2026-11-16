@@ -4,8 +4,8 @@ import { actionCounts, loadMyActions } from "@/lib/eval/log";
 import { measuredEstimates } from "@/lib/research/costEstimates";
 import { DAILY_CAP, spentToday } from "@/lib/intel/start";
 import { ActionForm, SubmitButton } from "@/components/forms";
-import { Card, CardHead, Pill } from "@/components/ui";
-import { saveCostSettings, startEvaluation } from "./actions";
+import { Card, CardHead, Disclose, Pill } from "@/components/ui";
+import { saveCostSettings, setEvaluationCeiling, startEvaluation } from "./actions";
 
 const usd = (n: number) => `$${n.toFixed(2)}`;
 const CLASS: Record<BudgetClass, { title: string; what: string }> = {
@@ -39,6 +39,18 @@ export default async function CostsPage() {
             <span className="text-ink text-xl tabular-nums">{usd(e.spent)} <span className="t-sm">of {usd(e.ceiling)}</span></span>
             <div className="h-1.5 rounded-full bg-surface-2 overflow-hidden" aria-hidden="true"><div className="h-full" style={{ width: `${pct}%`, background: e.over ? "var(--loss)" : e.warn ? "var(--warn, var(--accent))" : "var(--accent)" }} /></div>
             <span className="t-xs">At this pace about {usd(e.projected)} by day 30. {usd(Math.max(0, e.left))} left.</span>
+            {e.active && (
+              <Disclose summary={<span className="t-sm">Change the ceiling · {usd(e.ceiling)}</span>}>
+                <ActionForm action={setEvaluationCeiling} success="Test ceiling changed" className="flex flex-col gap-2">
+                  <div className="grid grid-cols-2 gap-2">
+                    <label className="field">Ceiling ($)<input name="ceiling" inputMode="decimal" defaultValue={e.ceiling} className="input" required /></label>
+                    <label className="field">Warn me at ($)<input name="warn" inputMode="decimal" defaultValue={e.warnAt} className="input" required /></label>
+                  </div>
+                  <span className="t-xs">The test keeps its dates and everything spent so far; only the limit moves. Scheduled jobs start again once there is room.</span>
+                  <SubmitButton className="btn btn-sm self-start" pendingText="Saving…">Save</SubmitButton>
+                </ActionForm>
+              </Disclose>
+            )}
             <span className="t-xs">Three periods on this page: the test total counts from when you tapped Start ({fmt(e.start)}); the monthly figures below count all of {monthName}, including spending before the test; &quot;spent today&quot; counts since midnight UTC (7 PM ET the evening before).</span>
             <table className="t-sm w-full"><tbody>
               {e.byCategory.map((c) => (
@@ -112,7 +124,7 @@ export default async function CostsPage() {
           <li>Full investigation: about {usd(est.full.low)}–{usd(est.full.high)} <span className="t-xs">({est.full.basis})</span></li>
           <li>Quick screen: about $0.25 · a question: about $0.10 · plan rebuild: about $0.10</li>
         </ul>
-        <p className="t-xs">Anything estimated above {usd(s.settings.approveAbove)}, or that would pass a monthly budget, waits for you to confirm. The safety net of {usd(DAILY_CAP.total)} a day still applies ({usd(today.total)} spent today).</p>
+        <p className="t-xs">Anything estimated above {usd(s.settings.approveAbove)}, or that would pass a monthly budget, waits for you to confirm. The safety net of {usd(DAILY_CAP.total)} a day stops scheduled jobs ({usd(today.total)} spent today); a run you start past it asks you first and goes ahead if you confirm.</p>
       </Card>
 
       <Card className="!gap-2">

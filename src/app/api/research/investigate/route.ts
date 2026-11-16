@@ -8,7 +8,7 @@ import { loadAnalyst } from "@/lib/analyst/job";
  */
 import { createClient } from "@/lib/supabase/server";
 import { dispatchJob } from "@/lib/intel/jobs";
-import { DAILY_CAP, spentToday } from "@/lib/intel/start";
+import { confirmBlock, dailyCapBlock, spentToday } from "@/lib/intel/start";
 import { updateFoundation } from "@/lib/research/standing";
 import { updatePlanFor } from "@/lib/research/updateCheck";
 import { updateAllowed } from "@/lib/research/updatePlan";
@@ -65,11 +65,12 @@ export async function POST(req: Request) {
     return Response.json({ error: "A full investigation is a separate, paid run and needs your explicit confirmation: tick the box under Full re-investigation first." }, { status: 409 });
   }
   const spent = await spentToday(db);
-  if (spent.answers >= DAILY_CAP.answers || spent.total >= DAILY_CAP.total) return Response.json({ error: `Today's cost limit is reached ($${spent.total.toFixed(2)} spent). It resets at midnight UTC.` }, { status: 429 });
+  const daily = dailyCapBlock(spent);
   // Monthly research budget and the approval threshold, against what runs of this kind have cost.
   const [month, est] = await Promise.all([loadSpend(db), measuredEstimates(db)]);
   const gate = budgetGate(month, "research", type === "material_event_refresh" ? est.update.high : est.full.high, body?.confirm === true, type === "full_investigation");
-  if (!gate.ok) return Response.json({ error: gate.message, needsConfirm: gate.needsConfirm }, { status: 409 });
+  const block = confirmBlock(daily, gate, body?.confirm === true);
+  if (block) return Response.json({ error: block, needsConfirm: true }, { status: 409 });
   try {
     const requestId = await startInvestigation(db, symbol, type);
     await dispatchJob(origin, { job: "investigate", requestId, token });

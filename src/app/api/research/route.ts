@@ -5,7 +5,7 @@
  */
 import { createClient } from "@/lib/supabase/server";
 import { dispatchJob, save } from "@/lib/intel/jobs";
-import { DAILY_CAP, spentToday } from "@/lib/intel/start";
+import { confirmBlock, dailyCapBlock, spentToday } from "@/lib/intel/start";
 import { budgetGate, loadSpend } from "@/lib/costs/spend";
 import { RESEARCH_VERSION } from "@/lib/research/aiResearch";
 import { RUNNING_WINDOW_MIN } from "@/lib/research/aiResearchJob";
@@ -39,9 +39,10 @@ export async function POST(req: Request) {
   const { data: company } = await db.from("companies").select("id").eq("symbol", symbol).maybeSingle();
   if ((await latest(db, symbol)).status === "running") return Response.json({ error: "Research on this company is already running." }, { status: 409 });
   const spent = await spentToday(db);
-  if (spent.answers >= DAILY_CAP.answers || spent.total >= DAILY_CAP.total) return Response.json({ error: `Today's cost limit is reached ($${spent.total.toFixed(2)} spent; limits $${DAILY_CAP.answers} for questions and research, $${DAILY_CAP.total} in all). It resets at midnight UTC.` }, { status: 429 });
+  const daily = dailyCapBlock(spent);
   const gate = budgetGate(await loadSpend(db), "research", 0.35, body?.confirm === true);
-  if (!gate.ok) return Response.json({ error: gate.message, needsConfirm: gate.needsConfirm }, { status: 409 });
+  const block = confirmBlock(daily, gate, body?.confirm === true);
+  if (block) return Response.json({ error: block, needsConfirm: true }, { status: 409 });
   if (!company) {
     // A stock not on the list yet is added as an idea, so research works for any ticker.
     const at = new Date().toISOString();

@@ -5,7 +5,7 @@
  */
 import { loadSpend, manualGate } from "@/lib/costs/spend";
 import { createClient } from "@/lib/supabase/server";
-import { DAILY_CAP, spentToday } from "@/lib/intel/start";
+import { confirmBlock, dailyCapBlock, spentToday } from "@/lib/intel/start";
 import { startAnalyst } from "@/lib/analyst/job";
 import { MAX_PDF_BYTES } from "@/lib/analyst/report";
 
@@ -28,9 +28,10 @@ export async function POST(req: Request) {
   if (b.path !== path) return Response.json({ error: "The upload path did not match; choose the file again." }, { status: 400 });
   if (!(Number(b.size) > 0 && Number(b.size) <= MAX_PDF_BYTES)) return Response.json({ error: "The PDF must be under 20 MB." }, { status: 400 });
   const spent = await spentToday(db);
-  if (spent.total >= DAILY_CAP.total) return Response.json({ error: `Today's cost limit is reached ($${spent.total.toFixed(2)} spent). It resets at midnight UTC.` }, { status: 429 });
+  const daily = dailyCapBlock(spent, false);
   const gate = manualGate(await loadSpend(db), "analyst_report", b.confirm === true);
-  if (!gate.ok) return Response.json({ error: gate.message, needsConfirm: gate.needsConfirm }, { status: 409 });
+  const block = confirmBlock(daily, gate, b.confirm === true);
+  if (block) return Response.json({ error: block, needsConfirm: true }, { status: 409 });
   const doc = await db.from("source_documents")
     .upsert({ owner_id: auth.user.id, file_name: fileName, sha256: sha, byte_size: Number(b.size), storage_path: path, origin: "manual", description: `Analyst report for ${symbol} (licensed to you; private)` }, { onConflict: "owner_id,sha256" })
     .select("id").single();

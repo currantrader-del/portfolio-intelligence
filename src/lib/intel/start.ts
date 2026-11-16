@@ -54,6 +54,23 @@ export async function spentToday(db: SupabaseClient, now = new Date()) {
 export const DAILY_CAP = { answers: 15, total: 20 };
 
 /**
+ * Why a run you start yourself would pass today's safety limit, or null when there is room. Scheduled jobs
+ * still stop at the limit; a run you start can go ahead once you confirm with the amount in front of you
+ * (2026-11-16: "Over ride this"). `answersToo` is off for jobs that count only against the total.
+ */
+export function dailyCapBlock(spent: { answers: number; total: number }, answersToo = true): string | null {
+  if (spent.total < DAILY_CAP.total && (!answersToo || spent.answers < DAILY_CAP.answers)) return null;
+  return `Today's safety limit is reached ($${spent.total.toFixed(2)} spent today; limits $${DAILY_CAP.answers} for questions and research, $${DAILY_CAP.total} in all; it resets at midnight UTC). This run would add to today's spending.`;
+}
+
+/** One confirmation covering today's limit and the monthly or test budget: both reasons shown together. */
+export function confirmBlock(daily: string | null, gate: { ok: true } | { ok: false; message: string }, confirmed: boolean): string | null {
+  if (confirmed) return null;
+  const parts = [daily, gate.ok ? null : gate.message].filter(Boolean);
+  return parts.length ? parts.join(" ") : null;
+}
+
+/**
  * The scheduled morning run: today's briefing first, then the assistant's answer to MORNING_QUESTION,
  * which reads that briefing. Stops before spending anything when today's cost limit is reached.
  */

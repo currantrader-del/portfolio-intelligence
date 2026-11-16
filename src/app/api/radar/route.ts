@@ -5,7 +5,7 @@
  */
 import { loadSpend, manualGate } from "@/lib/costs/spend";
 import { createClient } from "@/lib/supabase/server";
-import { DAILY_CAP, spentToday } from "@/lib/intel/start";
+import { confirmBlock, dailyCapBlock, spentToday } from "@/lib/intel/start";
 import { radarStatus, startRadar } from "@/lib/radar/job";
 
 export const runtime = "nodejs";
@@ -19,9 +19,10 @@ export async function POST(req: Request) {
   if (!auth.user || !s.session?.access_token) return Response.json({ error: "Sign in first." }, { status: 401 });
   const body = (await req.json().catch(() => ({}))) as { confirm?: boolean };
   const spent = await spentToday(db);
-  if (spent.total >= DAILY_CAP.total) return Response.json({ error: `Today's cost limit is reached ($${spent.total.toFixed(2)} spent). It resets at midnight UTC.` }, { status: 429 });
+  const daily = dailyCapBlock(spent, false);
   const gate = manualGate(await loadSpend(db), "radar_run", body.confirm === true);
-  if (!gate.ok) return Response.json({ error: gate.message, needsConfirm: gate.needsConfirm }, { status: 409 });
+  const block = confirmBlock(daily, gate, body.confirm === true);
+  if (block) return Response.json({ error: block, needsConfirm: true }, { status: 409 });
   try {
     const requestId = await startRadar(db, new URL(req.url).origin, s.session.access_token, "manual");
     return Response.json(requestId ? { requestId } : { skipped: "Radar is already running." });
