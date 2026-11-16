@@ -12,6 +12,8 @@ import { ResearchSummary } from "@/components/ResearchSummary";
 import { addToPipeline } from "../actions";
 import { FeedSkeleton, FilingsList, FundamentalsCard, LinesSkeleton, NewsList } from "@/components/CompanyFeeds";
 import { isEtf } from "@/lib/portfolio/classify";
+import { FUNDS } from "@/lib/exposure/reference";
+import { EtfResearch } from "@/components/research/EtfResearch";
 import { createClient } from "@/lib/supabase/server";
 import { EXTRACTION_LABEL, ORIGIN_LABEL } from "@/lib/research-labels";
 import { getWorkspace } from "@/lib/workspace";
@@ -69,7 +71,7 @@ export default async function CompanyPage({ params, searchParams }: { params: Pr
     getWorkspace(),
     supabase.from("model_runs").select("id, computed_at, code_version, inputs, outputs").eq("kind", "research_filing_check").eq("inputs->>symbol", symbol).order("computed_at", { ascending: false }).limit(1).maybeSingle(),
   ]);
-  const etf = isEtf(symbol);
+  const etf = isEtf(symbol) || !!FUNDS[symbol];
   // The workspace only quotes holdings and benchmarks; a researched idea needs its own quote.
   const q = ws.quotes.get(symbol) ?? (await getQuote(symbol).catch(() => null)) ?? undefined;
   const h = ws.portfolio.holdings.find((x) => x.symbol === symbol);
@@ -82,6 +84,17 @@ export default async function CompanyPage({ params, searchParams }: { params: Pr
       <Disclose summary={<span>Headlines <span className="t-xs">· unverified</span></span>}><Suspense fallback={<LinesSkeleton />}><NewsList symbol={symbol} name={name} /></Suspense></Disclose>
     </Card>
   );
+
+  if (etf) {
+    const name = company?.name ?? FUNDS[symbol]?.name ?? null;
+    return (
+      <div className="flex flex-col gap-3 lg:gap-4 max-w-3xl">
+        <Header symbol={symbol} name={name} kicker={`${symbol} · ETF`} price={price} day={day} />
+        <EtfResearch db={supabase} symbol={symbol} portfolio={ws.portfolio} now={ws.now} />
+        {feeds(name)}
+      </div>
+    );
+  }
 
   if (!company) {
     return (
