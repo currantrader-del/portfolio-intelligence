@@ -128,14 +128,15 @@ export async function planTransfer(formData: FormData): Promise<ActionResult> {
   if (!(amount > 0)) return fail("Enter the amount you plan to transfer.");
   if (!from || !to || from === to) return fail("Choose two different accounts.");
   const ws = await buildWorkspace(await createClient());
-  const src = ws.portfolio.cashDetail.accounts.find((a) => a.id === from);
+  // "outside" = the money outside your accounts (your standing figure), not an account on file.
+  const src = from === "outside" ? { id: "outside", name: "Outside money", use: "outside" as const, cash: ws.portfolio.cashDetail.outside.remaining } : ws.portfolio.cashDetail.accounts.find((a) => a.id === from);
   const dst = ws.portfolio.cashDetail.accounts.find((a) => a.id === to);
   if (!src || !dst) return fail("One of those accounts is not on file.");
   if (!dst.canBuyChosen) return fail(`${dst.name} cannot buy a chosen stock or ETF, so a transfer there does not fund a decision.`);
   if (src.use === "retirement_managed") return fail("Money cannot be taken out of a retirement account for this.");
   const already = ws.transfers.filter((t) => t.fromAccountId === from).reduce((a, t) => a + t.amount, 0);
-  const available = src.use === "savings" ? ws.portfolio.cashDetail.deployableSavings - already : src.cash - already;
-  if (amount > available + 0.005) return fail(src.use === "savings" ? `Only $${Math.max(0, available).toLocaleString()} of ${src.name} is left (after transfers already planned).` : `${src.name} holds only $${Math.max(0, available).toLocaleString()} of cash.`);
+  const available = src.cash - already;
+  if (amount > available + 0.005) return fail(src.use === "outside" ? `Only $${Math.max(0, available).toLocaleString()} of outside money is left (after transfers already planned).` : `${src.name} holds only $${Math.max(0, available).toLocaleString()} of cash.`);
   const db = await createClient();
   await saveRun(db, "planned_transfer", "transfer@1", { from_account_id: from, to_account_id: to, amount, date, note: String(formData.get("note") ?? "").slice(0, 200) || null }, { from: src.name, to: dst.name });
   revalidatePath("/decisions");
@@ -152,17 +153,17 @@ export async function cancelTransfer(formData: FormData): Promise<ActionResult> 
 }
 
 /**
- * Saves your standing capital preference: the most you would move from savings to the brokerage if an opportunity
- * justifies it. A maximum for evaluating opportunities only; it creates no deposit or transfer and is never buying
- * power. A new row each time; earlier ones stay as history.
+ * Saves your standing figure of money outside the brokerage accounts that is available to invest (e.g. $10,000).
+ * Not buying power and never part of the portfolio value; deposits that reach the brokerage afterwards are taken off
+ * it automatically. A new row each time; earlier ones stay as history.
  */
 export async function saveCapitalPreference(formData: FormData): Promise<ActionResult> {
   const clear = formData.get("clear") === "1";
-  const raw = String(formData.get("max_transfer") ?? "").replace(/[$,\s]/g, "");
-  const max = Math.round(Number(raw));
-  if (!clear && !(raw !== "" && max >= 0 && max <= 1_000_000)) return fail("Enter the most you would move from savings, for example 10000.");
+  const raw = String(formData.get("outside_capital") ?? formData.get("max_transfer") ?? "").replace(/[$,\s]/g, "");
+  const amt = Math.round(Number(raw));
+  if (!clear && !(raw !== "" && amt >= 0 && amt <= 10_000_000)) return fail("Enter the amount available outside your brokerage accounts, for example 10000.");
   const db = await createClient();
-  await saveRun(db, "capital_preference", "capital-preference@1", { max_transfer: clear ? null : max, at: new Date().toISOString() },
-    clear ? { cleared: true } : { max_transfer: max, note: "Maximum I am willing to transfer from savings to the brokerage if a sufficiently attractive opportunity is identified. Not buying power; not an instruction to invest." });
+  await saveRun(db, "capital_preference", "capital-preference@2", { outside_capital: clear ? null : amt, at: new Date().toISOString() },
+    clear ? { cleared: true } : { outside_capital: amt, note: "Money outside my brokerage accounts available to invest if an opportunity justifies it. Not buying power; not an instruction to invest." });
   revalidatePath("/", "layout");
 }

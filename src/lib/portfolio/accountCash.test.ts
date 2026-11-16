@@ -46,11 +46,11 @@ describe("a cash figure is checked, not assumed", () => {
     expect(off.cashDetail.accounts.find((a) => a.id === "schwab")!.basis).toMatchObject({ confirmed: false });
     expect(off.cashDetail.accounts.find((a) => a.id === "schwab")!.basis!.checks.join(" ")).toMatch(/You confirmed \$250\.00 .* records give \$221\.24/);
   });
-  it("counts savings as investable only up to your transfer limit", () => {
-    const p = buildPortfolio([oct, usaa(13000)], new Map(), policy, {}, ledger, now, [], 10000);
-    expect(p.cashDetail.deployableSavings).toBe(10000);
+  it("counts your outside-money figure, not any savings balance on file (2026-11-16)", () => {
+    const p = buildPortfolio([oct, usaa(13000)], new Map(), policy, {}, ledger, now, [], { amount: 10000, setAt: "2026-11-12T12:00:00Z" });
+    expect(p.cashDetail.outside.remaining).toBe(10000);
     expect(p.investableCapital).toBe(Math.round((p.total + 10000) * 100) / 100);
-    expect(buildPortfolio([oct, usaa(6000)], new Map(), policy, {}, ledger, now, [], 10000).cashDetail.deployableSavings).toBe(6000);
+    expect(buildPortfolio([oct, usaa(6000)], new Map(), policy, {}, ledger, now, [], { amount: 10000, setAt: "2026-11-12T12:00:00Z" }).cashDetail.outside.remaining).toBe(10000);
   });
   it("flags records that spend more cash than the statement had", () => {
     const p = buildPortfolio([oct, usaa(3000)], new Map(), policy, {}, ledger.filter((t) => t.kind !== "deposit"), now);
@@ -58,7 +58,7 @@ describe("a cash figure is checked, not assumed", () => {
   });
   it("a recent statement or your own entry with no later activity is confirmed", () => {
     const p = buildPortfolio([schwab, { ...usaa(3000), sourceKind: "manual" }], new Map(), policy, {}, [], now);
-    expect(p.cashDetail.accounts.map((a) => [a.name, a.basis!.status, a.basis!.confirmed])).toEqual([["Schwab One (Thinkorswim)", "statement", true], ["USAA Savings", "manual", true]]);
+    expect(p.cashDetail.accounts.map((a) => [a.name, a.basis!.status, a.basis!.confirmed])).toEqual([["Schwab One (Thinkorswim)", "statement", true]]);
   });
 });
 
@@ -76,9 +76,9 @@ describe("cash belongs to its account", () => {
     expect(cd.investingAccount).toMatchObject({ id: "schwab", name: "Schwab One (Thinkorswim)", cash: 82.2, confirmed: true });
     expect(cd.spendableNow).toBe(82.2);
     expect(cd.accounts.map((a) => [a.name, a.cash, a.canBuyChosen])).toEqual([
-      ["Schwab One (Thinkorswim)", 82.2, true], ["Acorns Invest", 5, false], ["Acorns Later (Roth IRA)", 3.97, false], ["USAA Savings", 3000, false],
+      ["Schwab One (Thinkorswim)", 82.2, true], ["Acorns Invest", 5, false], ["Acorns Later (Roth IRA)", 3.97, false],
     ]);
-    expect(cd.deployableSavings).toBe(3000); // no protected reserve: all savings could be transferred
+    expect(cd.outside.remaining).toBe(0); // no figure entered: a savings balance on file is not counted
 
     const r = newCapital({ amount: 1250, source: "existing", portfolio: p, research: [], policy, now });
     expect(r.funds).toMatchObject({ requested: 1250, used: 82.2, verified: true });
@@ -88,12 +88,12 @@ describe("cash belongs to its account", () => {
     expect(r.recommendation.allocations.reduce((a, x) => a + x.amount, 0)).toBeCloseTo(82.2, 2);
   });
 
-  it("savings are used only through a planned transfer, and stay conditional until they arrive", () => {
-    const p = buildPortfolio([schwab, acorns, roth, usaa(4500)], new Map(), policy, {}, [], now);
+  it("outside money is used only through a transfer, and stays conditional until it arrives", () => {
+    const p = buildPortfolio([schwab, acorns, roth, usaa(4500)], new Map(), policy, {}, [], now, [], { amount: 4500, setAt: "2026-11-01T12:00:00Z" });
     const noPlan = newCapital({ amount: 1000, source: "existing", portfolio: p, research: [], policy, now });
     expect(noPlan.funds.used).toBe(82.2);
-    expect(noPlan.funds.detail).toMatch(/Savings hold \$4,500; that can be used only after you plan a transfer to Schwab One/);
-    const transfers = [{ id: "t", fromAccountId: "usaa", toAccountId: "schwab", amount: 1000, date: "2026-11-10", note: null, createdAt: "2026-11-08T22:00:00Z" }];
+    expect(noPlan.funds.detail).toMatch(/You have \$4,500 outside your accounts; it can be used only after you transfer it to Schwab One/);
+    const transfers = [{ id: "t", fromAccountId: "outside", toAccountId: "schwab", amount: 1000, date: "2026-11-10", note: null, createdAt: "2026-11-08T22:00:00Z" }];
     const planned = newCapital({ amount: 1000, source: "existing", portfolio: p, research: [], policy, now, transfers });
     expect(planned.funds).toMatchObject({ used: 1000, verified: false });
     expect(planned.status).toBe("conditional");

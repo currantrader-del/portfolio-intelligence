@@ -163,7 +163,7 @@ describe("new capital: ceilings and money source", () => {
 
   it("does not grow the portfolio when the money is cash already held", () => {
     const policy = policyFromRules(approvedRules);
-    const p = buildPortfolio([{ ...snap, cashValue: 1500 }, savings], new Map(), policy, {}, [], now);
+    const p = buildPortfolio([{ ...snap, cashValue: 1500 }, savings], new Map(), policy, {}, [], now, [], { amount: 12000, setAt: "2026-11-01T12:00:00Z" });
     const fromNew = newCapital({ amount: 1000, source: "new", portfolio: p, research: [research("$26")], policy, now });
     const fromCash = newCapital({ amount: 1000, source: "existing", portfolio: p, research: [research("$26")], policy, now });
     const room = (x: typeof fromNew) => x.options.find((o) => o.symbol === "AAA")!.headroomDollars!;
@@ -171,7 +171,7 @@ describe("new capital: ceilings and money source", () => {
     // Cash already held is only what the brokerage account itself holds: savings need a planned transfer first.
     const tooMuch = newCapital({ amount: 5000, source: "existing", portfolio: p, research: [], policy, now });
     expect(tooMuch.funds).toMatchObject({ requested: 5000, used: 1500, verified: true });
-    expect(tooMuch.funds.detail).toMatch(/Broker holds \$1,500 of cash that can buy a stock or ETF, so this is sized on \$1,500\. Savings hold \$12,000; that can be used only after you plan a transfer to Broker\./);
+    expect(tooMuch.funds.detail).toMatch(/Broker holds \$1,500 of cash that can buy a stock or ETF, so this is sized on \$1,500\. You have \$12,000 outside your accounts; it can be used only after you transfer it to Broker\./);
     expect(tooMuch.funds.detail).not.toMatch(/reserve/);
     expect(tooMuch.recommendation.allocations.reduce((a, x) => a + x.amount, 0)).toBe(1500);
     // With a planned $2,000 transfer it can be used, but only as conditional money until it arrives.

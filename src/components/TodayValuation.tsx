@@ -150,7 +150,7 @@ export async function InvestmentSummary({ ws, symbol, brief }: { ws: Workspace; 
           <Bar thin value={exp.total} max={exp.max} markers={lim?.normal ? [lim.normal.low, lim.normal.high] : []} label={`${pctStr(exp.total)} of a ${pctStr(exp.max, 0)} maximum`} />
           {lim && (lim.normal || lim.highConviction) && <span className="t-xs">Your limits: {lim.normal ? `normal ${pctStr(lim.normal.low, 0)}–${pctStr(lim.normal.high, 0)}` : ""}{lim.normal && lim.highConviction ? " · " : ""}{lim.highConviction ? `high conviction up to ${pctStr(lim.highConviction.high, 0)}` : ""} · maximum {pctStr(exp.max, 0)}</span>}
           {reviewLvl && <span className={`t-xs ${exp.total > reviewLvl.value + 1e-9 ? "warn" : ""}`}>Research review level: {pctStr(reviewLvl.value, 0)} ({reviewLvl.source}){exp.total > reviewLvl.value + 1e-9 ? `. It is above it: see Review this position for the research-backed size.` : ""}</span>}
-          <span className="t-xs">Percentages are of the invested portfolio ({usd(ws.portfolio.total)}), savings excluded.</span>
+          <span className="t-xs">Percentages are of the invested portfolio ({usd(ws.portfolio.total)}), outside money excluded.</span>
           <span className="t-xs">{pctStr(exp.direct)} direct · {pctStr(exp.viaEtfs)} through ETFs (approx.){exp.totalMax - exp.total > 0.0005 ? `; could be up to ${pctStr(exp.totalMax)} in total because fund holdings are only partly published` : ""} · room {usd(exp.headroomDollars)}{exp.totalMax - exp.total > 0.0005 ? " (on the upper figure)" : ""}</span>
         </div>
       ) : (

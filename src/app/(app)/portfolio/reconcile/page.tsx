@@ -4,7 +4,8 @@ import { getWorkspace } from "@/lib/workspace";
 import { createClient } from "@/lib/supabase/server";
 import { Tag } from "@/components/Tag";
 import { shortDate, usd } from "@/lib/format";
-import { recordTransaction, saveSavings } from "../actions";
+import { recordTransaction } from "../actions";
+import { OutsideMoneyForm } from "@/components/decisions/CurrentPortfolioView";
 
 const ROLE = { taxable_brokerage: "Taxable", retirement: "Retirement (Roth IRA)", cash: "Savings", protected_savings: "Savings" } as Record<string, string>;
 const input = "rounded-lg border border-line-strong bg-ground px-3 min-h-11";
@@ -18,7 +19,6 @@ export default async function ReconcilePage({ searchParams }: { searchParams: Pr
   const brokers = p.accounts.filter((a) => a.role !== "cash" && a.role !== "protected_savings");
   const today = ws.now.toISOString().slice(0, 10);
   const c = p.cashDetail;
-  const savingsAccts = (c.accounts ?? []).filter((a) => a.use === "savings");
 
   return (
     <div className="flex flex-col gap-6">
@@ -46,23 +46,13 @@ export default async function ReconcilePage({ searchParams }: { searchParams: Pr
       </section>
 
       <section aria-labelledby="cash-h" className="bg-surface border border-line rounded-2xl p-5 flex flex-col gap-3">
-        <h2 id="cash-h" className="font-semibold">Cash and savings</h2>
-        <dl className="grid grid-cols-2 sm:grid-cols-4 gap-3 text-sm">
-          <div><dt className="text-muted">Brokerage cash</dt><dd className="font-mono">{usd(c.brokerage)}</dd><dd className="text-xs text-muted">from statements</dd></div>
-          <div><dt className="text-muted">Savings</dt><dd className="font-mono">{c.savings === null ? "Not entered" : usd(c.savings)}</dd><dd className="text-xs text-muted">{c.savingsAsOf ? `as of ${shortDate(c.savingsAsOf)}` : "enter below"}</dd></div>
-          <div><dt className="text-muted">Deployable</dt><dd className="font-mono">{usd(c.deployable)}</dd><dd className="text-xs text-muted">brokerage + savings</dd></div>
+        <h2 id="cash-h" className="font-semibold">Cash</h2>
+        <dl className="grid grid-cols-2 gap-3 text-sm">
+          <div><dt className="text-muted">Brokerage cash</dt><dd className="font-mono">{usd(c.brokerage)}</dd><dd className="text-xs text-muted">inside Schwab and Acorns</dd></div>
+          <div><dt className="text-muted">Outside money available</dt><dd className="font-mono">{c.outside.figure === null ? "Not entered" : usd(c.outside.remaining)}</dd><dd className="text-xs text-muted">not in the portfolio value</dd></div>
         </dl>
-        <ActionForm action={saveSavings} success="Balance saved" className="flex flex-wrap gap-2 items-end">
-          {savingsAccts.length > 0 ? (
-            <label className="text-sm flex flex-col gap-1">Account<select name="account_id" defaultValue={savingsAccts[0].id} className={input}>{savingsAccts.map((a) => <option key={a.id} value={a.id}>{a.name}</option>)}<option value="new">Another savings account (new)</option></select></label>
-          ) : null}
-          <label className="text-sm flex flex-col gap-1">{savingsAccts.length ? "New account name (only for a new account)" : "Account name"}<input name="name" defaultValue={savingsAccts.length ? "" : "Savings"} placeholder="e.g. Ally Savings" className={input} /></label>
-          <label className="text-sm flex flex-col gap-1">Balance<input name="balance" required inputMode="decimal" placeholder="$" className={`${input} w-32 font-mono`} /></label>
-          <label className="text-sm flex flex-col gap-1">As of<input name="as_of" type="date" required defaultValue={today} className={input} /></label>
-          <SubmitButton className="btn btn-primary">Save balance</SubmitButton>
-        </ActionForm>
-        {savingsAccts.length > 1 && <p className="text-sm warn">{savingsAccts.length} savings accounts are on file and their balances are added together: {savingsAccts.map((a) => `${a.name} ${usd(a.cash)}`).join(" + ")}. If these are the same account, the total is double-counted.</p>}
-        <p className="text-xs text-muted">Updating a balance adds a dated entry to that account; earlier entries stay as history. The app does not carry over savings figures from old research chats; enter today&apos;s balance.</p>
+        <OutsideMoneyForm figure={c.outside.figure} invName={c.investingAccount?.name ?? "Schwab"} />
+        <p className="text-xs text-muted">The app no longer tracks a savings balance or a reserve. A deposit into {c.investingAccount?.name ?? "Schwab"} after you set the outside figure (from the Schwab sync, or recorded below) is taken off it, so nothing is counted twice. Savings balances entered before stay on file as history.</p>
       </section>
 
       <section aria-labelledby="tx-h" className="bg-surface border border-line rounded-2xl p-5 flex flex-col gap-3">

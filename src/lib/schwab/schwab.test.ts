@@ -4,7 +4,7 @@ import { beforeAll, describe, expect, it } from "vitest";
 import { READ_PATHS, connectionOf, schwabGet, seal, unseal } from "./client";
 import { mapAccounts } from "./sync";
 import { needsReminder } from "./morning";
-import { mapQuotes, mapTrades } from "./market";
+import { mapQuotes, mapDeposits, mapTrades } from "./market";
 
 beforeAll(() => { process.env.SCHWAB_APP_KEY = "test-key"; process.env.SCHWAB_APP_SECRET = "test-secret-only-for-tests"; });
 
@@ -72,6 +72,19 @@ describe("quotes and trades", () => {
     });
     expect([...q.keys()]).toEqual(["VOO"]);
     expect(q.get("VOO")).toMatchObject({ price: 690.1, prevClose: 689.5, provider: "schwab", delayClass: "realtime" });
+  });
+  it("maps incoming deposits only: positive, valid, dated; journals and withdrawals left out", () => {
+    expect(mapDeposits([
+      { activityId: 10, type: "ACH_RECEIPT", status: "VALID", tradeDate: "2026-11-14T10:00:00+0000", netAmount: 2500 },
+      { activityId: 11, type: "WIRE_IN", tradeDate: "2026-11-15", netAmount: 1000.456 },
+      { activityId: 12, type: "ACH_DISBURSEMENT", tradeDate: "2026-11-15", netAmount: -300 },
+      { activityId: 13, type: "JOURNAL", tradeDate: "2026-11-15", netAmount: 50 },
+      { activityId: 14, type: "ACH_RECEIPT", status: "PENDING", tradeDate: "2026-11-15", netAmount: 100 },
+      { activityId: 15, type: "TRADE", tradeDate: "2026-11-15", netAmount: 100 },
+    ])).toEqual([
+      { activityId: "10", tradeDate: "2026-11-14", kind: "deposit", amount: 2500 },
+      { activityId: "11", tradeDate: "2026-11-15", kind: "deposit", amount: 1000.46 },
+    ]);
   });
   it("maps buys and sells, leaving fees and other activity out", () => {
     const t = mapTrades([

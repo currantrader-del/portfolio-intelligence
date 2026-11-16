@@ -41,7 +41,7 @@ export default async function QuestionsPage({ searchParams }: { searchParams: Pr
   const events = oldest ? await loadContextEvents(db, oldest).catch(() => []) : [];
   const staleFor = (a: StoredAnswer) => {
     if (!a) return null;
-    const v = outdatedVerdict({ writtenAt: a.at, events, text: a.answer, currentReserve: ws.portfolio.cashDetail.protectedReserve });
+    const v = outdatedVerdict({ writtenAt: a.at, events, text: a.answer, currentReserve: 0 });
     return v.outdated ? { headline: v.headline, reasons: [...v.contradictions, ...v.changes.slice(0, 2).map((c) => `${c.label} changed ${c.at.slice(0, 10)}.`)] } : null;
   };
 

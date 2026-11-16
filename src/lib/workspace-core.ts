@@ -28,7 +28,7 @@ export type Workspace = {
   yields: Yields;
   /** Transfers between your accounts you recorded as planned and have not cancelled. */
   transfers: PlannedTransfer[];
-  /** Your standing limit for moving savings to the brokerage when an opportunity justifies it (null when not set). */
+  /** Your standing figure of outside money available to invest, e.g. $10,000 (null when not set). */
   capitalPreference: CapitalPreference | null;
   /** Sector, industry, country and theme exposure with ETF look-through, and the exposure limits checked against it. */
   exposure: ExposureReport;
@@ -172,7 +172,7 @@ export async function buildWorkspace(db: SupabaseClient, now = new Date(), opts:
   const quotes = opts.liveQuotes ? await withSchwabQuotes(db, free, [...symbols, ...BENCHMARKS.map((b) => b.symbol)]) : free;
   const roles: Record<string, string | null> = Object.fromEntries(Object.values(policy?.companies ?? {}).map((c) => [c.symbol, c.role]));
   const classifications = { ...roles, ...Object.fromEntries(research.filter((r) => r.current?.parsed.classification).map((r) => [r.symbol, r.current!.parsed.classification])) };
-  const portfolio = buildPortfolio(snapshots, quotes, policy, classifications, ledger, now, cashConfirmations, capitalPreference?.maxTransfer ?? null);
+  const portfolio = buildPortfolio(snapshots, quotes, policy, classifications, ledger, now, cashConfirmations, capitalPreference ? { amount: capitalPreference.amount, setAt: capitalPreference.setAt } : null);
   const benchmarks = BENCHMARKS.map((b) => ({ ...b, dayPct: dayChangePct(quotes.get(b.symbol)) }));
   const exposure = computeExposure(portfolio.holdings.map((h) => ({ symbol: h.symbol, value: h.value })), portfolio.cash, now);
   const exposureLimits = checkLimits(exposure, policy?.audit?.subjects.flatMap((s) => [...(s.approvedRow ? [s.approvedRow] : []), ...s.candidates]) ?? []);

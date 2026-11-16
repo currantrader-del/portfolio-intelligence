@@ -2,71 +2,56 @@
  * Current Portfolio decision: "Given what I own and the capital I could deploy, what is the best action right now?"
  *
  * It adds no new analysis. It runs the same deterministic new-capital engine (approved research, today's prices,
- * limits, exposure, reserve) on the money that actually exists, and decides HOW MUCH is worth deploying:
+ * limits, exposure) on the money that actually exists, and decides HOW MUCH is worth deploying:
  *  - Brokerage cash already in the account that buys is the first source.
- *  - Savings, capped by your standing transfer limit and net of transfers already
- *    planned, is only a maximum you authorised for evaluating opportunities. It is never buying power, and it is
- *    proposed only when a researched stock qualifies for more than the brokerage cash covers. A diversified ETF on
- *    its own is never a reason to move savings: that is a long-term allocation choice, shown as an alternative.
- *  - Nothing has to be invested. No allocation target is filled.
+ *  - Outside money (your standing figure, e.g. $10,000, minus what has already reached the brokerage and transfers
+ *    you planned) is the most that could be added for a good opportunity. It is never buying power: it is proposed
+ *    only when a researched stock qualifies for more than the brokerage cash covers, and you transfer it first.
+ *    A diversified ETF on its own is never a reason to move it: that is a long-term choice, shown as an alternative.
+ *  - Nothing has to be invested. No allocation target is filled. The app tracks no savings balance and no reserve.
  * Hypothetical deposits and transfers live in the separate What-if mode.
  */
-import type { PlannedTransfer, PortfolioView } from "@/lib/portfolio/engine";
+import type { PortfolioView } from "@/lib/portfolio/engine";
 import { newCapital, ruleRowsOf, type NewCapitalResult, type Option } from "@/lib/decision/newCapital";
 import type { FilingsResult } from "@/lib/market/sec";
 import type { Workspace } from "@/lib/workspace-core";
 
-/** Your standing capital preference: the most you are willing to move from savings to the brokerage for a good opportunity. */
-export type CapitalPreference = { maxTransfer: number; setAt: string; note: string | null };
-
-/** Savings older than this are shown as needing an update before a transfer is sized on them. */
-export const SAVINGS_FRESH_DAYS = 31;
+/** Your standing figure of money outside the brokerage accounts that is available to invest (e.g. $10,000). */
+export type CapitalPreference = { amount: number; setAt: string; note: string | null };
 
 export type Transferable = {
-  /** Total recorded savings (all savings accounts), or null when never entered. */
-  savings: number | null;
-  savingsAsOf: string | null;
-  reserve: number;
-  aboveReserve: number;
-  /** Your standing limit, or null when not set. */
-  cap: number | null;
-  /** Transfers out of savings you already planned (they count against both the balance and the limit). */
+  /** The figure you entered, or null when none is set. */
+  figure: number | null;
+  setAt: string | null;
+  /** Deposits that reached the brokerage after you set the figure (already counted as brokerage cash). */
+  movedIn: number;
+  /** Transfers into the brokerage you planned that have not shown up yet (counted as brokerage money already). */
   alreadyPlanned: number;
-  /** What could still be moved: min(limit, savings) minus transfers already planned, never below 0. */
+  /** What could still be moved in: figure minus moved in minus planned, never below 0. */
   amount: number;
-  /** The savings balance is your own dated entry or a statement within SAVINGS_FRESH_DAYS. */
-  verified: boolean;
   detail: string;
 };
 
 const $ = (n: number) => `$${Math.round(n).toLocaleString("en-US")}`;
 const $2 = (n: number) => `$${n.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+const day = (iso: string | null) => (iso ? new Date(iso).toLocaleDateString("en-US", { month: "short", day: "numeric", timeZone: "America/New_York" }) : "");
 
-export function transferableSavings(args: { portfolio: PortfolioView; transfers: PlannedTransfer[]; preference: CapitalPreference | null; now: Date }): Transferable {
-  const cd = args.portfolio.cashDetail;
-  const savingsIds = new Set((cd.accounts ?? []).filter((a) => a.use === "savings").map((a) => a.id));
-  const alreadyPlanned = Math.round(args.transfers.filter((t) => savingsIds.has(t.fromAccountId)).reduce((a, t) => a + t.amount, 0) * 100) / 100;
-  const reserve = cd.protectedReserve;
-  const savings = cd.savings;
-  const aboveReserve = savings === null ? 0 : Math.max(0, savings - reserve);
-  const cap = args.preference ? Math.max(0, args.preference.maxTransfer) : null;
-  const ageDays = cd.savingsAsOf ? Math.floor((args.now.getTime() - new Date(cd.savingsAsOf).getTime()) / 86_400_000) : null;
-  const verified = savings !== null && ageDays !== null && ageDays <= SAVINGS_FRESH_DAYS;
-  const amount = cap === null ? 0 : Math.max(0, Math.floor(Math.min(cap, aboveReserve) - alreadyPlanned));
-  const multiple = savingsIds.size > 1 ? ` across ${savingsIds.size} savings accounts` : "";
-  const detail = savings === null
-    ? "No savings balance on file, so nothing from savings is counted. Enter it on Portfolio → Reconcile."
-    : cap === null
-      ? `Savings ${$2(savings)}${multiple}. You have not set a standing transfer limit, so none of it is considered.`
-      : `min(${$(cap)} limit, ${$2(savings)} savings${multiple})${alreadyPlanned ? ` − ${$2(alreadyPlanned)} already planned` : ""} = ${$(amount)} you could move if an opportunity justifies it.${verified ? "" : ` The savings balance is from ${cd.savingsAsOf?.slice(0, 10) ?? "an unknown date"}; update it before moving money.`}`;
-  return { savings, savingsAsOf: cd.savingsAsOf, reserve, aboveReserve, cap, alreadyPlanned, amount, verified, detail };
+/** Outside money still available to move in, net of deposits already in the brokerage and transfers already planned. */
+export function outsideAvailable(args: { portfolio: PortfolioView; plannedIn: number }): Transferable {
+  const o = args.portfolio.cashDetail.outside;
+  const alreadyPlanned = Math.round(Math.max(0, args.plannedIn) * 100) / 100;
+  const amount = o.figure === null ? 0 : Math.max(0, Math.floor(o.remaining - alreadyPlanned));
+  const detail = o.figure === null
+    ? "You have not entered how much money outside your brokerage accounts is available, so only brokerage cash is considered."
+    : `${$(o.figure)} outside your accounts (set ${day(o.setAt)})${o.movedIn ? ` − ${$2(o.movedIn)} that has reached the brokerage since` : ""}${alreadyPlanned ? ` − ${$2(alreadyPlanned)} you planned to transfer` : ""} = ${$(amount)} you could move in if an opportunity justifies it. It is not buying power until you transfer it.`;
+  return { figure: o.figure, setAt: o.setAt, movedIn: o.movedIn, alreadyPlanned, amount, detail };
 }
 
 export type Projection = {
   invested: { before: number; after: number };
   investable: { before: number; after: number };
   rows: { symbol: string; amount: number; before: number; afterInvested: number; beforeInvestable: number; afterInvestable: number; limit: number | null; lookthrough: boolean }[];
-  savingsAboveReserve: { before: number; after: number };
+  outside: { before: number; after: number };
 };
 
 export type Alternative = { key: "add" | "new" | "etf" | "cash"; title: string; status: string; detail: string; symbol: string | null; href: string | null };
@@ -78,8 +63,8 @@ export type CurrentDecision = {
   why: string;
   /** The split that makes sense (possibly nothing). */
   allocations: { symbol: string; amount: number }[];
-  /** Where the money comes from. Savings appear only when a researched stock needs them. */
-  funding: { brokerage: number; fromSavings: number; detail: string };
+  /** Where the money comes from. Outside money appears only when a researched stock needs it. */
+  funding: { brokerage: number; fromOutside: number; detail: string };
   status: NewCapitalResult["status"];
   alternatives: Alternative[];
   /** Before acting: the open checks, then the transfer and trade steps you would take yourself. */
@@ -106,7 +91,8 @@ export function currentPortfolioDecision(args: EngineArgs & { preference: Capita
   const invAsOf = portfolio.accounts.find((a) => a.id === inv?.id)?.asOf ?? null;
   const brokerageCash = Math.max(0, Math.floor((cd.spendableNow ?? 0) * 100) / 100);
   const plannedIn = Math.round(transfers.filter((t) => inv && t.toAccountId === inv.id && (!invAsOf || t.createdAt > invAsOf)).reduce((a, t) => a + t.amount, 0) * 100) / 100;
-  const tr = transferableSavings({ portfolio, transfers, preference, now: args.now });
+  void preference;
+  const tr = outsideAvailable({ portfolio, plannedIn });
   const here = Math.round((brokerageCash + plannedIn) * 100) / 100;
   const run = (amount: number, authorizedSavings: number) => newCapital({ ...rest, portfolio, amount: Math.max(1, amount), source: "existing", authorizedSavings });
 
@@ -114,7 +100,7 @@ export function currentPortfolioDecision(args: EngineArgs & { preference: Capita
   const capacity = run(here + tr.amount, tr.amount);
   const kindOf = (r: NewCapitalResult, s: string) => r.options.find((o) => o.symbol === s);
   const stockNeed = capacity.recommendation.allocations.filter((a) => isStock(kindOf(capacity, a.symbol))).reduce((a, x) => a + x.amount, 0);
-  // 2. Size on what is worth deploying: brokerage cash first; savings only for the stock adds that need them.
+  // 2. Size on what is worth deploying: brokerage cash first; outside money only for the stock adds that need it.
   // Limits are a share of the invested portfolio, and money moved in grows it, so the room at the full authorised
   // amount overstates the room at a smaller transfer. Shrink the transfer until it matches what the stocks can take.
   let fromSavings = stockNeed > here ? Math.min(tr.amount, Math.ceil(stockNeed - here)) : 0;
@@ -139,15 +125,15 @@ export function currentPortfolioDecision(args: EngineArgs & { preference: Capita
   if (stockAllocs.length) {
     headline = `Add ${words(stockAllocs)}${etfAlloc ? `; the other ${$(etfAlloc.amount)} to ${etfAlloc.symbol} or keep it as cash` : ""}${once}`;
     const lead = stockAllocs.map((a) => kindOf(result, a.symbol)!).map((o) => `${o.symbol}: approved research supports adding at today's price${o.assessment ? ` (${o.assessment.summary.replace(/\.\s*$/, "")})` : ""}, and it has room under the limit you approved`).join(". ");
-    why = `${lead}. ${fromSavings ? `That needs ${$(fromSavings)} more than the ${$2(here)} in ${invName}, so it uses part of the ${$(tr.amount)} you authorised from savings; the rest stays in savings.` : tr.amount ? `The cash already in ${invName} covers it, so nothing needs to move from savings.` : ""}`.trim();
+    why = `${lead}. ${fromSavings ? `That needs ${$(fromSavings)} more than the ${$2(here)} in ${invName}, so transfer ${$(fromSavings)} of the ${$(tr.amount)} outside money to ${invName} first; the rest stays where it is.` : tr.amount ? `The cash already in ${invName} covers it, so none of your outside money needs to move.` : ""}`.trim();
   } else {
     const noStock = "No researched stock qualifies for new money right now";
-    const savingsLine = tr.amount >= 1 ? ` Keep your savings where they are: nothing justifies a transfer.` : "";
+    const savingsLine = tr.amount >= 1 ? ` Keep the ${$(tr.amount)} outside money where it is: nothing justifies a transfer.` : "";
     if (here >= 1) {
-      headline = `No transfer from savings. The ${$2(here)} in ${invName}: ${etfAlloc?.symbol ?? etfSym} or keep it as cash`;
+      headline = tr.amount >= 1 ? `Keep the ${$(tr.amount)} where it is. The ${$2(here)} in ${invName}: ${etfAlloc?.symbol ?? etfSym} or keep it as cash` : `The ${$2(here)} in ${invName}: ${etfAlloc?.symbol ?? etfSym} or keep it as cash`;
       why = `${noStock}, so there is no opportunity that calls for more money.${savingsLine} For the cash already in ${invName}, ${etfAlloc?.symbol ?? etfSym} is the diversified choice (${result.exposure.reasons[0]?.replace(/^[A-Z]+ \(chosen\): /, "").split(". ")[0] ?? "the default diversified fund"}); keeping it as cash is equally valid.`;
     } else {
-      headline = tr.amount >= 1 ? "Do nothing now: keep your savings, no transfer" : "Do nothing now";
+      headline = tr.amount >= 1 ? `Do nothing now: keep the ${$(tr.amount)} where it is` : "Do nothing now";
       why = `${noStock}, and there is no cash in ${invName}.${savingsLine}`;
     }
   }
@@ -167,20 +153,19 @@ export function currentPortfolioDecision(args: EngineArgs & { preference: Capita
     detail: `${reasonOf(fresh)}${others("new_stock", fresh).length ? ` Other researched ideas: ${others("new_stock", fresh).join(", ")}.` : ""}` });
   else alternatives.push({ key: "new", title: "Start a new researched position", status: "None ready", symbol: null, href: "/research", detail: "No researched company outside your holdings has approved research and a limit yet." });
   if (etf) alternatives.push({ key: "etf", title: `Buy ${etf.symbol}`, status: etfAlloc ? "In the recommendation" : "Valid option", symbol: etf.symbol, href: `/research/${etf.symbol}`,
-    detail: `${etf.notes[0] ?? ""}. ${etf.notes[1] ?? ""}. Moving savings into it is a long-term allocation choice for money you will not need for 10+ years, not an opportunity the app is calling${tr.amount >= 1 ? `; you could move up to ${$(tr.amount)}` : ""}.` });
-  alternatives.push({ key: "cash", title: "Keep it in savings or brokerage cash", status: "Always valid", symbol: null, href: null,
-    detail: `${opt.find((o) => o.kind === "cash")?.notes[2] ?? "Earns a savings or Treasury rate"}. No stock risk; the right choice for money you may need within a few years. Holding cash is a valid choice when nothing is attractive enough.` });
+    detail: `${etf.notes[0] ?? ""}. ${etf.notes[1] ?? ""}. Moving outside money into it is a long-term allocation choice for money you will not need for 10+ years, not an opportunity the app is calling${tr.amount >= 1 ? `; you could move up to ${$(tr.amount)}` : ""}.` });
+  alternatives.push({ key: "cash", title: "Keep the money where it is", status: "Always valid", symbol: null, href: null,
+    detail: `Leave the outside money where it is and the brokerage cash as cash. ${opt.find((o) => o.kind === "cash")?.notes[2] ?? "Cash earns a savings or Treasury rate"}. No stock risk; holding cash is a valid choice when nothing is attractive enough.` });
 
   const confirm = [
     ...result.gates.filter((g) => !g.ok).map((g) => `${g.label}: ${g.detail}`),
     ...result.toVerify.filter((t) => !result.gates.some((g) => g.detail === t)).slice(0, 4),
-    ...(fromSavings ? [`Transfer ${$(fromSavings)} from savings to ${invName} yourself (the app moves no money), and wait until it shows as cash before buying.`] : []),
-    ...(fromSavings && !tr.verified ? ["Update your savings balance first; the one on file is old."] : []),
+    ...(fromSavings ? [`Transfer ${$(fromSavings)} to ${invName} yourself first (the app moves no money), and wait until it shows as cash before buying. Once it arrives it is taken off your outside money automatically.`] : []),
     ...(allocations.length ? ["Check the live price and your buying power in the broker's app before placing any order; the app never trades."] : []),
   ].filter((x, i, a) => a.indexOf(x) === i);
 
-  // Projected allocation: the invested portfolio grows by what moves in from savings (an internal transfer, so total
-  // investable capital does not change). Companies use look-through exposure (direct + inside ETFs, counted once).
+  // Projected allocation: the invested portfolio grows by what moves in from outside (total investable capital does
+  // not change). Companies use look-through exposure (direct + inside ETFs, counted once).
   const T = portfolio.total;
   const moved = plannedIn + fromSavings;
   const I = portfolio.investableCapital;
@@ -192,7 +177,7 @@ export function currentPortfolioDecision(args: EngineArgs & { preference: Capita
   const projected: Projection = {
     invested: { before: T, after: T + moved },
     investable: { before: I, after: I },
-    savingsAboveReserve: { before: cd.deployableSavings, after: Math.max(0, cd.deployableSavings - moved) },
+    outside: { before: cd.outside.remaining, after: Math.max(0, cd.outside.remaining - moved) },
     rows: allocations.map((a) => {
       const { v, look } = valueOf(a.symbol);
       const o = kindOf(result, a.symbol);
@@ -202,18 +187,21 @@ export function currentPortfolioDecision(args: EngineArgs & { preference: Capita
 
   return {
     headline, why, allocations, status: result.status, alternatives, confirm, result, capacity, projected,
-    funding: { brokerage: Math.min(here, allocations.reduce((a, x) => a + x.amount, 0)), fromSavings,
-      detail: !allocations.length ? "Nothing to fund." : fromSavings ? `${$2(Math.min(here, total))} already in ${invName}${plannedIn ? ` (including ${$2(plannedIn)} you planned to transfer)` : ""} + ${$(fromSavings)} from savings, of the ${$(tr.amount)} you authorised.` : `Cash already in ${invName}${plannedIn ? ` (including ${$2(plannedIn)} you planned to transfer)` : ""}. Savings untouched.` },
+    funding: { brokerage: Math.min(here, allocations.reduce((a, x) => a + x.amount, 0)), fromOutside: fromSavings,
+      detail: !allocations.length ? "Nothing to fund." : fromSavings ? `${$2(Math.min(here, total))} already in ${invName}${plannedIn ? ` (including ${$2(plannedIn)} you planned to transfer)` : ""} + ${$(fromSavings)} you would transfer in first, of the ${$(tr.amount)} outside money available.` : `Cash already in ${invName}${plannedIn ? ` (including ${$2(plannedIn)} you planned to transfer)` : ""}. Outside money untouched.` },
     money: { brokerageCash, brokerageConfirmed: inv?.confirmed ?? true, plannedIn, transferable: tr },
   };
 }
 
-/** Reads the newest standing capital preference (model_runs kind "capital_preference"). Earlier rows stay as history. */
+/**
+ * Reads the newest standing figure (model_runs kind "capital_preference"). Earlier rows stay as history. Rows saved
+ * before 2026-11-16 stored it as max_transfer (then a cap on moving savings); it is read as the same figure.
+ */
 export function preferenceFromRow(row: { outputs: unknown; computed_at: string } | null | undefined): CapitalPreference | null {
-  const o = (row?.outputs ?? null) as { max_transfer?: unknown; note?: unknown; cleared?: unknown } | null;
+  const o = (row?.outputs ?? null) as { outside_capital?: unknown; max_transfer?: unknown; note?: unknown; cleared?: unknown } | null;
   if (!o || o.cleared) return null;
-  const n = Number(o.max_transfer);
-  return Number.isFinite(n) && n >= 0 ? { maxTransfer: n, setAt: row!.computed_at, note: typeof o.note === "string" ? o.note : null } : null;
+  const n = Number(o.outside_capital ?? o.max_transfer);
+  return Number.isFinite(n) && n >= 0 ? { amount: n, setAt: row!.computed_at, note: typeof o.note === "string" ? o.note : null } : null;
 }
 
 /** The Current Portfolio decision from a workspace: the one call every page uses, so they cannot disagree. */

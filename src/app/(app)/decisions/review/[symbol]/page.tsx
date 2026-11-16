@@ -108,7 +108,7 @@ export default async function ReviewPage({ params }: { params: Promise<{ symbol:
               {rv.levels.hardMax !== null && <><dt>Portfolio maximum</dt><dd className="font-mono text-right">{pctStr(rv.levels.hardMax, 0)}</dd></>}
             </dl>
             <p className="text-sm">{rv.levelState.text}.</p>
-            <p className="text-xs text-muted">All percentages are of the invested portfolio ({usd(rv.snapshot.invested)}: holdings plus cash in the investment accounts; savings excluded), counting shares held through funds.</p>
+            <p className="text-xs text-muted">All percentages are of the invested portfolio ({usd(rv.snapshot.invested)}: holdings plus cash in the investment accounts; outside money excluded), counting shares held through funds.</p>
           </section>
 
           <section className="bg-surface border border-line rounded-2xl p-5 flex flex-col gap-3">

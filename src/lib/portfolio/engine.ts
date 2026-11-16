@@ -10,10 +10,13 @@
  *  - Invested portfolio (`total`): holdings in the brokerage, Acorns and retirement accounts plus the cash inside
  *    them. Every holding weight, bucket weight, company exposure and allocation limit uses this. Savings outside
  *    the brokerage never change it.
- *  - Total investable capital (`investableCapital`): the invested portfolio plus savings. Used for capital
- *    planning, liquidity and "share of everything I could invest" views.
- * There is no protected savings reserve (investor's direction, 2026-11-09): brokerage cash and transferable
- * savings both count as available, shown separately. `protectedReserve` stays in the shape as 0.
+ *  - Total investable capital (`investableCapital`): the invested portfolio plus the outside money you said is
+ *    available to invest. Used only for "share of everything I could invest" views.
+ * Money outside the brokerage (investor's direction, 2026-11-16): the app does not track savings balances or a
+ * reserve. You give one standing figure of outside money available to invest (e.g. $10,000). It is not buying
+ * power and never changes the portfolio value or any weight. Money that reaches the brokerage as a deposit after
+ * you set the figure shows up as brokerage cash and is taken off the figure, so nothing is counted twice.
+ * Savings-account snapshots stay on file as history but are left out of every figure.
  */
 import type { Quote } from "@/lib/market/quotes";
 import { companyLimit, type Policy, type Range } from "@/lib/policy/limits";
@@ -172,18 +175,27 @@ const USE_NOTE: Record<AccountCashUse, string> = {
 /** A transfer you recorded as planned. It counts as conditional money until the receiving account shows it. */
 export type PlannedTransfer = { id: string; fromAccountId: string; toAccountId: string; amount: number; date: string; note: string | null; createdAt: string };
 
+/** Your standing figure for money outside the brokerage accounts that is available to invest. */
+export type OutsideCapitalInput = { amount: number; setAt: string };
+export type OutsideCapital = {
+  /** The figure you entered, or null when none is set. */
+  figure: number | null;
+  setAt: string | null;
+  /** Deposits that reached the investing account after you set the figure (already counted as brokerage cash). */
+  movedIn: number;
+  /** What is still outside: figure minus what has moved in, never below 0. */
+  remaining: number;
+};
+
 export type CashView = {
   /** Each account's own cash and what it can be used for. */
   accounts: AccountCash[];
   /** The self-directed brokerage account new-money decisions buy in (null when none is on file). */
   investingAccount: { id: string; name: string; cash: number; confirmed?: boolean; basis?: CashBasis } | null;
   brokerage: number; // cash inside brokerage and retirement accounts
-  savings: number | null; // cash accounts; null when never entered
-  savingsAsOf: string | null;
-  protectedReserve: number; // policy floor, excluded from every percentage
-  reserveShortfall: number; // reserve not covered by savings
-  deployableSavings: number; // savings you would move to the brokerage: the balance, capped at your transfer limit
-  deployable: number; // brokerage + deployable savings (capital accounting; not all of it can buy anything today)
+  /** Money outside the brokerage you said is available to invest. Not buying power; transfer it first. */
+  outside: OutsideCapital;
+  deployable: number; // brokerage cash + outside money still available (capital accounting; not all of it can buy today)
   /** Cash that can buy a chosen stock or ETF today, without any transfer: the self-directed brokerage cash. */
   spendableNow: number;
 };
@@ -198,12 +210,10 @@ export type DataQuality = {
 };
 
 /** Lists what stops a total from being called reconciled investable capital. Pure. */
-export function reconciliationGaps(args: { brokerAsOfs: string[]; savingsEntered: boolean; reserveApproved: boolean; ledgerRows: number; positionsWithoutBasis: number }): { complete: boolean; label: string; gaps: string[] } {
+export function reconciliationGaps(args: { brokerAsOfs: string[]; ledgerRows: number; positionsWithoutBasis: number }): { complete: boolean; label: string; gaps: string[] } {
   const gaps: string[] = [];
   const dates = [...new Set(args.brokerAsOfs.map((d) => d.slice(0, 10)))].sort();
   if (dates.length > 1) gaps.push(`Accounts are as of different dates (${dates.join(", ")})`);
-  if (!args.savingsEntered) gaps.push("Savings balance not entered");
-  if (!args.reserveApproved) gaps.push("Protected reserve not approved (app default used)");
   if (args.ledgerRows === 0) gaps.push("No transactions recorded, so deposits, withdrawals and trades since each statement are unknown");
   if (args.positionsWithoutBasis > 0) gaps.push(`Cost basis missing for ${args.positionsWithoutBasis} position${args.positionsWithoutBasis > 1 ? "s" : ""}`);
   return { complete: gaps.length === 0, label: gaps.length === 0 ? "Reconciled" : "Incomplete", gaps };
@@ -220,10 +230,10 @@ export type CompanyExposure = {
 
 export type PortfolioView = {
   total: number; // invested portfolio (holdings + cash inside investment accounts): the denominator for every weight and limit
-  /** Invested portfolio plus savings: for capital planning and liquidity, never a limit denominator. */
+  /** Invested portfolio plus the outside money still available: for "share of everything" views, never a limit denominator. */
   investableCapital: number;
-  netWorthTracked: number; // invested portfolio + all savings
-  cash: number; // cash inside investment accounts (savings excluded; see cashDetail)
+  netWorthTracked: number; // same as investableCapital (savings balances are no longer tracked)
+  cash: number; // cash inside investment accounts (outside money excluded; see cashDetail)
   cashDetail: CashView;
   quality: DataQuality;
   sinceStatementDollar: number | null; // estimated price change on statement holdings since each statement
@@ -238,6 +248,18 @@ export type PortfolioView = {
   pricedLive: number; // count of holdings priced from a live quote
 };
 
+/**
+ * Outside money still available: your figure minus deposits that reached the investing account after you set it.
+ * A deposit on the day you set the figure is not taken off (enter what is left if you moved money that day). Pure.
+ */
+export function outsideCapital(input: OutsideCapitalInput | null, ledger: LedgerEntry[], investingAccountId: string | null): OutsideCapital {
+  if (!input) return { figure: null, setAt: null, movedIn: 0, remaining: 0 };
+  const day = input.setAt.slice(0, 10);
+  const movedIn = round2(ledger.filter((t) => t.accountId === investingAccountId && (t.kind === "deposit" || t.kind === "transfer_in") && t.amount > 0 && t.tradeDate > day).reduce((a, t) => a + t.amount, 0));
+  const figure = Math.max(0, input.amount);
+  return { figure, setAt: input.setAt, movedIn, remaining: round2(Math.max(0, figure - movedIn)) };
+}
+
 export function buildPortfolio(
   snapshots: SnapshotInput[],
   quotes: Map<string, Quote>,
@@ -246,28 +268,23 @@ export function buildPortfolio(
   ledger: LedgerEntry[] = [],
   now: Date = new Date(),
   cashConfirmations: CashConfirmation[] = [],
-  /** Your standing limit on moving savings to the brokerage (capital preference); null = no limit saved. */
-  maxTransfer: number | null = null,
+  /** Your standing figure of outside money available to invest (capital preference); null = none set. */
+  outsideInput: OutsideCapitalInput | null = null,
 ): PortfolioView {
   const bySymbol = new Map<string, { quantity: number; stmtValue: number; stmtPrice: number | null; stmtQty: number; cost: number | null; costKnown: boolean; accounts: Set<string>; asOf: string }>();
   let brokerageCash = 0;
-  let savings: number | null = null;
-  let savingsAsOf: string | null = null;
   const accounts: AccountView[] = [];
   const accountCash: AccountCash[] = [];
   const missing: string[] = [];
 
-  for (const s of snapshots) {
-    const isCashAccount = s.accountRole === "cash" || s.accountRole === "protected_savings";
+  // Savings accounts are history only: the app no longer tracks a savings balance (2026-11-16).
+  for (const s of snapshots.filter((x) => x.accountRole !== "cash" && x.accountRole !== "protected_savings")) {
     const after = ledger.filter((t) => t.accountId === s.accountId && t.tradeDate > s.asOf.slice(0, 10));
     const cashAfter = (s.cashValue ?? 0) + after.reduce((a, t) => a + t.amount, 0);
     const use = accountCashUse(s.accountName, s.accountRole);
     const acctCash: AccountCash = { id: s.accountId, name: s.accountName, role: s.accountRole, cash: round2(cashAfter), use, canBuyChosen: use === "self_directed", note: USE_NOTE[use] };
     accountCash.push(acctCash);
-    if (isCashAccount) {
-      savings = (savings ?? 0) + cashAfter;
-      if (!savingsAsOf || s.asOf < savingsAsOf) savingsAsOf = s.asOf;
-    } else brokerageCash += cashAfter;
+    brokerageCash += cashAfter;
 
     let acctValue = cashAfter;
     let stmtComputed = s.cashValue ?? 0;
@@ -317,28 +334,20 @@ export function buildPortfolio(
     if (gap !== null && Math.abs(gap) > 1) missing.push(`${s.accountName}: statement total differs from its positions plus cash by ${gap > 0 ? "" : "-"}$${Math.abs(gap).toFixed(2)}`);
   }
 
-  // No protected reserve (2026-11-09 direction); the old policy row is kept on file but no longer applied.
-  const reserve = 0;
-  // Savings count as investable only up to the amount you said you would transfer ($10,000), never the whole balance.
-  const aboveReserve = savings === null ? 0 : Math.max(0, savings - reserve);
-  const deployableSavings = maxTransfer === null ? aboveReserve : Math.min(aboveReserve, Math.max(0, maxTransfer));
   const selfDirected = accountCash.filter((a) => a.use === "self_directed").sort((a, b) => b.cash - a.cash);
   const investingAccount = selfDirected[0] ? { id: selfDirected[0].id, name: selfDirected[0].name, cash: Math.max(0, selfDirected[0].cash), confirmed: selfDirected[0].basis?.confirmed ?? false, basis: selfDirected[0].basis } : null;
+  const outside = outsideCapital(outsideInput, ledger, investingAccount?.id ?? null);
+  const deployableSavings = outside.remaining;
   const cashDetail: CashView = {
     accounts: accountCash,
     investingAccount,
     spendableNow: round2(Math.max(0, investingAccount?.cash ?? 0)),
     brokerage: round2(brokerageCash),
-    savings: savings === null ? null : round2(savings),
-    savingsAsOf,
-    protectedReserve: reserve,
-    reserveShortfall: savings === null ? reserve : round2(Math.max(0, reserve - savings)),
-    deployableSavings: round2(deployableSavings),
-    deployable: round2(brokerageCash + deployableSavings),
+    outside,
+    deployable: round2(brokerageCash + outside.remaining),
   };
-  // Savings stay outside the invested portfolio: entering a savings balance never changes a holding's weight.
+  // Outside money is never part of the invested portfolio: it changes no value and no weight.
   const cash = brokerageCash;
-  if (savings === null) missing.push("Savings balance not entered, so transferable savings are not counted");
 
   const rows = [...bySymbol.entries()].map(([symbol, h]) => {
     const q = quotes.get(symbol);
@@ -436,8 +445,6 @@ export function buildPortfolio(
   }
   const reconciliation = reconciliationGaps({
     brokerAsOfs: brokerAccounts.map((a) => a.asOf),
-    savingsEntered: savings !== null,
-    reserveApproved: true,
     ledgerRows: ledger.length,
     positionsWithoutBasis: noBasis.length,
   });
@@ -447,7 +454,7 @@ export function buildPortfolio(
   return {
     total: round2(total),
     investableCapital: round2(total + deployableSavings),
-    netWorthTracked: round2(total + (savings ?? 0)),
+    netWorthTracked: round2(total + deployableSavings),
     cash: round2(cash),
     cashDetail,
     quality,

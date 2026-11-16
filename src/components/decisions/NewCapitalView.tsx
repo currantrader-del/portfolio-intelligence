@@ -115,14 +115,15 @@ export async function NewCapitalView({ ws, amount, source, confirmed, action }: 
 }
 
 /**
- * Each account's own cash and what it can do. Cash never moves between accounts on its own; savings can fund the
+ * Each account's own cash and what it can do. Cash never moves between accounts on its own; outside money can fund the
  * brokerage only through a transfer you plan here (recorded only, nothing is moved).
  */
 export function AccountCashCard({ ws }: { ws: Workspace }) {
   const cd = ws.portfolio.cashDetail;
   const accounts = cd.accounts ?? [];
   const name = (id: string) => accounts.find((a) => a.id === id)?.name ?? "Unknown account";
-  const sources = accounts.filter((a) => a.use === "savings" || a.use === "self_directed");
+  // Outside money is offered first as a source; it is your standing figure, not an account on file.
+  const sources = [...(cd.outside.remaining >= 1 ? [{ id: "outside", name: `Outside money (${usd(cd.outside.remaining)} available)`, use: "outside" }] : []), ...accounts.filter((a) => a.use === "self_directed")];
   const targets = accounts.filter((a) => a.canBuyChosen);
   return (
     <Card labelledBy="acct-h" className="!gap-2.5">
@@ -130,7 +131,7 @@ export function AccountCashCard({ ws }: { ws: Workspace }) {
       <ul className="flex flex-col">
         {accounts.map((a) => (
           <li key={a.id} className="flex items-start justify-between gap-3 py-1.5 border-t border-line first:border-t-0">
-            <span className="flex flex-col min-w-0"><span className="t-sm text-ink">{a.name}</span><span className="t-xs">{a.use === "savings" ? `${a.note}. ${usd(cd.deployableSavings)} could be transferred.` : a.note}</span>
+            <span className="flex flex-col min-w-0"><span className="t-sm text-ink">{a.name}</span><span className="t-xs">{a.note}</span>
               {a.basis && <span className={`t-xs ${a.basis.confirmed ? "" : "warn"}`}>{a.basis.detail}{a.basis.checks.length ? ` ${a.basis.checks.join(" ")}` : ""}</span>}
               {a.basis && !a.basis.confirmed && a.canBuyChosen && (
                 <ActionForm action={confirmCash} success="Cash confirmed" className="flex items-end gap-2 pt-1">
@@ -160,9 +161,9 @@ export function AccountCashCard({ ws }: { ws: Workspace }) {
           <Disclose summary="Plan a transfer to the brokerage account">
             <ActionForm action={planTransfer} success="Transfer recorded as planned" className="flex flex-col gap-2">
               <div className="grid grid-cols-2 gap-2">
-                <label className="field">From<select name="from" className="input" defaultValue={sources.find((a) => a.use === "savings")?.id ?? sources[0].id}>{sources.map((a) => <option key={a.id} value={a.id}>{a.name}</option>)}</select></label>
+                <label className="field">From<select name="from" className="input" defaultValue={sources[0].id}>{sources.map((a) => <option key={a.id} value={a.id}>{a.name}</option>)}</select></label>
                 <label className="field">To<select name="to" className="input" defaultValue={targets[0].id}>{targets.map((a) => <option key={a.id} value={a.id}>{a.name}</option>)}</select></label>
-                <label className="field">Amount<input name="amount" inputMode="decimal" className="input" placeholder={cd.deployableSavings >= 1 ? String(Math.floor(cd.deployableSavings)) : "0"} /></label>
+                <label className="field">Amount<input name="amount" inputMode="decimal" className="input" placeholder={cd.outside.remaining >= 1 ? String(Math.floor(cd.outside.remaining)) : "0"} /></label>
                 <label className="field">Date<input name="date" type="date" className="input" defaultValue={ws.now.toISOString().slice(0, 10)} /></label>
               </div>
               <span className="t-xs">This only records your plan; it moves no money.</span>
@@ -198,7 +199,7 @@ export function ExposureCard({ r }: { r: NewCapitalResult }) {
       </table>
     </div>
     <ul className="list-disc pl-4 t-sm flex flex-col gap-1">{r.exposure.reasons.map((x) => <li key={x}>{x}</li>)}</ul>
-    <span className="t-xs">% of your invested portfolio after the money moves in (savings that stay put are not counted), including what each fund holds; each company counted once. Levels: NVIDIA&apos;s limit and the exposure levels on file ({shown[0]?.rows.find((x) => x.key === "semis")?.level?.status ?? "proposed"}). Industry and theme figures are lower bounds.</span>
+    <span className="t-xs">% of your invested portfolio after the money moves in (outside money that stays put is not counted), including what each fund holds; each company counted once. Levels: NVIDIA&apos;s limit and the exposure levels on file ({shown[0]?.rows.find((x) => x.key === "semis")?.level?.status ?? "proposed"}). Industry and theme figures are lower bounds.</span>
   </Card>
 
   );

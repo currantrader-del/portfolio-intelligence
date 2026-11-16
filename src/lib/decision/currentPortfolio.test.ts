@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { buildPortfolio, type SnapshotInput } from "@/lib/portfolio/engine";
 import { policyFromRules, type PolicyRuleRow } from "@/lib/policy/rules";
 import { toResearchRecord } from "@/lib/research/records";
-import { currentPortfolioDecision, preferenceFromRow, transferableSavings } from "./currentPortfolio";
+import { currentPortfolioDecision, outsideAvailable, preferenceFromRow } from "./currentPortfolio";
 
 // Synthetic data only.
 const now = new Date("2026-11-05T16:00:00Z");
@@ -33,97 +33,102 @@ const policy = policyFromRules([
   row({ scope: "portfolio", subject: "protected_reserve", value: 3000 }),
 ]);
 const quiet = new Map([["AAA", { cik: "1", company: "AAA", filings: [{ form: "10-Q", filed: "2026-08-01", reportDate: null, description: "Quarterly report", items: [], isEarnings: true, url: "u", category: "periodic" as const, note: "" }], lastEarnings: null, nextEarningsEstimate: null, source: "s", fetchedAt: "t" }]]);
-const pref = (maxTransfer: number) => ({ maxTransfer, setAt: "2026-11-09T04:30:00Z", note: null });
+const pref = (amount: number) => ({ amount, setAt: "2026-11-01T04:30:00Z", note: null });
+const outside = (amount: number) => ({ amount, setAt: "2026-11-01T04:30:00Z" });
+const port = (cash: number, figure: number | null, ledger: Parameters<typeof buildPortfolio>[4] = [], extra: SnapshotInput[] = []) =>
+  buildPortfolio([broker(cash), ...extra], new Map(), policy, {}, ledger, now, [], figure === null ? null : outside(figure));
 
-describe("transferable savings", () => {
-  const p = (bal: number, extra: SnapshotInput[] = []) => buildPortfolio([broker(200), savingsSnap(bal), ...extra], new Map(), policy, {}, [], now);
-  it("is min(limit, savings): no protected reserve is held back", () => {
-    expect(transferableSavings({ portfolio: p(13000), transfers: [], preference: pref(10000), now }).amount).toBe(10000);
-    expect(transferableSavings({ portfolio: p(20000), transfers: [], preference: pref(10000), now }).amount).toBe(10000);
-    expect(transferableSavings({ portfolio: p(5000), transfers: [], preference: pref(10000), now }).amount).toBe(5000);
-    expect(transferableSavings({ portfolio: p(3000), transfers: [], preference: pref(10000), now }).amount).toBe(3000);
-    expect(transferableSavings({ portfolio: p(0), transfers: [], preference: pref(10000), now }).amount).toBe(0);
-    expect(transferableSavings({ portfolio: p(13000), transfers: [], preference: pref(10000), now }).detail).not.toMatch(/reserve/);
+describe("outside money available (2026-11-16: a standing figure, no savings balance, no reserve)", () => {
+  it("is your figure, whatever any old savings balance on file says", () => {
+    expect(outsideAvailable({ portfolio: port(200, 10000), plannedIn: 0 }).amount).toBe(10000);
+    expect(outsideAvailable({ portfolio: port(200, 10000, [], [savingsSnap(500)]), plannedIn: 0 }).amount).toBe(10000);
+    expect(outsideAvailable({ portfolio: port(200, 10000), plannedIn: 0 }).detail).not.toMatch(/reserve|savings/i);
   });
-  it("counts nothing without a standing limit", () => {
-    const t = transferableSavings({ portfolio: p(13000), transfers: [], preference: null, now });
+  it("counts nothing without a figure", () => {
+    const t = outsideAvailable({ portfolio: port(200, null), plannedIn: 0 });
     expect(t.amount).toBe(0);
-    expect(t.detail).toMatch(/not set a standing transfer limit/);
+    expect(t.detail).toMatch(/have not entered/);
   });
-  it("subtracts transfers already planned, so an internal transfer is never counted twice", () => {
-    const transfers = [{ id: "t", fromAccountId: "s", toAccountId: "a", amount: 1500, date: "2026-11-05", note: null, createdAt: "2026-11-05T10:00:00Z" }];
-    expect(transferableSavings({ portfolio: p(13000), transfers, preference: pref(10000), now }).amount).toBe(8500);
-    expect(transferableSavings({ portfolio: p(1000), transfers, preference: pref(10000), now }).amount).toBe(0);
+  it("takes off a deposit that reached the brokerage after the figure was set, so it is never counted twice", () => {
+    const dep = [{ accountId: "a", tradeDate: "2026-11-03", kind: "deposit" as const, symbol: null, quantity: null, price: null, amount: 2500 }];
+    const p = port(200, 10000, dep);
+    expect(p.cashDetail.outside).toMatchObject({ figure: 10000, movedIn: 2500, remaining: 7500 });
+    expect(outsideAvailable({ portfolio: p, plannedIn: 0 }).amount).toBe(7500);
+    // A deposit before the figure was set, or into another account, is not taken off.
+    const early = [{ ...dep[0], tradeDate: "2026-10-20" }, { ...dep[0], accountId: "acorns" }];
+    expect(port(200, 10000, early).cashDetail.outside.remaining).toBe(10000);
   });
-  it("adds every savings account on file and says so", () => {
-    const t = transferableSavings({ portfolio: p(3000, [savingsSnap(3000, "s2", "USAA Savings")]), transfers: [], preference: pref(10000), now });
-    expect(t.savings).toBe(6000);
-    expect(t.detail).toMatch(/across 2 savings accounts/);
+  it("subtracts transfers already planned into the brokerage", () => {
+    expect(outsideAvailable({ portfolio: port(200, 10000), plannedIn: 1500 }).amount).toBe(8500);
+  });
+  it("never changes the portfolio value, weights or room under a limit", () => {
+    const withIt = port(200, 10000), without = port(200, null);
+    expect(withIt.total).toBe(without.total);
+    expect(withIt.holdings.map((h) => h.weight)).toEqual(without.holdings.map((h) => h.weight));
+    expect(withIt.exposures.find((e) => e.symbol === "AAA")!.headroomDollars).toBe(without.exposures.find((e) => e.symbol === "AAA")!.headroomDollars);
+    expect(withIt.investableCapital - without.investableCapital).toBe(10000);
+  });
+  it("leaves savings-account snapshots out of every figure", () => {
+    expect(port(200, null, [], [savingsSnap(13000)]).total).toBe(port(200, null).total);
+    expect(port(200, null, [], [savingsSnap(13000)]).cashDetail.accounts.map((a) => a.id)).toEqual(["a"]);
   });
 });
 
 describe("current portfolio decision", () => {
   const args = (over: Partial<Parameters<typeof currentPortfolioDecision>[0]> = {}) => ({
-    portfolio: buildPortfolio([broker(200), savingsSnap(13000)], new Map(), policy, {}, [], now),
+    portfolio: port(200, 10000),
     research: [research("ADD", "Add")], policy, now, filings: quiet, holdingsConfirmed: true, preference: pref(10000), ...over,
   });
 
-  it("uses savings only for the stock add that qualifies, and only what it needs", () => {
+  it("uses outside money only for the stock add that qualifies, only what it needs, and says to transfer it first", () => {
     const d = currentPortfolioDecision(args());
     const aaa = d.allocations.find((x) => x.symbol === "AAA")!;
     expect(aaa.amount).toBeGreaterThan(200);
-    expect(d.funding.fromSavings).toBe(Math.ceil(aaa.amount - 200));
-    expect(d.funding.fromSavings).toBeLessThan(10000);
-    expect(d.allocations.reduce((a, x) => a + x.amount, 0)).toBeLessThanOrEqual(200 + d.funding.fromSavings + 0.01);
+    expect(d.funding.fromOutside).toBe(Math.ceil(aaa.amount - 200));
+    expect(d.funding.fromOutside).toBeLessThan(10000);
+    expect(d.allocations.reduce((a, x) => a + x.amount, 0)).toBeLessThanOrEqual(200 + d.funding.fromOutside + 0.01);
     expect(d.headline).toMatch(/^Add \$\d[\d,]* AAA/);
-    expect(d.confirm.join(" ")).toMatch(/Transfer \$[\d,]+ from savings to Broker yourself/);
+    expect(d.why).toMatch(/transfer \$[\d,]+ of the \$10,000 outside money to Broker first/);
+    expect(d.confirm.join(" ")).toMatch(/Transfer \$[\d,]+ to Broker yourself first/);
     expect(d.alternatives.map((a) => a.key)).toEqual(["add", "new", "etf", "cash"]);
   });
 
-  it("does not move savings when no researched stock qualifies; the ETF is an alternative, not a reason to transfer", () => {
+  it("keeps the outside money where it is when no researched stock qualifies; the ETF is an alternative, not a reason to transfer", () => {
     const d = currentPortfolioDecision(args({ research: [research("HOLD / NO ADD", "Hold")] }));
-    expect(d.funding.fromSavings).toBe(0);
-    expect(d.headline).toMatch(/^No transfer from savings\. The \$200\.00 in Broker: (VOO|VXUS|AVUV) or keep it as cash/);
+    expect(d.funding.fromOutside).toBe(0);
+    expect(d.headline).toMatch(/^Keep the \$10,000 where it is\. The \$200\.00 in Broker: (VOO|VXUS|AVUV) or keep it as cash/);
     expect(d.allocations.reduce((a, x) => a + x.amount, 0)).toBeLessThanOrEqual(200);
     expect(d.alternatives.find((a) => a.key === "etf")!.detail).toMatch(/not an opportunity the app is calling; you could move up to \$10,000/);
   });
 
-  it("never treats savings as buying power without a standing limit", () => {
-    const d = currentPortfolioDecision(args({ preference: null }));
-    expect(d.funding.fromSavings).toBe(0);
+  it("never treats outside money as buying power without a figure", () => {
+    const d = currentPortfolioDecision(args({ portfolio: port(200, null), preference: null }));
+    expect(d.funding.fromOutside).toBe(0);
     expect(d.allocations.reduce((a, x) => a + x.amount, 0)).toBeLessThanOrEqual(200);
   });
 
   it("projects allocation on both denominators; a transfer grows the invested portfolio but not investable capital", () => {
     const d = currentPortfolioDecision(args());
     const p = args().portfolio;
-    expect(d.projected.invested).toEqual({ before: p.total, after: p.total + d.funding.fromSavings });
+    expect(d.projected.invested).toEqual({ before: p.total, after: p.total + d.funding.fromOutside });
     expect(d.projected.investable.after).toBe(p.investableCapital);
     const aaa = d.projected.rows.find((x) => x.symbol === "AAA")!;
-    expect(aaa.afterInvested).toBeLessThanOrEqual(0.10 + 1e-9); // its approved 10% limit, on the invested portfolio
+    expect(aaa.afterInvested).toBeLessThanOrEqual(0.10 + 1e-9);
     expect(aaa.afterInvestable).toBeLessThan(aaa.afterInvested);
-    expect(d.projected.savingsAboveReserve.after).toBe(13000 - d.funding.fromSavings);
-  });
-
-  it("savings do not create room under a limit by being on file: only money actually moved in counts", () => {
-    const withSavings = buildPortfolio([broker(200), savingsSnap(13000)], new Map(), policy, {}, [], now);
-    const without = buildPortfolio([broker(200), savingsSnap(3000)], new Map(), policy, {}, [], now);
-    expect(withSavings.total).toBe(without.total);
-    expect(withSavings.exposures.find((e) => e.symbol === "AAA")!.headroomDollars).toBe(without.exposures.find((e) => e.symbol === "AAA")!.headroomDollars);
-    expect(withSavings.holdings.map((h) => h.weight)).toEqual(without.holdings.map((h) => h.weight));
-    expect(withSavings.investableCapital - without.investableCapital).toBe(10000);
+    expect(d.projected.outside.after).toBe(10000 - d.funding.fromOutside);
   });
 
   it("does nothing when there is no cash and nothing qualifies", () => {
-    const d = currentPortfolioDecision(args({ portfolio: buildPortfolio([broker(0), savingsSnap(3000)], new Map(), policy, {}, [], now), research: [research("HOLD / NO ADD", "Hold")] }));
+    const d = currentPortfolioDecision(args({ portfolio: port(0, 10000), research: [research("HOLD / NO ADD", "Hold")] }));
     expect(d.allocations).toEqual([]);
-    expect(d.headline).toMatch(/^Do nothing now/);
+    expect(d.headline).toMatch(/^Do nothing now: keep the \$10,000 where it is/);
   });
 });
 
 describe("capital preference row", () => {
   it("reads the newest row and honours a cleared one", () => {
-    expect(preferenceFromRow({ outputs: { max_transfer: 10000 }, computed_at: "t" })).toEqual({ maxTransfer: 10000, setAt: "t", note: null });
+    expect(preferenceFromRow({ outputs: { max_transfer: 10000 }, computed_at: "t" })).toEqual({ amount: 10000, setAt: "t", note: null });
+    expect(preferenceFromRow({ outputs: { outside_capital: 8000 }, computed_at: "t" })).toEqual({ amount: 8000, setAt: "t", note: null });
     expect(preferenceFromRow({ outputs: { cleared: true }, computed_at: "t" })).toBeNull();
     expect(preferenceFromRow(null)).toBeNull();
   });

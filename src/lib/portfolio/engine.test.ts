@@ -70,23 +70,22 @@ describe("portfolio engine", () => {
     expect(p.quality.reasons[0]).toMatch(/plus trades you recorded since/);
   });
 
-  it("separates brokerage cash and transferable savings, with no protected reserve", () => {
+  it("separates brokerage cash and outside money; a savings account on file is history only (2026-11-16)", () => {
     const sav: SnapshotInput = { accountId: "s", accountName: "Savings", accountRole: "cash", asOf: "2026-11-04T23:59:00Z", totalValue: 14000, cashValue: 14000, positions: [] };
-    const p = buildPortfolio([snap(), sav], new Map(), null);
-    // No protected reserve (2026-11-09 direction): all savings count as transferable capital.
-    expect(p.cashDetail).toMatchObject({ brokerage: 100, savings: 14000, protectedReserve: 0, deployableSavings: 14000, deployable: 14100 });
-    // Weights use the invested portfolio: savings never change them. Investable capital adds savings.
+    const p = buildPortfolio([snap(), sav], new Map(), null, {}, [], new Date(), [], { amount: 10000, setAt: "2026-11-01T12:00:00Z" });
+    expect(p.cashDetail).toMatchObject({ brokerage: 100, outside: { figure: 10000, movedIn: 0, remaining: 10000 }, deployable: 10100 });
+    // Weights use the invested portfolio: outside money never changes them. Investable capital adds it.
     expect(p.total).toBe(1000 + 100);
-    expect(p.investableCapital).toBe(1000 + 100 + 14000);
+    expect(p.investableCapital).toBe(1000 + 100 + 10000);
     expect(p.holdings.find((h) => h.symbol === "VOO")!.weight).toBeCloseTo(600 / 1100, 6);
-    expect(p.netWorthTracked).toBe(15100);
+    expect(p.accounts.map((a) => a.id)).not.toContain("s");
   });
 
-  it("flags missing savings and statements that do not add up", () => {
+  it("flags statements that do not add up, and never asks for a savings balance", () => {
     const p = buildPortfolio([snap({ totalValue: 1200 })], new Map(), null);
-    expect(p.cashDetail.savings).toBeNull();
+    expect(p.cashDetail.outside).toMatchObject({ figure: null, remaining: 0 });
     expect(p.accounts[0].statementGap).toBe(100);
-    expect(p.quality.missing.join(" ")).toMatch(/Savings balance not entered/);
+    expect(p.quality.missing.join(" ")).not.toMatch(/Savings balance/);
     expect(p.quality.missing.join(" ")).toMatch(/differs from its positions plus cash by \$100.00/);
   });
 

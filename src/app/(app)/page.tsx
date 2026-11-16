@@ -45,7 +45,7 @@ export default async function TodayPage() {
   // What this morning's scheduled run could not do (budget, ceiling or a failed step), said plainly rather than left out.
   const { data: runRow } = await db.from("model_runs").select("computed_at, outputs").eq("kind", "morning_run").order("computed_at", { ascending: false }).limit(1).maybeSingle();
   const morningSkipped = runRow && etDay(new Date(runRow.computed_at)) === etDay(ws.now) ? ((runRow.outputs as { skipped?: string[] }).skipped ?? []).filter((x) => !/^trade_scan paused/.test(x)) : [];
-  const morningCheck = morning ? outdatedVerdict({ writtenAt: morning.at, events: await loadContextEvents(db, morning.at).catch(() => []), text: morning.answer, currentReserve: p.cashDetail.protectedReserve }) : null;
+  const morningCheck = morning ? outdatedVerdict({ writtenAt: morning.at, events: await loadContextEvents(db, morning.at).catch(() => []), text: morning.answer, currentReserve: 0 }) : null;
 
   const spy = ws.benchmarks.find((b) => b.symbol === "SPY")?.dayPct ?? null;
   const brief = writeBrief(p, spy, ws.alerts);
@@ -140,7 +140,7 @@ export default async function TodayPage() {
               {ws.benchmarks.map((b) => (
                 <Metric key={b.symbol} className="max-lg:hidden" size="sm" align="right" label={b.label} value={pctStr(b.dayPct, 1, true)} tone={b.dayPct === null ? null : b.dayPct >= 0 ? "gain" : "loss"} />
               ))}
-              <Metric size="sm" align="right" label="Invested" value={`${verified ? "" : "≈ "}${usd(p.total)}`} note={p.investableCapital > p.total + 0.5 ? `${usd(p.investableCapital)} with savings` : undefined} />
+              <Metric size="sm" align="right" label="Invested" value={`${verified ? "" : "≈ "}${usd(p.total)}`} note={p.investableCapital > p.total + 0.5 ? `${usd(p.investableCapital)} with outside money` : undefined} />
             </div>
           </div>
           <p className="t-sm leading-relaxed">{brief.sentences.join(" ")}</p>
