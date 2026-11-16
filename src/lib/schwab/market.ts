@@ -80,9 +80,26 @@ export function mapTrades(body: unknown): MappedTrade[] {
   return out;
 }
 
+export type MappedDeposit = { activityId: string; tradeDate: string; kind: "deposit"; amount: number };
+/** Money coming into the account from outside it (bank transfer, wire, check). Internal journals are left out. */
+export const DEPOSIT_TYPES = ["ACH_RECEIPT", "CASH_RECEIPT", "WIRE_IN", "ELECTRONIC_FUND"] as const;
+
+/** Pure: Schwab's transaction list to incoming deposits (positive cash only, valid, dated). */
+export function mapDeposits(body: unknown): MappedDeposit[] {
+  const out: MappedDeposit[] = [];
+  for (const t of Array.isArray(body) ? (body as SchwabTxn[]) : []) {
+    if (!t.type || !(DEPOSIT_TYPES as readonly string[]).includes(t.type) || (t.status && t.status !== "VALID") || t.activityId === undefined) continue;
+    const net = n(t.netAmount);
+    const day = (t.tradeDate ?? t.time ?? "").slice(0, 10);
+    if (net === null || net <= 0 || !/^\d{4}-\d{2}-\d{2}$/.test(day)) continue;
+    out.push({ activityId: String(t.activityId), tradeDate: day, kind: "deposit", amount: r2(net) });
+  }
+  return out;
+}
+
 export type TradeSync = { ok: boolean; at: string; added: number; seen: number; error: string | null };
 
-/** Copies new Schwab buys and sells since the first Schwab sync (at most 60 days back) into the ledger. */
+/** Copies new Schwab buys, sells and incoming deposits since the first Schwab sync (at most 60 days back) into the ledger. */
 export async function syncSchwabTrades(db: SupabaseClient, now = new Date()): Promise<TradeSync> {
   const out: TradeSync = { ok: false, at: now.toISOString(), added: 0, seen: 0, error: null };
   try {
@@ -109,6 +126,21 @@ export async function syncSchwabTrades(db: SupabaseClient, now = new Date()): Pr
         if (error) throw new Error(`Could not save trades: ${error.message}`);
         out.added += fresh.length;
       }
+      // Deposits too, so money you move in from outside is taken off your outside-money figure (2026-11-16).
+      // A failure here never stops the trade sync.
+      for (const type of DEPOSIT_TYPES) {
+        try {
+          const dq = new URLSearchParams({ startDate: start.toISOString(), endDate: now.toISOString(), types: type });
+          const deps = mapDeposits(await schwabGet(db, `/trader/v1/accounts/${a.hashValue}/transactions?${dq}`)).filter((d) => !seen.has(d.activityId));
+          if (!deps.length) continue;
+          const { error } = await db.from("transactions").insert(deps.map((d) => ({ account_id: target.id, trade_date: d.tradeDate, kind: "deposit", symbol: null, quantity: null, price: null, amount: d.amount, source_kind: "schwab_api", note: `Deposit from Schwab (schwab activity ${d.activityId})` })));
+          if (error) throw new Error(error.message);
+          deps.forEach((d) => seen.add(d.activityId));
+          out.added += deps.length;
+        } catch (e) {
+          console.error(`schwab deposits (${type}): ${(e as Error).message.slice(0, 200)}`);
+        }
+      }
     }
     out.ok = true;
   } catch (e) {
@@ -120,6 +152,6 @@ export async function syncSchwabTrades(db: SupabaseClient, now = new Date()): Pr
 
 /** Your Schwab trades on file, newest first. */
 export async function recentSchwabTrades(db: SupabaseClient, limit = 10) {
-  const { data } = await db.from("transactions").select("trade_date, kind, symbol, quantity, price, amount").eq("source_kind", "schwab_api").order("trade_date", { ascending: false }).limit(limit);
+  const { data } = await db.from("transactions").select("trade_date, kind, symbol, quantity, price, amount").eq("source_kind", "schwab_api").in("kind", ["buy", "sell"]).order("trade_date", { ascending: false }).limit(limit);
   return (data ?? []) as { trade_date: string; kind: "buy" | "sell"; symbol: string; quantity: number; price: number; amount: number }[];
 }

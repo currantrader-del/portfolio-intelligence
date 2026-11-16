@@ -154,9 +154,6 @@ export function evaluateAlerts(args: {
       href: "/policy",
     });
   }
-  if (portfolio.cashDetail.savings === null) {
-    out.push({ id: "savings-missing", severity: "medium", symbol: null, kind: "data_missing", title: "Savings balance not entered", detail: "Without it the app cannot count the capital you could transfer to Schwab.", href: "/portfolio/reconcile" });
-  }
 
   if (portfolio.oldestHoldingsAsOf) {
     const days = Math.floor((now.getTime() - new Date(portfolio.oldestHoldingsAsOf).getTime()) / 86_400_000);

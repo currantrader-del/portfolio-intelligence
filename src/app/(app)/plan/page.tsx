@@ -38,7 +38,7 @@ export default async function PlanPage() {
   const check = plan && last ? outdatedVerdict({
     writtenAt: last.at, events: await loadContextEvents(db, last.at).catch(() => []),
     text: [plan.summary, plan.cash.now, plan.cash.waitFor, ...plan.nextActions, ...plan.positions.map((x) => `${x.symbol}: ${x.action} ${x.reason}`), ...(plan.opportunities ?? []).map((o) => `${o.symbol}: ${o.vsVoo} ${o.reason}`)].join(" "),
-    currentReserve: ws.portfolio.cashDetail.protectedReserve,
+    currentReserve: 0,
     policy: audit ? {
       approved: audit.subjects.filter((x) => x.scope === "company" && x.authority === "you" && x.used?.approved_at).map((x) => ({ symbol: x.subject, at: x.used!.approved_at! })),
       imported: audit.imported.map((x) => x.subject),
@@ -74,7 +74,7 @@ export default async function PlanPage() {
       <Card labelledBy="pl-now" className="!gap-2">
         <CardHead id="pl-now" title="Where things stand today" right={<Pill small>Computed now · no AI</Pill>} />
         <ul className="flex flex-col gap-1.5 t-sm">
-          <li><span className="text-ink font-semibold">Cash you could invest:</span> {money(cd.spendableNow)} in your brokerage account{best.money.transferable.amount >= 1 ? `, plus up to ${money(best.money.transferable.amount)} from savings under your standing transfer limit (only for an opportunity that justifies it)` : ""}. {unverified.length ? "Estimated, not confirmed" : "Verified by recent statements"}. Investing it, or leaving it in cash, are both valid.</li>
+          <li><span className="text-ink font-semibold">Cash you could invest:</span> {money(cd.spendableNow)} in your brokerage account{best.money.transferable.amount >= 1 ? `, plus up to ${money(best.money.transferable.amount)} of the outside money you could transfer in (only for an opportunity that justifies it)` : ""}. {unverified.length ? "Estimated, not confirmed" : "Verified by recent statements"}. Investing it, or leaving it in cash, are both valid.</li>
           <li><span className="text-ink font-semibold">Holdings:</span> {unverified.length ? `estimated. ${unverified.map((a) => `${a.name} is known from a ${a.asOf.slice(0, 10)} statement${a.tradesAfter ? ` plus recorded trades` : ""}`).join("; ")}. Check them before acting on a dollar amount.` : "verified by statements within a week."}</li>
           <li><span className="text-ink font-semibold">Best action now:</span> {best.headline}. <Link href="/decisions" className="t-sm">Decisions</Link></li>
           {ws.alerts.filter((a) => a.kind === "over_limit" && a.symbol).map((a) => <li key={a.id}><span className="text-ink font-semibold">Position to review:</span> {a.title}. <Link href={a.href} className="t-sm">Review</Link></li>)}

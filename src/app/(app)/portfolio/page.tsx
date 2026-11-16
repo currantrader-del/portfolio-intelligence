@@ -78,8 +78,8 @@ export default async function PortfolioPage({ searchParams }: { searchParams: Pr
           <div className="divider" />
           <div className="grid grid-cols-2 gap-2">
             <Metric size="sm" label="Since statements" value={p.sinceStatementDollar === null ? "—" : `${p.sinceStatementDollar >= 0 ? "+" : ""}${usd(p.sinceStatementDollar)}`} note="price change, est." tone={p.sinceStatementDollar === null ? null : p.sinceStatementDollar >= 0 ? "gain" : "loss"} />
-            <Metric size="sm" label="Total investable capital" value={usd(p.investableCapital)} note={`+ ${usd(c.deployableSavings)} savings`} />
-            <Metric size="sm" label="Weights and limits use" value="Invested" note="savings never change them" />
+            <Metric size="sm" label="Outside money available" value={c.outside.figure === null ? "—" : usd(c.outside.remaining)} note="not in the value or weights" />
+            <Metric size="sm" label="Weights and limits use" value="Invested" note="Schwab and Acorns only" />
           </div>
           <DataQualityNote p={p} />
         </Card>
@@ -101,10 +101,17 @@ export default async function PortfolioPage({ searchParams }: { searchParams: Pr
             })}
             <Link href="/portfolio/reconcile" className="li !min-h-12">
               <div className="flex-1 min-w-0 flex flex-col">
-                <span className="font-semibold">Cash and savings</span>
-                <span className="t-xs">{usd(c.brokerage)} in brokerage · {c.savings === null ? "savings not entered" : `${usd(c.deployableSavings)} savings`}</span>
+                <span className="font-semibold">Brokerage cash</span>
+                <span className="t-xs">Cash inside your Schwab and Acorns accounts</span>
               </div>
-              {c.savings === null ? <Pill tone="warn">Add</Pill> : <span className="num font-semibold">{usd(c.deployable)}</span>}
+              <span className="num font-semibold">{usd(c.brokerage)}</span>
+            </Link>
+            <Link href="/decisions#mn-h" className="li !min-h-12">
+              <div className="flex-1 min-w-0 flex flex-col">
+                <span className="font-semibold">Outside money available to invest</span>
+                <span className="t-xs">{c.outside.figure === null ? "Not entered" : `Your figure ${usd(c.outside.figure)}${c.outside.movedIn ? `, less ${usd(c.outside.movedIn)} that reached Schwab since` : ""}. Not part of the portfolio value`}</span>
+              </div>
+              {c.outside.figure === null ? <Pill tone="warn">Add</Pill> : <span className="num font-semibold">{usd(c.outside.remaining)}</span>}
             </Link>
           </div>
         </Card>

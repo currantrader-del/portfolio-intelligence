@@ -87,7 +87,10 @@ export const RETIRED_WHY: Record<string, string> = {
   research_freshness_days: "App placeholder. Research is refreshed when events happen, not after a fixed number of days.",
   benchmark_return: "Withdrawn 2026-11-08 at your request: one combined U.S. range is no longer used as a bar for every stock.",
   risk_margin_factor: "Withdrawn 2026-11-08 at your request: no universal premium. Downside and uncertainty are shown, not folded into a cutoff.",
+  protected_reserve: "Retired 2026-11-09 and removed 2026-11-16 at your request: the app keeps no savings reserve and tracks no savings balance. Only your outside-money figure is used.",
 };
+/** A retired rule stays in history but never controls anything. */
+const isRetired = (r: PolicyRuleRow) => (r.scope === "assumption" && RETIRED_ASSUMPTIONS.has(r.subject)) || (r.scope === "portfolio" && r.subject === "protected_reserve");
 
 export type Assumption = { value: number; status: LimitStatus; source: string };
 
@@ -163,8 +166,8 @@ function auditSubject(scope: PolicyRuleRow["scope"], subject: string, rs: Policy
 }
 
 export function auditRules(rows: PolicyRuleRow[]): PolicyAudit {
-  const retired = rows.filter((r) => r.scope === "assumption" && RETIRED_ASSUMPTIONS.has(r.subject));
-  const live = rows.filter((r) => !(r.scope === "assumption" && RETIRED_ASSUMPTIONS.has(r.subject)));
+  const retired = rows.filter(isRetired);
+  const live = rows.filter((r) => !isRetired(r));
   const groups = new Map<string, PolicyRuleRow[]>();
   for (const r of live) {
     const key = `${r.scope}|${r.subject}`;

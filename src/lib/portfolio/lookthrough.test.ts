@@ -30,10 +30,10 @@ const policy = policyFromRules([
 const p = buildPortfolio([broker, usaa], new Map(), policy, { NOW: "Quality/growth individual stocks", NVDA: "Quality/growth individual stocks", IREN: "Asymmetric/high-risk growth sleeve" }, [], now);
 
 describe("investable capital and cash", () => {
-  it("applies no reserve even when an old reserve rule is on file: all savings are transferable", () => {
-    expect(p.cashDetail).toMatchObject({ brokerage: 221.24, savings: 3000, protectedReserve: 0, deployableSavings: 3000, deployable: 3221.24 });
+  it("applies no reserve and counts no savings balance, even when old rows are on file", () => {
+    expect(p.cashDetail).toMatchObject({ brokerage: 221.24, outside: { figure: null, remaining: 0 }, deployable: 221.24 });
     expect(p.total).toBe(20221.24); // positions 20,000 + brokerage cash 221.24
-    expect(p.netWorthTracked).toBe(23221.24);
+    expect(p.netWorthTracked).toBe(20221.24);
     expect(p.holdings.reduce((a, h) => a + h.weight, 0) + p.cash / p.total).toBeCloseTo(1, 10);
   });
 });

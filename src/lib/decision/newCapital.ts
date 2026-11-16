@@ -177,7 +177,7 @@ export function newCapital(args: {
   const recordedCash = Math.round(spendable * 100) / 100;
   const depositShows = source === "deposited" && recordedCash + 0.5 >= amount;
   const fromTransfer = source === "existing" ? Math.max(0, Math.round((amount - spendable) * 100) / 100) : 0;
-  const savingsHint = cd.deployableSavings >= 1 && !plannedIn ? ` Savings hold ${fmt$(cd.deployableSavings)}; that can be used only after you plan a transfer to ${invName}.` : "";
+  const savingsHint = cd.outside.remaining >= 1 && !plannedIn ? ` You have ${fmt$(cd.outside.remaining)} outside your accounts; it can be used only after you transfer it to ${invName}.` : "";
   const funds: NewCapitalResult["funds"] = source === "planned"
     ? { requested, used: amount, verified: false, detail: `${fmt$(requested)} of planned new money for ${invName}, not yet deposited. This is what to do once it arrives, not an order to place now` }
     : source === "deposited"
@@ -491,10 +491,9 @@ export function newCapital(args: {
   const receivingStocks = allocations.map((x) => x.symbol).filter((s) => ![...etfOptions].some((e) => e.symbol === s));
   const blocking = [...refresh, ...newOptions.filter((o) => o.label === "Refresh required")].filter((o, i, all) => receivingStocks.includes(o.symbol) && all.findIndex((x) => x.symbol === o.symbol) === i);
   const gates: Gate[] = [
-    { key: "funds", label: "The money is verified, in the account that buys", ok: source === "planned" ? false : source === "deposited" ? depositShows : funds.verified && cd.savings !== null,
+    { key: "funds", label: "The money is verified, in the account that buys", ok: source === "planned" ? false : source === "deposited" ? depositShows : funds.verified,
       detail: source === "planned" ? `${funds.detail}. Choose "New, already deposited" once it has arrived`
         : source === "deposited" ? funds.detail
-        : cd.savings === null ? "Enter your savings balance so transferable capital is known"
         : amount < 1 ? `No cash in ${invName} to invest.${savingsHint}` : funds.detail },
     { key: "holdings", label: "Holdings and balances are verified", ok: confirmed || (!unverified.length && !gaps.length),
       detail: confirmed ? `You confirmed today that the holdings and balances shown match your broker accounts${portfolio.quality.reconciliation.complete ? "" : ` (still open, not blocking: ${portfolio.quality.reconciliation.gaps.join("; ")})`}`

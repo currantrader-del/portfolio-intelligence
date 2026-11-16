@@ -39,7 +39,7 @@ describe("alerts", () => {
     expect(aaa[0].title).toMatch(/^Review AAA: −9\.2% today/);
     expect(aaa[0].detail).toMatch(/not a buy signal by itself/);
     expect(aaa[0].detail).toMatch(/not an automatic sale/);
-    expect(a.map((x) => x.kind)).toEqual(expect.arrayContaining(["research_missing", "holdings_stale", "data_missing"]));
+    expect(a.map((x) => x.kind)).toEqual(expect.arrayContaining(["research_missing", "holdings_stale"]));
   });
 
   it("treats a move in line with the market as low priority", () => {
