@@ -12,6 +12,8 @@ import { AlertList } from "@/components/cards/Alerts";
 import { ResearchBrowser, type OwnedItem, type PipeItem } from "@/components/ResearchBrowser";
 import { toZoneViews } from "@/components/ZoneBar";
 import { addToPipeline } from "./actions";
+import { createClient } from "@/lib/supabase/server";
+import { activeInvestigations } from "@/lib/research/investigate/run";
 
 const TASK_KINDS = new Set(["research_stale", "research_missing", "price_zone", "review", "event"]);
 const md = (iso: string | null | undefined) => (iso ? shortDate(iso).replace(/, \d{4}$/, "") : null);
@@ -22,6 +24,8 @@ export default async function ResearchPage({ searchParams }: { searchParams: Pro
   const freshDays = AGE_REMINDER_DAYS;
   // The same SEC filings Decisions uses, so "Reassess" here matches Decisions.
   const filings = await loadDecisionFilings(ws).catch(() => new Map<string, FilingsResult>());
+  // Research under way, shown above every tab so it is one tap away (2026-11-16: STWD was hard to find again).
+  const active = await createClient().then((db) => activeInvestigations(db)).catch(() => []);
   const fl = (s: string) => filings.get(s) ?? null;
   const holdings = ws.portfolio.holdings.filter((h) => !isEtf(h.symbol)).sort((a, b) => b.value - a.value);
   const ownedSet = new Set(holdings.map((h) => h.symbol));
@@ -74,7 +78,7 @@ export default async function ResearchPage({ searchParams }: { searchParams: Pro
       <PageHeader title="Research" actionsDesktopOnly />
       <div className="grid grid-cols-1 gap-3 lg:gap-4 lg:grid-cols-12 items-start">
         <div className="lg:col-span-8 lg:row-span-2 lg:row-start-1 flex flex-col gap-3 min-w-0">
-          <ResearchBrowser owned={owned} pipeline={pipeline} initialStage={stage} />
+          <ResearchBrowser owned={owned} pipeline={pipeline} initialStage={stage} active={active.map((a) => ({ ...a, name: ws.research.find((r) => r.symbol === a.symbol)?.name ?? null }))} />
         </div>
         {tasks.length > 0 && (
           <Card className="lg:col-span-4 lg:col-start-9 lg:row-start-1 !gap-1 !pb-1.5 max-lg:order-first" labelledBy="rt-h">
