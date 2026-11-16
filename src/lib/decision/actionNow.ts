@@ -28,7 +28,7 @@ export type ActionNow = {
 const money = (n: number) => `$${n.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 const short = (s: string, n = 140) => { const t = s.replace(/\s+/g, " ").trim(); return t.length > n ? `${t.slice(0, n - 1).trimEnd()}…` : t; };
 const lc = (s: string) => s.charAt(0).toLowerCase() + s.slice(1);
-const CONDITIONAL = /\bonly (after|if|when)\b|\bconsider\b|\breview point\b|\bnot a buy signal\b|\bno add by default\b/i;
+const CONDITIONAL = /\bonly (after|if|when)\b|\bconsider\b|\breview point\b|\bnot a buy signal\b|\bno add by default\b|\bcheck first\b|\bafter checking\b/i;
 
 export function actionNow(a: {
   symbol: string;
@@ -78,7 +78,7 @@ export function actionNow(a: {
   if (kind === "trim") return { verb: "Trim", headline: `Trim${at}: ${research} says for ${z.label}: ${lc(short(z.action, 200))}`, levels, zones: zoneRows, watch, ...pm };
   if (kind === "buy" && !CONDITIONAL.test(z.action)) {
     if (a.research!.openQuestions > 0) return { verb: "Hold", headline: `Hold${at} for now: this is the research's buy range (${z.label}), but ${a.research!.openQuestions} open question${a.research!.openQuestions === 1 ? "" : "s"} must be answered before new money goes in.`, levels, zones: zoneRows, watch, ...pm };
-    return { verb: "Buy more", headline: `Buy more${at}: it is inside the research's buy range (${z.label}): ${lc(short(z.action, 200))}. See Decisions for the amount your limits allow.`, levels, zones: zoneRows, watch, ...pm };
+    return { verb: "Buy more", headline: `Buy more${at}: it is inside the research's buy range (${z.label}): ${lc(short(z.action, 200)).replace(/[.\s]+$/, "")}. See Decisions for the amount your limits allow.`, levels, zones: zoneRows, watch, ...pm };
   }
   return { verb: "Hold", headline: `Hold${at}: ${research} says for ${z.label}: ${lc(short(z.action, 200))}`, levels, zones: zoneRows, watch, ...pm };
 }

@@ -93,9 +93,14 @@ export async function InvestmentSummary({ ws, symbol, brief }: { ws: Workspace; 
       {r && r.authoritative === false && (r.current || r.latest) && <p className="t-sm rounded-[12px] bg-warn-bg text-warn-ink px-3 py-2">Preliminary research only for {symbol}. The record below is {r.authority === "preliminary_screen" ? "a preliminary screen" : "older research"}: enough for Hold or No Add, but the app makes no add, buy-range or target recommendation from it until a targeted investigation is done.</p>}
       {any?.parsed.classification && <span className="t-xs -mt-1">Classification: <span className="text-ink">{any.parsed.classification}</span></span>}
       {any ? (
-        <div className="grid grid-cols-3 gap-x-2 gap-y-3">
+        <>
+        {/* The portfolio action is a sentence, not a number: full width at reading size (2026-11-14, unreadable in a third of a phone screen). */}
+        <div className="flex flex-col gap-0.5">
+          <span className="t-xs">For your portfolio <span className="opacity-70">· uses your limits and cash</span></span>
+          <p className="text-[15px] leading-snug text-ink font-medium">{brief?.action || cap1(any.parsed.action)}</p>
+        </div>
+        <div className="grid grid-cols-2 sm:grid-cols-3 gap-x-3 gap-y-3">
           <Metric label="Company at this price" value={view ?? "—"} note={view ? (stale ? "from saved scenarios; reassess before relying on it" : "valuation only, vs VOO") : undefined} />
-          <Metric label="For your portfolio" value={brief?.action || cap1(any.parsed.action)} note="uses your limits and cash" />
           <Metric label="Confidence" value={cap1(brief?.confidence ?? any.parsed.confidence)} />
           <Metric label="Price now" value={price ? usd(price, 2) : "—"} note={!q && h ? "statement price" : q?.asOf ? `delayed, ${quoteTime(q.asOf)}` : "delayed"} />
           <Metric label={v?.parsed.horizonDate ? `Price forecast, ${monthYear(v.parsed.horizonDate)}` : "Price forecast"} value={v?.parsed.weightedValue ? usd(v.parsed.weightedValue, 2) : "—"} note={v?.parsed.weightedValue ? "weighted scenarios, a future price" : undefined} />
@@ -104,6 +109,7 @@ export async function InvestmentSummary({ ws, symbol, brief }: { ws: Workspace; 
           <Metric label="Research" value={shortDate(any.research_as_of).replace(/, \d{4}$/, "")} note={age !== null ? `${age} days old` : undefined} />
           <Metric label="Research price" value={any.parsed.referencePrice ? usd(any.parsed.referencePrice, 2) : "—"} note={refDay ? `close of ${shortDate(refDay.date).replace(/, \d{4}$/, "")}${refDay.moved ? " (market closed on the research date)" : ""}` : undefined} />
         </div>
+        </>
       ) : (
         <p className="t-sm">No research on file for {symbol}. Run the screen below, then start full research before comparing it for new money.</p>
       )}

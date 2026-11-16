@@ -79,7 +79,7 @@ export function coverage(r: ResearchRecord | undefined, price: number | null, no
       return { key: "refresh", label: "Reassess", tone: "warn", dot: "hollow", detail: `Something happened since the research: ${real.map((t) => t.detail).join("; ")}. Decisions holds off on new money until a targeted update.` };
     }
   }
-  const check = price ? repriceCheck(v.parsed, price, age, reminderDays) : { ok: true, reason: null, note: undefined };
+  const check = price ? repriceCheck(v.parsed, price, age, reminderDays) : { ok: true, reason: null, drift: null, note: undefined };
   if (!check.ok) return { key: "refresh", label: "Reassess", tone: "warn", dot: "hollow", detail: check.reason ?? "Needs a refresh" };
   // A material new filing the research has not absorbed means it is not current, however complete it looks.
   const pending = unresolvedFiling(v.research_as_of, r.filingCheck);
@@ -94,11 +94,11 @@ export function coverage(r: ResearchRecord | undefined, price: number | null, no
   if (d.level === "preliminary") {
     const q = d.openQuestions.length;
     return {
-      key: "current", label: q ? `Preliminary · ${q} open` : "Preliminary", tone: "warn", dot: "hollow",
-      detail: `${d.label}: usable for comparison, not verified.${q ? ` ${q} question${q > 1 ? "s" : ""} it could not verify, e.g. ${d.openQuestions[0]}.` : ""} ${d.filings.detail}.${ageNote}`,
+      key: "current", label: q ? (isInvestigation(v) && complete ? `Finished · ${q} open` : `Preliminary · ${q} open`) : "Preliminary", tone: "warn", dot: "hollow",
+      detail: `${d.label}: usable for comparison, not verified.${check.note ? ` ${check.note}` : ""}${q ? ` ${q} question${q > 1 ? "s" : ""} it could not verify, e.g. ${d.openQuestions[0]}.` : ""} ${d.filings.detail}.${ageNote}`,
     };
   }
-  return { key: "current", label: "Current", tone: "gain", dot: "solid", detail: `${d.label}; no large price move since. ${d.filings.detail}.${ageNote}` };
+  return { key: "current", label: "Current", tone: "gain", dot: "solid", detail: `${d.label}; ${check.note && check.drift != null && Math.abs(check.drift) > 0.15 ? check.note : "no large price move since."} ${d.filings.detail}.${ageNote}` };
 }
 
 /**

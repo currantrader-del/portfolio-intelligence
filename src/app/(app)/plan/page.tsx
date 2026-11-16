@@ -22,7 +22,7 @@ export const dynamic = "force-dynamic";
 const STANCE_TONE = { Constructive: "gain", Neutral: "neutral", Cautious: "warn" } as const;
 const pct = (n: number | null) => (n === null ? "—" : `${n.toFixed(1)}%`);
 const money = (n: number) => `$${Math.round(n).toLocaleString("en-US")}`;
-const actionTone = (a: string) => (/refresh|review|research needed/i.test(a) ? "warn" : /\bno add|\bhold\b|wait/i.test(a) ? "neutral" : /trim|sell|avoid|exit/i.test(a) ? "alert" : /\badd|\bbuy/i.test(a) ? "gain" : "neutral");
+const actionTone = (a: string) => (/refresh|review|research needed/i.test(a) ? "warn" : /\bno add|\bno new money|\bdo not add|\bdon't add|\bhold\b|wait|watch/i.test(a) ? "neutral" : /trim|sell|avoid|exit/i.test(a) ? "alert" : /\badd|\bbuy/i.test(a) ? "gain" : "neutral");
 
 /** The portfolio plan: market stance, a target and action for each position, the cash plan, and what is stale. */
 export default async function PlanPage() {

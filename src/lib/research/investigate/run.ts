@@ -603,6 +603,27 @@ export async function resumeIfStalled(db: SupabaseClient, requestId: string, dis
   return true;
 }
 
+/**
+ * Investigations under way (running, paused or stalled), newest first, so the Research list can show
+ * them at the top. Finished and failed runs are left out. One per company: its latest request.
+ */
+export type ActiveInvestigation = { symbol: string; type: ResearchType; status: "running" | "paused" | "stalled"; startedAt: string; step: string | null; stepIndex: number; steps: number; costUsd: number };
+export async function activeInvestigations(db: SupabaseClient): Promise<ActiveInvestigation[]> {
+  const since = new Date(Date.now() - 7 * 86400_000).toISOString();
+  const { data } = await db.from("model_runs").select("id, computed_at, inputs, code_version").eq("kind", "investigation_request").gte("computed_at", since).order("computed_at", { ascending: false }).limit(20);
+  const seen = new Set<string>();
+  const out: ActiveInvestigation[] = [];
+  for (const req of data ?? []) {
+    const symbol = String((req.inputs as { symbol?: string }).symbol ?? "");
+    if (!symbol || seen.has(symbol)) continue;
+    seen.add(symbol);
+    const st = await statusForRequest(db, req);
+    if (st.status !== "running" && st.status !== "paused" && st.status !== "stalled") continue;
+    out.push({ symbol, type: st.type, status: st.status, startedAt: st.startedAt, step: st.run?.step ?? null, stepIndex: st.run?.stepIndex ?? 0, steps: st.run?.steps ?? 0, costUsd: st.run?.costUsd ?? 0 });
+  }
+  return out;
+}
+
 /** Investigations started in the last two days that have stalled (for the scheduled sweep). */
 export async function stalledInvestigations(db: SupabaseClient) {
   const since = new Date(Date.now() - 2 * 86400_000).toISOString();

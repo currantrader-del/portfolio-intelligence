@@ -20,11 +20,41 @@ export type PipeItem = {
   card: OwnedItem | null;
 };
 
+export type ActiveItem = { symbol: string; name: string | null; type: string; status: "running" | "paused" | "stalled"; startedAt: string; step: string | null; stepIndex: number; steps: number; costUsd: number };
+
+const STEP_TEXT: Record<string, string> = { inventory: "listing documents", discover: "finding sources", read: "reading documents", skeptic: "skeptical review", answer: "answering open questions", finalize: "finishing up" };
+const stepText = (s: string | null) => (!s ? "starting" : s.startsWith("phase:") ? `phase ${s.slice(6)} of 6` : STEP_TEXT[s] ?? s);
+const since = (iso: string) => { const m = Math.max(0, Math.round((Date.now() - Date.parse(iso)) / 60000)); return m < 60 ? `${m} min` : `${Math.floor(m / 60)} h ${m % 60} min`; };
+
+/** Research under way: always at the top of the list, whatever tab is open. */
+function ActiveStrip({ items }: { items: ActiveItem[] }) {
+  if (!items.length) return null;
+  return (
+    <section className="card !gap-0 !py-1" aria-labelledby="active-h">
+      <h2 id="active-h" className="t-xs uppercase tracking-wide pt-2 pb-1">Researching now</h2>
+      <ul className="list">
+        {items.map((a) => (
+          <li key={a.symbol}>
+            <Link href={`/research/${a.symbol}?tab=research#inv-h`} className="li">
+              <Tick symbol={a.symbol} />
+              <span className="flex-1 min-w-0 flex flex-col">
+                <span className="font-semibold truncate">{a.symbol}{a.name && <span className="font-normal text-ink-2"> · {a.name}</span>}</span>
+                <span className="t-xs" suppressHydrationWarning>{a.type === "material_event_refresh" ? "Update" : "Full investigation"} · {stepText(a.step)} · {since(a.startedAt)} · ${a.costUsd.toFixed(2)}</span>
+              </span>
+              <Pill small tone={a.status === "running" ? "gain" : "warn"}>{a.status === "running" ? "Running" : a.status === "paused" ? "Paused" : "Stopped"}</Pill>
+            </Link>
+          </li>
+        ))}
+      </ul>
+    </section>
+  );
+}
+
 const SCREEN_TONE: Record<string, "gain" | "warn" | "neutral"> = { "Worth researching": "gain", Mixed: "warn", "Weak on screen": "warn", "Not enough data": "neutral" };
 const STAGE_LABEL: Record<string, string> = { idea: "Ideas", screening: "Screening", researching: "Researching", ready: "Ready", passed: "Passed" };
 
 /** Search and stage filters run in the browser: instant, and the stage is kept in the URL. */
-export function ResearchBrowser({ owned, pipeline, initialStage }: { owned: OwnedItem[]; pipeline: PipeItem[]; initialStage: string }) {
+export function ResearchBrowser({ owned, pipeline, initialStage, active = [] }: { owned: OwnedItem[]; pipeline: PipeItem[]; initialStage: string; active?: ActiveItem[] }) {
   const [stage, setStage] = useState(initialStage);
   const [q, setQ] = useState("");
   useEffect(() => {
@@ -48,6 +78,7 @@ export function ResearchBrowser({ owned, pipeline, initialStage }: { owned: Owne
 
   return (
     <div className="flex flex-col gap-3">
+      <ActiveStrip items={active} />
       <label className="flex items-center gap-2 min-h-11 rounded-[12px] bg-surface-2 px-3 text-muted focus-within:ring-1 focus-within:ring-line-strong">
         <svg viewBox="0 0 20 20" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="1.7" aria-hidden="true"><circle cx="9" cy="9" r="5.5" /><path d="M13 13l4 4" /></svg>
         <span className="sr-only">Search companies</span>

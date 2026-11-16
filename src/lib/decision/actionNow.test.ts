@@ -41,6 +41,22 @@ describe("one plain action at today's price, with its levels", () => {
     expect(actionNow({ symbol: "X", price: 45, research: { pc: buy, asOf: "2026-11-01", openQuestions: 2 }, unreadFiling: null, trim: null, held: true }).verb).toBe("Hold");
   });
 
+  it("a 'no new money' band that mentions adding is hold, never buy more (MU, 2026-11-16)", () => {
+    const mu = parseConclusion({ price_framework: [
+      { price_zone: "< $520", action: "Starter eligible (small, about 1-2% if an MU limit is approved and deployable cash is rebuilt)." },
+      { price_zone: "$520-$600", action: "Watch. Expected return roughly matches VOO's 7.5% at about $592; not enough for the dispersion." },
+      { price_zone: "> $600", action: "No new money. At $690 expected return is about zero; a lower price alone is not a reason to add." },
+    ] });
+    const a = actionNow({ symbol: "MU", price: 778.31, research: { pc: mu, asOf: "2026-11-08", openQuestions: 0 }, unreadFiling: null, trim: null, held: true });
+    expect(a.verb).toBe("Hold");
+    expect(a.headline).not.toMatch(/buy range|\.\./);
+  });
+
+  it("a buy band with its own check is not a plain buy", () => {
+    const pc = parseConclusion({ price_framework: [{ price_zone: "< $60", action: "A starter position of about 1-2% is reasonable, funded from planned cash only. Check first that bookings growth holds." }, { price_zone: "> $60", action: "No add." }] });
+    expect(actionNow({ symbol: "X", price: 55, research: { pc, asOf: "2026-11-01", openQuestions: 0 }, unreadFiling: null, trim: null, held: true }).verb).toBe("Hold");
+  });
+
   it("a hold zone that mentions a later, conditional trim is still hold", () => {
     const pc2 = parseConclusion({ price_framework: [
       { price_zone: "< $137", action: "Re-review only." },
