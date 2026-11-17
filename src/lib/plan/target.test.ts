@@ -50,3 +50,17 @@ describe("your plan", () => {
     expect(planFrom({ sleeves: [{ key: "us", label: "x", buy: "VOO", target: 0.5 }], steps: [] })).toBe(DEFAULT_PLAN);
   });
 });
+
+describe("down from their high", () => {
+  it("flags plan funds at 10%, other funds at 15%, researched stocks at 25%", async () => {
+    const { lowsFrom } = await import("./target");
+    const highs = new Map([
+      ["VOO", { price: 89, high: 100 }], ["AVUV", { price: 95, high: 100 }],
+      ["QQQ", { price: 84, high: 100 }], ["VTI", { price: 90, high: 100 }],
+      ["ZZZ", { price: 70, high: 100 }], ["YYY", { price: 60, high: 100 }],
+    ]);
+    const lows = lowsFrom(DEFAULT_PLAN, highs, ["ZZZ"]);
+    expect(lows.map((l) => [l.symbol, l.kind])).toEqual([["ZZZ", "stock"], ["QQQ", "fund"], ["VOO", "plan_fund"]]);
+    expect(lows.find((l) => l.symbol === "VOO")!.note).toMatch(/11% below its high: a reason to move a planned transfer forward/);
+  });
+});

@@ -71,6 +71,21 @@ export function confirmBlock(daily: string | null, gate: { ok: true } | { ok: fa
 }
 
 /**
+ * The paid morning briefing runs monthly (2026-11-17, Brendan: "Monthly"): on the first business day of each
+ * month, New York time, skipping New Year's Day. Pure.
+ */
+export function isFirstBusinessDay(etDate: string): boolean {
+  const [y, m, d] = etDate.split("-").map(Number);
+  const biz = (day: number) => {
+    const wd = new Date(Date.UTC(y, m - 1, day)).getUTCDay();
+    return wd !== 0 && wd !== 6 && !(m === 1 && day === 1);
+  };
+  if (!biz(d)) return false;
+  for (let i = 1; i < d; i++) if (biz(i)) return false;
+  return true;
+}
+
+/**
  * The scheduled morning run: today's briefing first, then the assistant's answer to MORNING_QUESTION,
  * which reads that briefing. Stops before spending anything when today's cost limit is reached.
  */
@@ -98,6 +113,17 @@ export async function runMorning(db: SupabaseClient, token: string, origin: stri
     if (!g.ok) skipped.push(`${feature} ${g.reason}`);
     return g.ok;
   };
+  // Monthly cadence: on other days only the weekly Opportunity Radar (Wednesdays) runs; the code-only steps above always run.
+  const etDay = new Intl.DateTimeFormat("en-CA", { timeZone: "America/New_York" }).format(new Date());
+  if (!isFirstBusinessDay(etDay)) {
+    const wedOnly = new Intl.DateTimeFormat("en-US", { timeZone: "America/New_York", weekday: "short" }).format(new Date()) === "Wed";
+    let radarOnly: string | null = null;
+    if (wedOnly && (await room("radar_run"))) {
+      radarOnly = await startRadar(db, origin, token, "weekly").catch((e) => { console.error(`morning: radar did not start: ${(e as Error).message}`); return null; });
+    }
+    await record({ skipped, cadence: "monthly", radar: radarOnly });
+    return { cadence: "monthly", radar: radarOnly, skipped };
+  }
   if (!(await room("market_briefing"))) { await record({ skipped }); return { skipped: skipped.join("; ") }; }
   const b = await startBriefing(db, token, origin);
   if ("error" in b) console.error(`morning: briefing did not start: ${b.error}`);
