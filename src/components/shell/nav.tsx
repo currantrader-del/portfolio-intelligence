@@ -1,17 +1,18 @@
 /** Main sections, their icons, and how a path maps to a section title. */
 export const SECTIONS = [
   { href: "/", label: "Plan", icon: <><circle cx="11" cy="11" r="7.5" /><path d="M11 7v4l2.5 2" /></> },
-  { href: "/portfolio", label: "Portfolio", icon: <><path d="M11 3.5v7.5h7.5A7.5 7.5 0 1 1 11 3.5z" /><path d="M14 3.8a7.5 7.5 0 0 1 4.2 4.2H14z" /></> },
-  { href: "/research", label: "Research", icon: <><circle cx="10" cy="10" r="6" /><path d="M14.5 14.5L19 19" /></> },
+  { href: "/stocks", label: "Stocks & funds", icon: <><path d="M3.5 17.5h15" /><path d="M5 14l4-4 3 3 5-6" /><path d="M14 7h3v3" /></> },
   { href: "/alerts", label: "Alerts", icon: <><path d="M6 15V10a5 5 0 0 1 10 0v5l1.5 2h-13z" /><path d="M9.5 19.5a1.8 1.8 0 0 0 3 0" /></> },
 ] as const;
 
 /**
- * Less-used pages, in two groups: things you use, and setup (2026-11-17: the home screen is your plan; the main
- * tabs are Plan, Portfolio, Research and Alerts). Trade ideas, Markets, briefs and the old AI portfolio plan are
- * still reachable from their related pages.
+ * Less-used pages, in two groups: things you use, and setup (2026-11-17, "many tabs and views": the tabs are Plan,
+ * Stocks & funds and Alerts; everything else is here). Trade ideas, Markets, briefs and the old AI portfolio plan
+ * are still reachable from their related pages.
  */
 export const MORE = [
+  { href: "/portfolio", label: "Portfolio details" },
+  { href: "/research", label: "Research list and ideas" },
   { href: "/decisions", label: "Decisions (check a buy)" },
   { href: "/risk", label: "Risk" },
   { href: "/radar", label: "Opportunity Radar" },
@@ -31,6 +32,8 @@ const TITLES: [RegExp, string][] = [
   [/^\/decisions\/new-capital/, "New cash"],
   [/^\/decisions\/review\//, "Position review"],
   [/^\/research\/[^/]+/, "Company"],
+  [/^\/research$/, "Research"],
+  [/^\/portfolio$/, "Portfolio"],
   [/^\/brief/, "Brief"],
   [/^\/markets/, "Markets"],
   [/^\/policy/, "Policy"],
@@ -54,7 +57,7 @@ export function titleOf(path: string): string {
 
 /** Sub-pages show a back link to their section instead of the section title. */
 export function backOf(path: string): { href: string; label: string } | null {
-  if (/^\/research\/[^/]+/.test(path)) return { href: "/research", label: "Research" };
+  if (/^\/research\/[^/]+/.test(path)) return { href: "/stocks", label: "Stocks & funds" };
   if (/^\/decisions\/.+/.test(path)) return { href: "/decisions", label: "Decisions" };
   if (/^\/portfolio\/.+/.test(path)) return { href: "/portfolio", label: "Portfolio" };
   return null;
