@@ -80,6 +80,8 @@ export type Holding = {
   unrealized: number | null;
   bucket: Bucket;
   accounts: string[];
+  /** Value held in each account, by account id (same prices as `value`). */
+  byAccount: Record<string, number>;
   holdingsAsOf: string; // oldest snapshot date this holding depends on
 };
 
@@ -271,7 +273,7 @@ export function buildPortfolio(
   /** Your standing figure of outside money available to invest (capital preference); null = none set. */
   outsideInput: OutsideCapitalInput | null = null,
 ): PortfolioView {
-  const bySymbol = new Map<string, { quantity: number; stmtValue: number; stmtPrice: number | null; stmtQty: number; cost: number | null; costKnown: boolean; accounts: Set<string>; asOf: string }>();
+  const bySymbol = new Map<string, { quantity: number; stmtValue: number; stmtPrice: number | null; stmtQty: number; cost: number | null; costKnown: boolean; accounts: Set<string>; byAcct: Map<string, number>; asOf: string }>();
   let brokerageCash = 0;
   const accounts: AccountView[] = [];
   const accountCash: AccountCash[] = [];
@@ -306,7 +308,7 @@ export function buildPortfolio(
       const fallbackPrice = p?.price ?? (p?.marketValue && stmtQty ? p.marketValue / stmtQty : tradePrice ?? 0);
       acctValue += qty * (q ? q.price : fallbackPrice);
       if (Math.abs(qty) < 1e-9) continue;
-      const cur = bySymbol.get(sym) ?? { quantity: 0, stmtValue: 0, stmtPrice: null, stmtQty: 0, cost: 0, costKnown: true, accounts: new Set<string>(), asOf: s.asOf };
+      const cur = bySymbol.get(sym) ?? { quantity: 0, stmtValue: 0, stmtPrice: null, stmtQty: 0, cost: 0, costKnown: true, accounts: new Set<string>(), byAcct: new Map<string, number>(), asOf: s.asOf };
       cur.quantity += qty;
       cur.stmtQty += stmtQty;
       cur.stmtValue += (p?.marketValue ?? 0) + (qty - stmtQty) * fallbackPrice;
@@ -318,6 +320,7 @@ export function buildPortfolio(
       if (stmtBasis === null || sold) cur.costKnown = false;
       else cur.cost = (cur.cost ?? 0) + stmtBasis + buys;
       cur.accounts.add(s.accountName);
+      cur.byAcct.set(s.accountId, (cur.byAcct.get(s.accountId) ?? 0) + qty * (q ? q.price : fallbackPrice));
       if (s.asOf < cur.asOf) cur.asOf = s.asOf;
       bySymbol.set(sym, cur);
     }
@@ -382,6 +385,7 @@ export function buildPortfolio(
       unrealized: r.h.costKnown ? round2(r.value - (r.h.cost ?? 0)) : null,
       bucket: bucketOf(r.symbol, classifications[r.symbol]),
       accounts: [...r.h.accounts],
+      byAccount: Object.fromEntries([...r.h.byAcct].map(([k, v]) => [k, round2(v)])),
       holdingsAsOf: r.h.asOf,
     }))
     .sort((a, b) => b.value - a.value);

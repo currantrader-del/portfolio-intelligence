@@ -1,19 +1,21 @@
 /** Main sections, their icons, and how a path maps to a section title. */
 export const SECTIONS = [
-  { href: "/", label: "Today", icon: <><circle cx="11" cy="11" r="7.5" /><path d="M11 7v4l2.5 2" /></> },
+  { href: "/", label: "Plan", icon: <><circle cx="11" cy="11" r="7.5" /><path d="M11 7v4l2.5 2" /></> },
   { href: "/portfolio", label: "Portfolio", icon: <><path d="M11 3.5v7.5h7.5A7.5 7.5 0 1 1 11 3.5z" /><path d="M14 3.8a7.5 7.5 0 0 1 4.2 4.2H14z" /></> },
   { href: "/research", label: "Research", icon: <><circle cx="10" cy="10" r="6" /><path d="M14.5 14.5L19 19" /></> },
-  { href: "/risk", label: "Risk", icon: <path d="M11 3l7 3v5c0 4-3 7-7 8-4-1-7-4-7-8V6z" /> },
-  { href: "/decisions", label: "Decisions", icon: <path d="M5 11l4 4 8-9" /> },
+  { href: "/alerts", label: "Alerts", icon: <><path d="M6 15V10a5 5 0 0 1 10 0v5l1.5 2h-13z" /><path d="M9.5 19.5a1.8 1.8 0 0 0 3 0" /></> },
 ] as const;
 
-/** Less-used pages, in two groups: things you use, and setup. Trade ideas, Markets and the weekly brief are reached from their related pages. */
+/**
+ * Less-used pages, in two groups: things you use, and setup (2026-11-17: the home screen is your plan; the main
+ * tabs are Plan, Portfolio, Research and Alerts). Trade ideas, Markets, briefs and the old AI portfolio plan are
+ * still reachable from their related pages.
+ */
 export const MORE = [
+  { href: "/decisions", label: "Decisions (check a buy)" },
+  { href: "/risk", label: "Risk" },
   { href: "/radar", label: "Opportunity Radar" },
-  { href: "/alerts", label: "Phone alerts" },
-  { href: "/brief", label: "Briefs (day and week)" },
   { href: "/assistant", label: "Your questions" },
-  { href: "/plan", label: "Portfolio plan" },
   { href: "/costs", label: "30-day test and AI cost" },
 ] as const;
 
@@ -35,6 +37,8 @@ const TITLES: [RegExp, string][] = [
   [/^\/costs/, "AI spending"],
   [/^\/plan/, "Plan"],
   [/^\/alerts/, "Alerts"],
+  [/^\/risk/, "Risk"],
+  [/^\/decisions$/, "Decisions"],
   [/^\/trades/, "Trades"],
   [/^\/radar/, "Radar"],
   [/^\/import/, "Import"],
