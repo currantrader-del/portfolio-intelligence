@@ -9,7 +9,7 @@ import { getWorkspace } from "@/lib/workspace";
 import { writeBrief } from "@/lib/brief";
 import { getNews } from "@/lib/market/news";
 import { pctStr, shortDate, toneOf, usd } from "@/lib/format";
-import { Bar, Card, CardHead, Chevron, DataLabel, Disclose, Dot, LinkRow, Metric, PageHeader, Pill, Skel } from "@/components/ui";
+import { Bar, Card, CardHead, DataLabel, Disclose, Dot, LinkRow, Metric, PageHeader, Pill, Skel } from "@/components/ui";
 import { settingsFrom } from "@/lib/costs/spend";
 
 /** An account that does not sync gets a statement reminder after this many days. */
@@ -21,13 +21,11 @@ import { MorningRunner } from "@/components/MorningRunner";
 import { OutdatedNotice } from "@/components/OutdatedNotice";
 import { loadContextEvents } from "@/lib/freshness/contextEvents";
 import { outdatedVerdict } from "@/lib/freshness/outdated";
-import { currentDecisionFor } from "@/lib/decision/currentPortfolio";
-import { loadDecisionFilings, researchDates } from "@/lib/alerts/events";
+import { researchDates } from "@/lib/alerts/events";
 import { ImprovementTeaser } from "@/components/ImprovementCard";
 import { headlineTiming, sessionOfQuotes } from "@/lib/market/hours";
 import { improvementView } from "@/lib/shadow/proposals";
-import { MyActionButtons } from "@/components/eval/MyAction";
-import { actionRef, loadMyActions } from "@/lib/eval/log";
+import { PlanCard } from "@/components/PlanCard";
 
 const pts = (v: number) => `${v >= 0 ? "+" : "−"}${Math.abs(v).toFixed(2)}`;
 
@@ -83,9 +81,8 @@ export default async function TodayPage() {
 
   return (
     <div className="flex flex-col gap-3 lg:gap-4">
-      <PageHeader kicker={dateLabel} title="Today" actions={
+      <PageHeader kicker={dateLabel} title="Your plan" actions={
         <>
-          <Link href="/plan" className="btn btn-sm lg:min-h-11 lg:px-4 lg:text-[15px]">Your plan</Link>
           <Link href="/brief?period=week" className="btn btn-sm lg:min-h-11 lg:px-4 lg:text-[15px] max-lg:hidden">Weekly brief</Link>
           <Link href="/brief" className="btn btn-sm lg:min-h-11 lg:px-4 lg:text-[15px] max-lg:hidden">Daily brief</Link>
         </>
@@ -99,11 +96,13 @@ export default async function TodayPage() {
         </Card>
       )}
 
-      {/* The current decision comes first: the same answer Decisions gives (audit 2026-11-11). */}
-      <Suspense fallback={<div className="card card-tight"><Skel w="60%" /></div>}><BestAction /></Suspense>
+      {/* One plan first (2026-11-17): mix vs target, the next dated step, stocks nearest their buy levels. */}
+      <Suspense fallback={<div className="card card-tight"><Skel w="60%" /></div>}><PlanCard db={db} ws={ws} /></Suspense>
 
-      <Card labelledBy="mb-h" className="!gap-2">
-        <CardHead id="mb-h" cap="Morning briefing" right={<MorningRunner label={morningCheck?.outdated ? "Rewrite with today's facts" : morning ? "Write a new one" : "Write it now"} />} />
+      <Card labelledBy="mb-h" className="!gap-2" flush>
+        <Disclose summary={<span className="t-sm" id="mb-h">Morning briefing{morning ? ` · ${morning.today ? "today" : shortDate(morning.at)}` : ""}</span>}>
+        <div className="flex flex-col gap-2">
+        <div><MorningRunner label={morningCheck?.outdated ? "Rewrite with today's facts" : morning ? "Write a new one" : "Write it now"} /></div>
         {morningSkipped.length > 0 && <p className="t-xs warn">Not done this morning: {morningSkipped.map((x) => x.replace(/^(\w+) (skipped: |failed: )?/, (_m, k: string, how?: string) => `${({ market_briefing: "market briefing", assistant_answer: "this summary", morning_answer: "this summary", portfolio_plan: "weekly plan", trade_scan: "trade scan", radar_run: "Opportunity Radar" } as Record<string, string>)[k] ?? k} ${how?.startsWith("failed") ? "failed: " : "skipped, "}`)).join("; ")}. <Link href="/costs">Costs</Link></p>}
         {morning ? (
           <>
@@ -112,6 +111,8 @@ export default async function TodayPage() {
             <span className="t-xs">Written {new Intl.DateTimeFormat("en-US", { hour: "numeric", minute: "2-digit", timeZone: "America/New_York" }).format(new Date(morning.at))} ET{morning.today ? "" : ` on ${shortDate(morning.at)}`} · {Math.round(morning.ms / 1000)}s · ${morning.costUsd.toFixed(2)} · from your portfolio, policy, research and that day&apos;s market briefing · AI summary: facts are checked against sources on Markets, not here</span>
           </>
         ) : <p className="t-sm">Written automatically at 9:00 AM ET on weekdays, after the 8:30 economic data. It answers six questions, key recommendation first: what happened in the market, whether anything materially affected your investments, whether any action is needed, which researched stocks are approaching entry, which new opportunities are worth investigating, and what is coming up.</p>}
+        </div>
+        </Disclose>
       </Card>
 
       {improve && <ImprovementTeaser items={improve.active} />}
@@ -217,24 +218,3 @@ async function MoverHeadlines({ movers, window }: { movers: { symbol: string; da
   );
 }
 
-/** The Current Portfolio decision in one line: the same answer the Decisions page gives, with one tap to say what you did. */
-async function BestAction() {
-  const ws = await getWorkspace();
-  const d = currentDecisionFor(ws, await loadDecisionFilings(ws).catch(() => new Map()));
-  const db = await createClient();
-  const day = ws.now.toLocaleDateString("en-CA", { timeZone: "America/New_York" });
-  const mine = (await loadMyActions(db, 3).catch(() => new Map())).get(actionRef("recommendation", day)) ?? null;
-  return (
-    <div className="card card-tight !gap-2">
-      <Link href="/decisions" className="flex items-center justify-between gap-3 no-underline">
-        <span className="flex flex-col min-w-0">
-          <span className="cap">Best action now</span>
-          <span className="font-semibold text-ink">{d.headline}</span>
-          <span className="t-xs max-lg:hidden">From your holdings, research in use, cash and standing transfer limit. No AI. Open Decisions for the alternatives and what to confirm.</span>
-        </span>
-        <Chevron />
-      </Link>
-      <MyActionButtons subject="recommendation" refId={day} summary={d.headline} path="/" current={mine} label="Today, did you act on it?" />
-    </div>
-  );
-}

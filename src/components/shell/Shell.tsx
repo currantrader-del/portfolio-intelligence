@@ -81,7 +81,7 @@ export function TopBar({ status }: { status: React.ReactNode }) {
 export function TabBar() {
   const { active, loading } = useActiveSection();
   return (
-    <nav aria-label="Main" className="lg:hidden fixed bottom-0 inset-x-0 z-40 bg-[rgba(14,15,18,0.92)] backdrop-blur-md border-t border-line grid grid-cols-5 pb-[env(safe-area-inset-bottom)]">
+    <nav aria-label="Main" className="lg:hidden fixed bottom-0 inset-x-0 z-40 bg-[rgba(14,15,18,0.92)] backdrop-blur-md border-t border-line grid pb-[env(safe-area-inset-bottom)]" style={{ gridTemplateColumns: `repeat(${SECTIONS.length}, minmax(0, 1fr))` }}>
       {SECTIONS.map((s) => (
         <Link key={s.href} href={s.href} aria-current={active === s.href ? "page" : undefined}
           className={`tab-item h-[var(--tabbar-h)] flex flex-col items-center justify-center gap-[3px] text-[10.5px] font-medium no-underline ${active === s.href ? "text-ink" : "text-muted"} ${loading === s.href ? "is-loading" : ""}`}>
