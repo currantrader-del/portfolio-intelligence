@@ -417,7 +417,7 @@ function Header({ symbol, name, kicker, price, day }: { symbol: string; name: st
   return (
     <div className="flex items-end justify-between gap-3 min-w-0">
       <div className="flex flex-col gap-1 min-w-0">
-        <Link href="/research" className="max-lg:hidden inline-flex items-center gap-1 t-sm no-underline -ml-1 min-h-8"><Chevron dir="left" />Research</Link>
+        <Link href="/stocks" className="max-lg:hidden inline-flex items-center gap-1 t-sm no-underline -ml-1 min-h-8"><Chevron dir="left" />Stocks &amp; funds</Link>
         <span className="cap truncate">{kicker}</span>
         <h1 className="h1 truncate">{name ?? symbol}</h1>
       </div>

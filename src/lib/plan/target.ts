@@ -9,12 +9,15 @@ import type { Bucket } from "@/lib/portfolio/classify";
 import { isEtf } from "@/lib/portfolio/classify";
 import type { PortfolioView } from "@/lib/portfolio/engine";
 import type { ResearchRecord } from "@/lib/research/records";
+import { zoneKind } from "@/lib/policy/zoneKind";
 
 export type SleeveKey = "us" | "small" | "intl" | "stocks";
 export type Sleeve = { key: SleeveKey; label: string; buy: string; target: number };
 export type PlanStep = { date: string; text: string };
 export type TargetPlan = {
   adopted: string;
+  /** What the plan is for, in one or two sentences. */
+  goal: string;
   sleeves: Sleeve[];
   /** Most in individual stocks, and in any one stock, as shares of the plan's money. */
   stocksMax: number; singleMax: number;
@@ -25,6 +28,7 @@ export type TargetPlan = {
 
 export const DEFAULT_PLAN: TargetPlan = {
   adopted: "2026-11-17",
+  goal: "Beat the S&P 500 over the long run (10+ years) without one stock sinking you. Most money goes into low-cost funds every month; individual stocks only at their researched buy levels, at most 30% in all and 12% in any one.",
   sleeves: [
     { key: "us", label: "US market", buy: "VOO", target: 0.45 },
     { key: "small", label: "Small-cap value", buy: "AVUV", target: 0.10 },
@@ -156,4 +160,37 @@ export function lowsFrom(plan: TargetPlan, highs: Map<string, { price: number; h
     else if (researched.includes(symbol) && fromHigh <= DROP.stock) out.push({ symbol, kind: "stock", fromHigh, price, note: `${pct} below its high: check its research page; a drop alone is not a reason to buy` });
   }
   return out.sort((a, b) => a.fromHigh - b.fromHigh);
+}
+
+/** A research action that says to buy: a buy level in its words, or a buy/add instruction first. */
+export function isBuyAction(action: string | null | undefined): boolean {
+  if (!action) return false;
+  return buyLevelOf(action) !== null || zoneKind(action) === "buy";
+}
+
+export type Dropped = { symbol: string; since: string; was: string; now: string; kind: "research" | "passed" };
+const firstSentence = (s: string, max = 160) => {
+  const t = s.replace(/\s+/g, " ").trim();
+  const m = t.match(/^(.+?[.;])(\s|$)/);
+  const one = m ? m[1] : t;
+  return one.length > max ? `${one.slice(0, max - 1).trimEnd()}…` : one;
+};
+
+/**
+ * Pure: ideas that are no longer good, newest first. A stock is listed when its research in use no longer says to
+ * buy but the version before it did (with both actions, so the reason is the research's own words), or when you
+ * moved it to Passed with a note. `versions` is newest first per symbol.
+ */
+export function noLongerGood(versions: Map<string, { asOf: string; action: string | null }[]>, passed: { symbol: string; note: string | null; at: string | null }[], sinceIso: string): Dropped[] {
+  const out: Dropped[] = [];
+  for (const [symbol, vs] of versions) {
+    const [cur, prev] = vs;
+    if (!cur || !prev || cur.asOf < sinceIso) continue;
+    if (isBuyAction(prev.action) && !isBuyAction(cur.action)) out.push({ symbol, since: cur.asOf, was: firstSentence(prev.action ?? ""), now: firstSentence(cur.action ?? "No action written."), kind: "research" });
+  }
+  for (const p of passed) {
+    if (out.some((o) => o.symbol === p.symbol) || (p.at && p.at < sinceIso)) continue;
+    out.push({ symbol: p.symbol, since: p.at ?? "", was: "On your idea list", now: p.note ? firstSentence(p.note) : "Moved to Passed (no reason written).", kind: "passed" });
+  }
+  return out.sort((a, b) => b.since.localeCompare(a.since));
 }

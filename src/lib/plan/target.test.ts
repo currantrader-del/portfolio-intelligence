@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { buildPortfolio, type SnapshotInput } from "@/lib/portfolio/engine";
 import { toResearchRecord } from "@/lib/research/records";
-import { DEFAULT_PLAN, buyLevelOf, planFrom, planStatus } from "./target";
+import { DEFAULT_PLAN, buyLevelOf, planFrom, planStatus, noLongerGood, isBuyAction } from "./target";
 
 // Synthetic data only.
 const now = new Date("2026-11-17T16:00:00Z");
@@ -64,3 +64,23 @@ describe("down from their high", () => {
     expect(lows.find((l) => l.symbol === "VOO")!.note).toMatch(/11% below its high: a reason to move a planned transfer forward/);
   });
 });
+
+describe("no longer good", () => {
+  it("lists research that went from buy to hold, and ideas you passed on, newest first", () => {
+    const v = new Map([
+      ["AMAT", [{ asOf: "2026-11-16", action: "Watch, no new money; small starter only below ~$345." }, { asOf: "2026-11-01", action: "Hold." }]],
+      ["IREN", [{ asOf: "2026-11-08", action: "Trim to ~3%. The debt is larger than thought." }, { asOf: "2026-09-01", action: "Add below $40." }]],
+      ["NOW", [{ asOf: "2026-11-08", action: "Hold, no add." }, { asOf: "2026-10-01", action: "Hold." }]],
+      ["OLD", [{ asOf: "2026-05-01", action: "Hold." }, { asOf: "2026-04-01", action: "Buy below $10." }]],
+    ]);
+    const out = noLongerGood(v, [{ symbol: "XYZ", note: "Too much debt. Revisit next year.", at: "2026-11-10" }], "2026-07-20");
+    expect(out.map((d) => d.symbol)).toEqual(["XYZ", "IREN"]);
+    expect(out[1]).toMatchObject({ was: "Add below $40.", now: "Trim to ~3%.", kind: "research" });
+    expect(out[0]).toMatchObject({ now: "Too much debt.", kind: "passed" });
+  });
+  it("counts a buy level as a buy even when the action starts with watch", () => {
+    expect(isBuyAction("Watch, no new money; small starter only below ~$345.")).toBe(true);
+    expect(isBuyAction("Hold, no add.")).toBe(false);
+  });
+});
+
