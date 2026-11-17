@@ -3,7 +3,9 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import { Bar, Card, CardHead, Disclose, Pill } from "@/components/ui";
 import { shortDate, usd } from "@/lib/format";
 import { getQuotes } from "@/lib/market/quotes";
-import { DEFAULT_PLAN, buyLevelOf, planFrom, planStatus, type TargetPlan } from "@/lib/plan/target";
+import { DEFAULT_PLAN, WATCH_FUNDS, buyLevelOf, lowsFrom, planFrom, planStatus, type Low, type TargetPlan } from "@/lib/plan/target";
+import { getHistory } from "@/lib/market/history";
+import { metricsOf, type Candidate, type RadarIdea } from "@/lib/radar/radar";
 import type { Workspace } from "@/lib/workspace-core";
 
 async function loadPlan(db: SupabaseClient): Promise<TargetPlan> {
@@ -21,6 +23,7 @@ export async function PlanCard({ db, ws }: { db: SupabaseClient; ws: Workspace }
   const quotes = await getQuotes(needQuotes).catch(() => new Map());
   const prices = new Map([...quotes].map(([k, q]) => [k, q.price as number]));
   const st = planStatus(plan, ws.portfolio, ws.research, prices, today);
+  const [lows, radar] = await Promise.all([findLows(plan, ws), latestRadar(db)]).catch(() => [[] as Low[], null] as const);
   return (
     <Card labelledBy="plan-h" className="!gap-3">
       <CardHead id="plan-h" cap="Your plan" right={plan.docUrl ? <a href={plan.docUrl} target="_blank" rel="noreferrer" className="t-xs no-underline hover:text-ink">The full plan</a> : undefined} />
@@ -67,6 +70,25 @@ export async function PlanCard({ db, ws }: { db: SupabaseClient; ws: Workspace }
         </div>
       )}
 
+      {(lows.length > 0 || radar) && (
+        <div className="flex flex-col gap-1">
+          <span className="t-xs">Down from their high · free, from prices</span>
+          {lows.length ? (
+            <ul className="t-sm flex flex-col">
+              {lows.slice(0, 5).map((l) => (
+                <li key={l.symbol} className="flex flex-col py-1 border-t border-line">
+                  <span className="flex justify-between gap-3"><Link href={`/research/${l.symbol}`} className="no-underline text-ink">{l.symbol} <span className="t-xs">· {l.kind === "stock" ? "researched stock" : l.kind === "plan_fund" ? "plan fund" : "fund"}</span></Link><span className="num">{usd(l.price, 2)}</span></span>
+                  <span className="t-xs">{l.note}</span>
+                </li>
+              ))}
+            </ul>
+          ) : <p className="t-xs">None of your plan funds, the broad funds watched ({WATCH_FUNDS.join(", ")}) or your researched stocks is far below its 52-week high.</p>}
+          {radar && (
+            <p className="t-xs">Radar ({shortDate(radar.at)}): {radar.ideas.length ? radar.ideas.map((i) => i.symbol).join(", ") + " worth a research look" : radar.pullbacks.length ? `no strong new ideas; S&P 500 stocks beating the market but pulled back: ${radar.pullbacks.join(", ")} (screen only, not researched)` : "no new ideas this week"}. <Link href="/radar">Radar</Link></p>
+          )}
+        </div>
+      )}
+
       <Disclose summary={<span className="t-sm">Steps and monthly routine</span>}>
         <ol className="t-sm flex flex-col gap-1.5 list-decimal pl-5">
           {[...st.earlier, ...(st.next ? [st.next] : []), ...st.later].map((s) => <li key={s.date} className={s.date < today ? "opacity-60" : undefined}><span className="text-ink">{shortDate(s.date)}:</span> {s.text}</li>)}
@@ -76,4 +98,27 @@ export async function PlanCard({ db, ws }: { db: SupabaseClient; ws: Workspace }
       </Disclose>
     </Card>
   );
+}
+
+/** Plan funds, watched broad funds and researched stocks, with their 52-week high (daily prices, cached an hour). */
+async function findLows(plan: TargetPlan, ws: Workspace): Promise<Low[]> {
+  const researched = ws.research.filter((r) => r.current).map((r) => r.symbol);
+  const symbols = [...new Set([...plan.sleeves.map((s) => s.buy).filter((s) => /^[A-Z]{2,5}$/.test(s)), ...WATCH_FUNDS, ...researched])];
+  const highs = new Map<string, { price: number; high: number }>();
+  await Promise.all(symbols.map(async (s) => {
+    const h = await getHistory(s, "1y").catch(() => null);
+    const m = h ? metricsOf(h.bars) : null;
+    const price = ws.quotes.get(s)?.price ?? m?.price;
+    if (m && price) highs.set(s, { price, high: m.price / (1 + m.fromHigh) });
+  }));
+  return lowsFrom(plan, highs, researched);
+}
+
+/** The latest weekly Radar: its ideas, or the screen's top pullbacks when it named none. */
+async function latestRadar(db: SupabaseClient): Promise<{ at: string; ideas: RadarIdea[]; pullbacks: string[] } | null> {
+  const { data } = await db.from("model_runs").select("computed_at, outputs").eq("kind", "radar_run").order("computed_at", { ascending: false }).limit(1).maybeSingle();
+  if (!data) return null;
+  const o = data.outputs as { ideas?: RadarIdea[]; screen?: { candidates?: Candidate[] } | null };
+  const pullbacks = (o.screen?.candidates ?? []).filter((c) => c.kind === "pullback").slice(0, 3).map((c) => c.symbol);
+  return { at: data.computed_at as string, ideas: o.ideas ?? [], pullbacks };
 }

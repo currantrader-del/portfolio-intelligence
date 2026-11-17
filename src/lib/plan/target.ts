@@ -135,3 +135,25 @@ export function planStatus(plan: TargetPlan, p: PortfolioView, research: Researc
     waiting,
   };
 }
+
+/** Broad funds watched for big drops, beside the plan's own funds (2026-11-17: "funds that are low"). */
+export const WATCH_FUNDS = ["VTI", "QQQ", "VUG", "VTV", "SCHD", "VEA", "VWO", "SMH"];
+/** How far below the 52-week high counts as "down a lot". */
+export const DROP = { planFund: -0.10, otherFund: -0.15, stock: -0.25 };
+
+export type Low = { symbol: string; kind: "plan_fund" | "fund" | "stock" | "radar"; fromHigh: number; price: number; note: string };
+
+/** Pure: funds and researched stocks well below their 52-week high, deepest drop first. */
+export function lowsFrom(plan: TargetPlan, highs: Map<string, { price: number; high: number }>, researched: string[]): Low[] {
+  const planFunds = new Set(plan.sleeves.map((s) => s.buy).filter((s) => /^[A-Z]{2,5}$/.test(s)));
+  const out: Low[] = [];
+  for (const [symbol, { price, high }] of highs) {
+    if (!(high > 0) || !(price > 0)) continue;
+    const fromHigh = price / high - 1;
+    const pct = `${Math.round(-fromHigh * 100)}%`;
+    if (planFunds.has(symbol) && fromHigh <= DROP.planFund) out.push({ symbol, kind: "plan_fund", fromHigh, price, note: `${pct} below its high: a reason to move a planned transfer forward, not to change the plan` });
+    else if (!planFunds.has(symbol) && WATCH_FUNDS.includes(symbol) && fromHigh <= DROP.otherFund) out.push({ symbol, kind: "fund", fromHigh, price, note: `${pct} below its high: run its ETF check before buying` });
+    else if (researched.includes(symbol) && fromHigh <= DROP.stock) out.push({ symbol, kind: "stock", fromHigh, price, note: `${pct} below its high: check its research page; a drop alone is not a reason to buy` });
+  }
+  return out.sort((a, b) => a.fromHigh - b.fromHigh);
+}

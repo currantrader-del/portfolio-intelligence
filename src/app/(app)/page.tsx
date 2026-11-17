@@ -100,7 +100,7 @@ export default async function TodayPage() {
       <Suspense fallback={<div className="card card-tight"><Skel w="60%" /></div>}><PlanCard db={db} ws={ws} /></Suspense>
 
       <Card labelledBy="mb-h" className="!gap-2" flush>
-        <Disclose summary={<span className="t-sm" id="mb-h">Morning briefing{morning ? ` · ${morning.today ? "today" : shortDate(morning.at)}` : ""}</span>}>
+        <Disclose summary={<span className="t-sm" id="mb-h">Monthly briefing{morning ? ` · ${morning.today ? "today" : shortDate(morning.at)}` : ""}</span>}>
         <div className="flex flex-col gap-2">
         <div><MorningRunner label={morningCheck?.outdated ? "Rewrite with today's facts" : morning ? "Write a new one" : "Write it now"} /></div>
         {morningSkipped.length > 0 && <p className="t-xs warn">Not done this morning: {morningSkipped.map((x) => x.replace(/^(\w+) (skipped: |failed: )?/, (_m, k: string, how?: string) => `${({ market_briefing: "market briefing", assistant_answer: "this summary", morning_answer: "this summary", portfolio_plan: "weekly plan", trade_scan: "trade scan", radar_run: "Opportunity Radar" } as Record<string, string>)[k] ?? k} ${how?.startsWith("failed") ? "failed: " : "skipped, "}`)).join("; ")}. <Link href="/costs">Costs</Link></p>}
@@ -110,7 +110,7 @@ export default async function TodayPage() {
             <div className={morningCheck?.outdated ? "opacity-70" : undefined}><AnswerView text={morning.answer} /></div>
             <span className="t-xs">Written {new Intl.DateTimeFormat("en-US", { hour: "numeric", minute: "2-digit", timeZone: "America/New_York" }).format(new Date(morning.at))} ET{morning.today ? "" : ` on ${shortDate(morning.at)}`} · {Math.round(morning.ms / 1000)}s · ${morning.costUsd.toFixed(2)} · from your portfolio, policy, research and that day&apos;s market briefing · AI summary: facts are checked against sources on Markets, not here</span>
           </>
-        ) : <p className="t-sm">Written automatically at 9:00 AM ET on weekdays, after the 8:30 economic data. It answers six questions, key recommendation first: what happened in the market, whether anything materially affected your investments, whether any action is needed, which researched stocks are approaching entry, which new opportunities are worth investigating, and what is coming up.</p>}
+        ) : <p className="t-sm">Written automatically at 9:00 AM ET on the first business day of each month (tap above for one any day). It answers six questions, key recommendation first: what happened in the market, whether anything materially affected your investments, whether any action is needed, which researched stocks are approaching entry, which new opportunities are worth investigating, and what is coming up.</p>}
         </div>
         </Disclose>
       </Card>

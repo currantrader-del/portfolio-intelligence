@@ -17,3 +17,15 @@ describe("today's safety limit for runs you start (2026-11-16)", () => {
     expect(confirmBlock(daily, gate, true)).toBeNull();
   });
 });
+
+describe("monthly briefing day", () => {
+  it("is the first weekday of the month, skipping New Year's Day", async () => {
+    const { isFirstBusinessDay } = await import("./start");
+    expect(isFirstBusinessDay("2026-12-01")).toBe(true); // Tuesday
+    expect(isFirstBusinessDay("2026-12-02")).toBe(false);
+    expect(isFirstBusinessDay("2026-11-02")).toBe(true); // Nov 1 is a Sunday
+    expect(isFirstBusinessDay("2026-11-17")).toBe(false);
+    expect(isFirstBusinessDay("2027-01-01")).toBe(false); // holiday
+    expect(isFirstBusinessDay("2027-01-04")).toBe(true); // Jan 2-3 weekend
+  });
+});
