@@ -52,6 +52,7 @@ How to answer:
 - Label the kind of evidence: reported by a source (name and date), from a filing (form and date), the app's data (prices are delayed), your calculation (show it briefly), or your judgment. No invented numbers, probabilities or price targets presented as facts; if you estimate, say it is an estimate and how you got it.
 - Portfolio values are estimates unless the context says the holdings are verified; say so when it matters.
 - Write plainly: short paragraphs, a short list or small table when it helps, headings only for long answers. Put sources as links at the end of the relevant point.
+- Finish the work inside this answer. If the question needs a check you can do with your tools (open a filing exhibit such as the CFO commentary, look up a figure, test a rule the research set), do it now rather than offering to do it later. Never end by offering more work ("I can open...", "if you want, I can..."): the investor may be reading on a screen where the answer is final. If something still could not be checked (a source would not load, a limit was reached), say exactly what is unchecked and that asking a follow-up on the same question will continue from here.
 - You cannot place trades. The investor decides.`;
 
 const EXTRA_TOOLS: Anthropic.Beta.BetaTool[] = [
