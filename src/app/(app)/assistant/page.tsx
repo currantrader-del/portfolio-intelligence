@@ -29,10 +29,13 @@ export default async function QuestionsPage({ searchParams }: { searchParams: Pr
   const fill = (t: string) => t.replace("{cash}", cash > 0 ? money(cash) : "my available cash").replace("{ticker}", ticker);
 
   const { data: quick } = await db.from("model_runs").select("computed_at, inputs, outputs").eq("kind", "assistant_answer").eq("inputs->>purpose", "quick").order("computed_at", { ascending: false }).limit(40);
+  // A follow-up's request carries the earlier questions and answers, so the card can show the whole conversation.
+  const { data: reqs } = await db.from("model_runs").select("id, inputs").eq("kind", "assistant_request").eq("inputs->>purpose", "quick").order("computed_at", { ascending: false }).limit(40);
+  const priorOf = new Map((reqs ?? []).map((r) => [r.id as string, ((r.inputs as { history?: { role: "user" | "assistant"; content: string }[] }).history ?? [])]));
   const lastFor = (slot: number): StoredAnswer => {
     const r = (quick ?? []).find((x) => Number((x.inputs as { slot?: number }).slot) === slot);
     const o = r?.outputs as (AgentAnswer & { error?: string }) | undefined;
-    return r && o?.answer && !o.error ? { question: (r.inputs as { question: string }).question, answer: o.answer, at: r.computed_at, ms: o.ms, costUsd: o.costUsd, searches: o.searches } : null;
+    return r && o?.answer && !o.error ? { question: (r.inputs as { question: string }).question, answer: o.answer, at: r.computed_at, ms: o.ms, costUsd: o.costUsd, searches: o.searches, prior: priorOf.get((r.inputs as { request_id?: string }).request_id ?? "") ?? [] } : null;
   };
 
   // A saved answer is marked outdated when its inputs (policy, holdings, cash, research) changed after it, or it names
