@@ -93,6 +93,8 @@ export type LedgerEntry = {
   quantity: number | null;
   price: number | null;
   amount: number; // signed cash effect on the account
+  /** Where it came from (schwab_api, manual, csv_import, statement); for explaining, never for the math. */
+  source?: string;
 };
 
 export type AccountView = {

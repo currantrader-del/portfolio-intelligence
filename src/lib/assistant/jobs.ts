@@ -6,6 +6,7 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import { buildWorkspace } from "@/lib/workspace-core";
 import { save } from "@/lib/intel/jobs";
 import { AGENT_VERSION, runAgent, runBaseline, type AgentAnswer } from "./agent";
+import { isTradeRecordQuestion, tradeRecordAnswer } from "./tradeLookup";
 
 export type AskRequest = {
   question: string; history?: { role: "user" | "assistant"; content: string }[];
@@ -46,7 +47,10 @@ export async function runAskJob(db: SupabaseClient, requestId: string) {
   const ws = await buildWorkspace(db);
   let out: AgentAnswer | { error: string; mode: string; question: string };
   try {
-    out = r.mode === "baseline" ? await runBaseline(ws, r.question) : await runAgent(db, ws, r);
+    // "Was my trade recorded?" is a lookup, not research: answer it from the records, free (2026-11-18).
+    out = r.mode !== "baseline" && r.purpose !== "morning" && !r.deep && isTradeRecordQuestion(r.question)
+      ? { version: AGENT_VERSION, mode: "app", question: r.question, answer: tradeRecordAnswer(r.question, ws.ledger, ws.portfolio, ws.now), model: "records (no AI)", ms: 0, turns: 0, searches: 0, steps: [], usage: { input: 0, cacheRead: 0, cacheWrite: 0, output: 0 }, costUsd: 0, contextBriefingId: null, stopped: null }
+      : r.mode === "baseline" ? await runBaseline(ws, r.question) : await runAgent(db, ws, r);
   } catch (e) {
     out = { error: (e as Error).message.slice(0, 300), mode: r.mode, question: r.question };
   }

@@ -110,7 +110,9 @@ export async function syncSchwabTrades(db: SupabaseClient, now = new Date()): Pr
     const { data: accts } = await db.from("accounts").select("id, name, institution, account_role, external_ref_hint");
     const brokers = ((accts ?? []) as { id: string; name: string; institution: string; account_role: string; external_ref_hint: string | null }[])
       .filter((a) => a.account_role === "taxable_brokerage" && /schwab|thinkorswim/i.test(`${a.institution} ${a.name}`));
-    const { data: have } = await db.from("transactions").select("note").eq("source_kind", "schwab_api").gte("trade_date", start.toISOString().slice(0, 10));
+    // Every Schwab id already saved, whatever its date: Schwab's date window and the trade date can differ by days,
+    // which is how one deposit was saved twice (2026-11-18).
+    const { data: have } = await db.from("transactions").select("note").eq("source_kind", "schwab_api");
     const seen = new Set(((have ?? []) as { note: string | null }[]).map((r) => r.note?.match(/schwab activity (\S+)/)?.[1]).filter(Boolean));
     for (const a of nums ?? []) {
       const last4 = a.accountNumber.slice(-4);
@@ -125,6 +127,7 @@ export async function syncSchwabTrades(db: SupabaseClient, now = new Date()): Pr
         const { error } = await db.from("transactions").insert(fresh.map((t) => ({ account_id: target.id, trade_date: t.tradeDate, kind: t.kind, symbol: t.symbol, quantity: t.quantity, price: t.price, amount: t.amount, source_kind: "schwab_api", note: `From Schwab (schwab activity ${t.activityId})` })));
         if (error) throw new Error(`Could not save trades: ${error.message}`);
         out.added += fresh.length;
+        for (const t of fresh) seen.add(t.activityId);
       }
       // Deposits too, so money you move in from outside is taken off your outside-money figure (2026-11-16).
       // A failure here never stops the trade sync.

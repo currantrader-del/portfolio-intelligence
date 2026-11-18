@@ -8,6 +8,7 @@
  *   GET ?demo=<demoId>                   -> every request and answer of one demo run
  */
 import { loadSpend, manualGate } from "@/lib/costs/spend";
+import { isTradeRecordQuestion } from "@/lib/assistant/tradeLookup";
 import { createClient } from "@/lib/supabase/server";
 import { dispatchJob, save } from "@/lib/intel/jobs";
 import { AGENT_VERSION } from "@/lib/assistant/agent";
@@ -40,7 +41,10 @@ export async function POST(req: Request) {
   const spent = await spentToday(db);
   const daily = dailyCapBlock(spent);
   const gate = manualGate(await loadSpend(db), "assistant_answer", body?.confirm === true);
-  const block = confirmBlock(daily, gate, body?.confirm === true);
+  // A "was my trade recorded?" question is answered from the records for free, so no spending limit applies to it.
+  const lastQ = [...(body?.messages ?? [])].reverse().find((m) => m.role === "user" && typeof m.content === "string")?.content ?? "";
+  const free = !body?.action && !body?.deep && isTradeRecordQuestion(lastQ);
+  const block = free ? null : confirmBlock(daily, gate, body?.confirm === true);
   if (block) return Response.json({ error: block, needsConfirm: true }, { status: 409 });
   try {
     if (body?.action === "morning") {
