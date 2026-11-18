@@ -131,11 +131,26 @@ export async function loadPolicy(db: SupabaseClient): Promise<Policy | null> {
   return p;
 }
 
+/**
+ * A Schwab activity counts once, however many rows a sync wrote for it (2026-11-18: the Nov 12 $1,000 deposit was
+ * saved twice, which took $2,000 off the outside money instead of $1,000). Rows without a Schwab id are kept as they are.
+ */
+export function dedupeSynced<T extends { source_kind?: string | null; note?: string | null }>(rows: T[]): T[] {
+  const seen = new Set<string>();
+  return rows.filter((r) => {
+    const id = r.source_kind === "schwab_api" ? r.note?.match(/schwab activity (\S+)/)?.[1] : null;
+    if (!id) return true;
+    if (seen.has(id)) return false;
+    seen.add(id);
+    return true;
+  });
+}
+
 export async function loadLedger(db: SupabaseClient): Promise<LedgerEntry[]> {
-  const { data } = await db.from("transactions").select("account_id, trade_date, kind, symbol, quantity, price, amount").order("trade_date");
-  return (data ?? []).map((t) => ({
+  const { data } = await db.from("transactions").select("account_id, trade_date, kind, symbol, quantity, price, amount, source_kind, note").order("trade_date");
+  return dedupeSynced(data ?? []).map((t) => ({
     accountId: t.account_id, tradeDate: t.trade_date, kind: t.kind, symbol: t.symbol,
-    quantity: num(t.quantity), price: num(t.price), amount: num(t.amount) ?? 0,
+    quantity: num(t.quantity), price: num(t.price), amount: num(t.amount) ?? 0, source: t.source_kind ?? undefined,
   }));
 }
 

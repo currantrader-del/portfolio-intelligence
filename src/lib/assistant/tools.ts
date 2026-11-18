@@ -181,6 +181,12 @@ export async function runTool(name: string, input: Record<string, unknown>, ws: 
             action_now: rv ? { verb: rv.now.verb, headline: rv.now.headline, note: "The app's one action for this holding (Plan, Stocks & funds and its research page show the same). Explain it; do not replace it." } : null,
             review: rv ? { suggestion: rv.suggestion.label, reason: rv.suggestion.reason, options: rv.options.map((o) => ({ option: o.label, basis: o.basis, dollars: o.dollars, combined_after: r4(o.weightAfter), note: o.note })) } : null };
         }),
+        // Every recorded trade of the last 30 days, Schwab-synced ones included (2026-11-18: the assistant said "no trade
+        // recorded" because it only saw a count of hand-entered trades made after each account's last sync).
+        recent_trades: ws.ledger.filter((l) => (l.kind === "buy" || l.kind === "sell") && l.tradeDate >= new Date(ws.now.getTime() - 30 * 864e5).toISOString().slice(0, 10))
+          .sort((a, b) => b.tradeDate.localeCompare(a.tradeDate)).slice(0, 40)
+          .map((l) => ({ date: l.tradeDate, kind: l.kind, symbol: l.symbol, quantity: l.quantity, price: l.price, amount: l.amount, source: l.source ?? null, account: p.accounts.find((a) => a.id === l.accountId)?.name ?? null })),
+        recent_trades_note: "Trades synced from Schwab are already inside that account's synced holdings and cash. trades_recorded_since on an account counts only trades applied on top of its last snapshot, not all trades.",
         denominator: "Every weight is of the invested portfolio (holdings plus cash in the investment accounts); savings are excluded.",
         lookthrough_weights_as_of: LOOKTHROUGH_AS_OF,
       };
