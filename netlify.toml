@@ -1,0 +1,17 @@
+[build]
+  command = "npm run build"
+  publish = ".next"
+
+[build.environment]
+  NODE_VERSION = "22"
+
+# Our own functions (the briefing's background job) live here, next to the Next.js runtime.
+[functions]
+  directory = "netlify/functions"
+  node_bundler = "esbuild"
+
+# "Share full research" PDF: its own function so the PDF engine and fonts never ship in the Next.js server.
+[functions."share-pdf"]
+  external_node_modules = ["@react-pdf/renderer"]
+  # pdfkit loads its built-in fonts and colour profile by dynamic require/URL, which bundling does not trace.
+  included_files = ["public/share-fonts/**", "node_modules/pdfkit/js/standard-fonts/**", "node_modules/pdfkit/js/data/**"]

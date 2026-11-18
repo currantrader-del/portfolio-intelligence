@@ -1,0 +1,39 @@
+/**
+ * Opportunity Radar (src/lib/radar).
+ *   POST -> starts a Radar run: {requestId} or {skipped}
+ *   GET  -> {running}
+ */
+import { loadSpend, manualGate } from "@/lib/costs/spend";
+import { createClient } from "@/lib/supabase/server";
+import { confirmBlock, dailyCapBlock, spentToday } from "@/lib/intel/start";
+import { radarStatus, startRadar } from "@/lib/radar/job";
+
+export const runtime = "nodejs";
+export const maxDuration = 30;
+
+export async function POST(req: Request) {
+  if (!process.env.ANTHROPIC_API_KEY) return Response.json({ error: "The assistant is not configured yet: add ANTHROPIC_API_KEY in Netlify environment variables." }, { status: 503 });
+  const db = await createClient();
+  const { data: auth } = await db.auth.getUser();
+  const { data: s } = await db.auth.getSession();
+  if (!auth.user || !s.session?.access_token) return Response.json({ error: "Sign in first." }, { status: 401 });
+  const body = (await req.json().catch(() => ({}))) as { confirm?: boolean };
+  const spent = await spentToday(db);
+  const daily = dailyCapBlock(spent, false);
+  const gate = manualGate(await loadSpend(db), "radar_run", body.confirm === true);
+  const block = confirmBlock(daily, gate, body.confirm === true);
+  if (block) return Response.json({ error: block, needsConfirm: true }, { status: 409 });
+  try {
+    const requestId = await startRadar(db, new URL(req.url).origin, s.session.access_token, "manual");
+    return Response.json(requestId ? { requestId } : { skipped: "Radar is already running." });
+  } catch (e) {
+    return Response.json({ error: (e as Error).message.slice(0, 200) }, { status: 502 });
+  }
+}
+
+export async function GET() {
+  const db = await createClient();
+  const { data: auth } = await db.auth.getUser();
+  if (!auth.user) return Response.json({ error: "Sign in first." }, { status: 401 });
+  return Response.json(await radarStatus(db));
+}

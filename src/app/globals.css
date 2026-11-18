@@ -1,0 +1,251 @@
+@import "tailwindcss";
+
+/*
+ * Design tokens. Dark first: one theme, tuned for reading numbers at night and on phones.
+ * Older token names (ground, ink, accent…) are kept as aliases so every page shares one palette.
+ */
+:root {
+  color-scheme: dark;
+  --ground: #0a0b0d;
+  --surface: #131417;
+  --surface-2: #1b1d21;
+  --ink: #f2f3f5;
+  --ink-2: #c3c7cd;
+  --muted: #959ba4;
+  --line: #25272c;
+  --line-strong: #34373d;
+  --track: #2a2c31;
+  --accent: #c98c68; /* copper */
+  --accent-soft: #2a1f19;
+  --gain: #5fc694;
+  --gain-soft: #17271f;
+  --loss: #f2857a;
+  --warn-ink: #e9bd63;
+  --warn-bg: #2b2414;
+  --alert-ink: #f2857a;
+  --alert-bg: #2e1916;
+  --info: #8fb3f2;
+  --info-soft: #18202e;
+  --chrome: #0a0b0d;
+  --chrome-ink: #f2f3f5;
+  --chrome-muted: #959ba4;
+  --r-card: 18px;
+  --r-ctl: 12px;
+  --tabbar-h: 64px;
+}
+
+@theme inline {
+  --color-ground: var(--ground);
+  --color-surface: var(--surface);
+  --color-surface-2: var(--surface-2);
+  --color-ink: var(--ink);
+  --color-ink-2: var(--ink-2);
+  --color-muted: var(--muted);
+  --color-line: var(--line);
+  --color-line-strong: var(--line-strong);
+  --color-track: var(--track);
+  --color-accent: var(--accent);
+  --color-accent-soft: var(--accent-soft);
+  --color-gain: var(--gain);
+  --color-loss: var(--loss);
+  --color-warn-ink: var(--warn-ink);
+  --color-warn-bg: var(--warn-bg);
+  --color-alert-ink: var(--alert-ink);
+  --color-alert-bg: var(--alert-bg);
+  --color-info: var(--info);
+  --color-info-soft: var(--info-soft);
+  --color-chrome: var(--chrome);
+  --color-chrome-ink: var(--chrome-ink);
+  --color-chrome-muted: var(--chrome-muted);
+  /* One typeface. Numbers use tabular figures instead of a separate mono font. */
+  --font-sans: var(--font-inter), system-ui, -apple-system, sans-serif;
+  --font-serif: var(--font-inter), system-ui, -apple-system, sans-serif;
+  --font-mono: var(--font-inter), system-ui, -apple-system, sans-serif;
+}
+
+html { -webkit-text-size-adjust: 100%; background: var(--ground); }
+body {
+  background: var(--ground);
+  color: var(--ink);
+  font-family: var(--font-inter), system-ui, -apple-system, sans-serif;
+  font-size: 15px;
+  line-height: 1.45;
+  overflow-x: hidden;
+  -webkit-font-smoothing: antialiased;
+  -webkit-tap-highlight-color: transparent;
+}
+a { color: var(--ink); text-underline-offset: 3px; text-decoration-color: var(--line-strong); }
+a:hover { text-decoration-color: currentColor; }
+/* The rule above is unlayered, so it beats layered utilities and components: without these, a
+   light ("bg-ink") button link or a selected chip link showed ink text on an ink pill, a blank button. */
+a.bg-ink, a.btn-primary, a.chip[aria-current="page"] { color: var(--ground); }
+:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 6px; }
+::selection { background: var(--accent-soft); }
+
+/* Phones: 16px form text stops iOS zooming on focus. */
+@media (max-width: 640px) {
+  input, select, textarea { font-size: 16px; }
+}
+/* Taps: no double-tap-to-zoom wait on controls, and no accidental zoom from quick repeated taps. */
+a, button, summary, label, select, input, textarea, [role="button"] { touch-action: manipulation; }
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { animation-duration: 0.01ms !important; transition-duration: 0.01ms !important; }
+}
+
+@layer components {
+  .num, .font-mono { font-variant-numeric: tabular-nums; letter-spacing: -0.01em; }
+
+  /* Text */
+  .cap { font-size: 11px; text-transform: uppercase; letter-spacing: 0.08em; color: var(--muted); font-weight: 500; }
+  .h1 { font-size: 22px; font-weight: 600; letter-spacing: -0.02em; line-height: 1.2; }
+  .h2 { font-size: 17px; font-weight: 600; letter-spacing: -0.01em; line-height: 1.3; }
+  .t-big { font-size: 38px; font-weight: 600; letter-spacing: -0.03em; line-height: 1; font-variant-numeric: tabular-nums; }
+  .t-mid { font-size: 30px; font-weight: 600; letter-spacing: -0.02em; line-height: 1.05; font-variant-numeric: tabular-nums; }
+  .t-val { font-size: 17px; font-weight: 600; font-variant-numeric: tabular-nums; }
+  .t-sm { font-size: 13px; color: var(--ink-2); }
+  .t-xs { font-size: 12px; color: var(--muted); }
+  @media (max-width: 380px) { .t-big { font-size: 34px; } .t-mid { font-size: 27px; } }
+
+  /* Surfaces */
+  .card { background: var(--surface); border: 1px solid var(--line); border-radius: var(--r-card); padding: 16px; display: flex; flex-direction: column; gap: 12px; min-width: 0; }
+  .card-tight { padding: 12px 14px; gap: 8px; }
+  .card-flush { padding-top: 2px; padding-bottom: 2px; gap: 0; }
+  a.card { text-decoration: none; transition: border-color 120ms ease, background-color 120ms ease; }
+  a.card:hover { border-color: var(--line-strong); }
+  a.card:active { background: var(--surface-2); }
+  .divider { height: 1px; background: var(--line); flex: none; }
+
+  /* Pills and dots */
+  .pill { display: inline-flex; align-items: center; gap: 6px; min-height: 24px; padding: 0 10px; border-radius: 999px; font-size: 12px; font-weight: 500; background: var(--surface-2); color: var(--ink-2); white-space: nowrap; line-height: 1; flex: none; }
+  .pill-sm { min-height: 20px; padding: 0 8px; font-size: 11px; }
+  .pill-warn { background: var(--warn-bg); color: var(--warn-ink); }
+  .pill-alert { background: var(--alert-bg); color: var(--alert-ink); }
+  .pill-info { background: var(--info-soft); color: var(--info); }
+  .pill-copper { background: var(--accent-soft); color: var(--accent); }
+  .pill-gain { background: var(--gain-soft); color: var(--gain); }
+  .pill-solid { background: var(--ink); color: var(--ground); }
+  .dot { width: 7px; height: 7px; border-radius: 50%; background: currentColor; display: inline-block; flex: none; }
+  .dot-hollow { background: transparent; border: 1.5px solid currentColor; }
+  .dot-dash { background: transparent; border: 1.5px dashed currentColor; }
+
+  /* Bars */
+  .bar { height: 8px; border-radius: 999px; background: var(--track); position: relative; overflow: hidden; flex: none; }
+  .bar-thin { height: 6px; }
+  .bar > i { position: absolute; left: 0; top: 0; bottom: 0; border-radius: 999px; background: var(--accent); }
+  .bar > b { position: absolute; top: 0; bottom: 0; width: 2px; background: var(--ink-2); }
+
+  /* Controls */
+  .btn { display: inline-flex; align-items: center; justify-content: center; gap: 8px; min-height: 44px; padding: 0 16px; border-radius: var(--r-ctl); font-size: 15px; font-weight: 600; border: 1px solid var(--line-strong); background: var(--surface-2); color: var(--ink); text-decoration: none; white-space: nowrap; cursor: pointer; transition: background-color 120ms ease, border-color 120ms ease; }
+  .btn:hover { border-color: var(--muted); }
+  .btn:disabled { opacity: 0.5; cursor: default; }
+  .btn-primary { background: var(--ink); color: var(--ground); border-color: var(--ink); }
+  .btn-primary:hover { background: #ffffff; }
+  .btn-ghost { background: transparent; border-color: transparent; }
+  /* Pressed: every tap shows at once, before any network work starts. */
+  .btn { transition: background-color 120ms ease, border-color 120ms ease, transform 90ms ease, opacity 120ms ease; -webkit-user-select: none; user-select: none; }
+  .btn:not(:disabled):active { transform: scale(0.97); background: var(--line-strong); border-color: var(--muted); }
+  .btn-primary:not(:disabled):active { background: #cfd2d7; border-color: #cfd2d7; }
+  .btn-ghost:not(:disabled):active { background: var(--surface-2); }
+  /* Working: stays readable (not faded like a disabled button) and says what it is doing. */
+  .btn.is-pending, .btn[aria-busy="true"] { opacity: 0.85; cursor: progress; }
+  .btn-sm { min-height: 36px; padding: 0 12px; font-size: 13px; border-radius: 10px; }
+  .input { min-height: 44px; border-radius: var(--r-ctl); border: 1px solid var(--line-strong); background: var(--ground); color: var(--ink); padding: 0 12px; font: inherit; width: 100%; min-width: 0; }
+  textarea.input { padding: 10px 12px; }
+  .input:focus { border-color: var(--muted); outline: none; }
+  .field { display: flex; flex-direction: column; gap: 4px; font-size: 12px; color: var(--muted); min-width: 0; }
+  .seg { display: flex; background: var(--surface-2); border-radius: var(--r-ctl); padding: 3px; gap: 2px; }
+  .seg > a, .seg > button { flex: 1; min-height: 38px; display: flex; align-items: center; justify-content: center; border-radius: 9px; font-size: 13px; color: var(--muted); font-weight: 500; text-decoration: none; white-space: nowrap; padding: 0 8px; }
+  .seg > [aria-current="page"], .seg > [aria-pressed="true"] { background: var(--line-strong); color: var(--ink); }
+  .chips { display: flex; gap: 8px; overflow-x: auto; scrollbar-width: none; -webkit-overflow-scrolling: touch; margin: 0 -16px; padding: 0 16px; }
+  .chips::-webkit-scrollbar { display: none; }
+  .chip { min-height: 36px; padding: 0 14px; border-radius: 999px; border: 1px solid var(--line-strong); display: inline-flex; align-items: center; gap: 6px; font-size: 13px; color: var(--ink-2); white-space: nowrap; text-decoration: none; background: transparent; flex: none; cursor: pointer; }
+  .chip[aria-current="page"], .chip[aria-pressed="true"] { background: var(--ink); color: var(--ground); border-color: var(--ink); }
+  .chip { transition: background-color 120ms ease, transform 90ms ease; }
+  .chip:active { background: var(--surface-2); transform: scale(0.97); }
+  .chip[aria-current="page"]:active { background: #cfd2d7; }
+  .seg > a, .seg > button { transition: background-color 120ms ease; }
+  .seg > a:active, .seg > button:active { background: var(--surface); color: var(--ink); }
+
+  /* Lists */
+  .list { display: flex; flex-direction: column; }
+  .li { display: flex; align-items: center; gap: 12px; min-height: 56px; padding: 8px 0; border-top: 1px solid var(--line); text-decoration: none; color: inherit; min-width: 0; }
+  .list > .li:first-child, .list > li:first-child > .li { border-top: 0; }
+  a.li { transition: background-color 120ms ease; border-radius: 10px; }
+  a.li:active { background: var(--surface-2); }
+  .tick { width: 36px; height: 36px; border-radius: 10px; background: var(--surface-2); display: flex; align-items: center; justify-content: center; font-size: 12px; font-weight: 600; color: var(--ink-2); flex: none; letter-spacing: 0; }
+  .link-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; min-height: 44px; color: var(--ink-2); border-top: 1px solid var(--line); padding-top: 12px; text-decoration: none; }
+  .link-row:active { color: var(--ink); background: var(--surface-2); }
+  .chev { width: 16px; height: 16px; color: var(--muted); flex: none; transition: transform 150ms ease; }
+
+  /* Progressive disclosure on native <details>: works without JavaScript. */
+  .disclose > summary { display: flex; align-items: center; justify-content: space-between; gap: 12px; min-height: 48px; color: var(--ink-2); cursor: pointer; list-style: none; }
+  .disclose > summary::-webkit-details-marker { display: none; }
+  .disclose > summary { transition: background-color 120ms ease; border-radius: 10px; -webkit-user-select: none; user-select: none; }
+  .disclose > summary:active { background: var(--surface-2); }
+  .disclose[open] > summary .chev { transform: rotate(180deg); }
+  .disclose + .disclose { border-top: 1px solid var(--line); }
+  .disclose-body { padding-bottom: 14px; display: flex; flex-direction: column; gap: 10px; }
+
+  /* Sources and freshness */
+  .src { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; color: var(--muted); min-width: 0; }
+  .src i { font-style: normal; border: 1px solid var(--line-strong); border-radius: 6px; padding: 1px 6px; color: var(--ink-2); font-size: 11px; }
+
+  /* Tables (desktop) */
+  .tbl { width: 100%; border-collapse: collapse; font-size: 13px; }
+  .tbl th { font-weight: 500; color: var(--muted); text-align: left; padding: 8px 10px; border-bottom: 1px solid var(--line); font-size: 11px; text-transform: uppercase; letter-spacing: 0.06em; white-space: nowrap; }
+  .tbl td { padding: 10px; border-bottom: 1px solid var(--line); color: var(--ink-2); vertical-align: middle; }
+  .tbl tr:last-child td { border-bottom: 0; }
+  .tbl .n { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
+  .tbl tbody tr:hover td { background: rgba(255, 255, 255, 0.015); }
+
+  /* Navigation items: pressed, and the tab being opened pulses until its page arrives. */
+  .tab-item, .nav-item { transition: color 120ms ease, background-color 120ms ease; }
+  .tab-item:active { color: var(--ink); background: rgba(255, 255, 255, 0.04); }
+  .nav-item:active { background: var(--surface-2); color: var(--ink); }
+  .tab-item.is-loading svg, .nav-item.is-loading svg { animation: pulse-soft 0.9s ease-in-out infinite; }
+
+  /* Phones and tablets: every tap target at least 44px tall (Apple's minimum). */
+  @media (pointer: coarse) {
+    .btn-sm { min-height: 44px; }
+    .chip { min-height: 44px; }
+    .seg > a, .seg > button { min-height: 44px; }
+    .disclose > summary { min-height: 48px; }
+  }
+
+  /* Spinner for buttons that are working. */
+  .spin { width: 15px; height: 15px; border-radius: 50%; border: 2px solid currentColor; border-right-color: transparent; display: inline-block; flex: none; animation: spin 0.7s linear infinite; }
+
+  /* Form result under a form: success or a plain-language failure. */
+  .form-note { display: flex; align-items: flex-start; gap: 8px; font-size: 13px; line-height: 1.4; border-radius: 12px; padding: 8px 12px; animation: fade 150ms ease; }
+  .form-note > svg { margin-top: 1px; }
+  .form-note-ok { background: var(--gain-soft); color: var(--gain); }
+  .form-note-error { background: var(--warn-bg); color: var(--warn-ink); }
+
+  /* Toast: confirms a finished action above the tab bar. */
+  .toast-wrap { position: fixed; z-index: 60; left: 0; right: 0; bottom: calc(var(--tabbar-h) + env(safe-area-inset-bottom) + 76px); display: flex; justify-content: center; pointer-events: none; padding: 0 16px; }
+  @media (min-width: 1024px) { .toast-wrap { bottom: 88px; } }
+  .toast { pointer-events: auto; display: flex; align-items: center; gap: 8px; max-width: 420px; min-height: 44px; padding: 10px 16px; border-radius: 999px; background: var(--ink); color: var(--ground); font-size: 14px; font-weight: 600; box-shadow: 0 10px 30px rgba(0, 0, 0, 0.55); animation: toast-in 180ms ease-out; }
+  .toast-error { background: var(--warn-bg); color: var(--warn-ink); border: 1px solid var(--warn-ink); border-radius: 16px; }
+
+  /* Top-of-screen progress bar while a page loads. */
+  .nav-progress { position: fixed; z-index: 70; left: 0; right: 0; top: env(safe-area-inset-top); height: 3px; pointer-events: none; opacity: 0; transition: opacity 200ms ease 60ms; }
+  .nav-progress > i { position: absolute; inset: 0; background: var(--accent); transform-origin: left; transform: scaleX(0); box-shadow: 0 0 8px var(--accent); }
+  .nav-progress.is-on { opacity: 1; transition: none; }
+  .nav-progress.is-on > i { animation: nav-load 8s cubic-bezier(0.1, 0.7, 0.2, 1) forwards; }
+
+  /* Loading placeholders */
+  .skel { background: linear-gradient(90deg, var(--surface-2) 0%, #22252a 50%, var(--surface-2) 100%); background-size: 200% 100%; animation: skel 1.4s ease-in-out infinite; border-radius: 8px; }
+  @keyframes skel { from { background-position: 200% 0; } to { background-position: -200% 0; } }
+}
+
+.gain, .text-gain { color: var(--gain); }
+.loss, .text-loss { color: var(--loss); }
+.warn { color: var(--warn-ink); }
+
+@keyframes spin { to { transform: rotate(360deg); } }
+@keyframes pulse-soft { 0%, 100% { opacity: 1; } 50% { opacity: 0.35; } }
+@keyframes nav-load { 0% { transform: scaleX(0); } 10% { transform: scaleX(0.3); } 100% { transform: scaleX(0.92); } }
+@keyframes toast-in { from { transform: translateY(8px); opacity: 0; } to { transform: none; opacity: 1; } }
+@keyframes fade { from { opacity: 0; } to { opacity: 1; } }
+@keyframes rise { from { transform: translateY(24px); opacity: 0.6; } to { transform: none; opacity: 1; } }
+@keyframes slide { from { transform: translateX(24px); opacity: 0.6; } to { transform: none; opacity: 1; } }
