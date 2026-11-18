@@ -11,7 +11,8 @@ import { MoverHeadlines } from "@/components/MoverHeadlines";
 import { MarketsTeaser } from "@/components/intel/MarketsTeaser";
 import { researchDates } from "@/lib/alerts/events";
 import { sessionOfQuotes } from "@/lib/market/hours";
-import { reviewPosition } from "@/lib/decision/review";
+import { holdingAction } from "@/lib/decision/actions";
+import { loadDecisionFilings } from "@/lib/alerts/events";
 import { DEFAULT_PLAN, buyLevelOf } from "@/lib/plan/target";
 import { zoneKind } from "@/lib/policy/zoneKind";
 
@@ -30,7 +31,9 @@ const VERB_TONE = { "Buy more": "gain", Hold: "neutral", Trim: "warn", "Reassess
 export default async function StocksPage() {
   const ws = await getWorkspace();
   const p = ws.portfolio;
-  const planFunds = new Set(DEFAULT_PLAN.sleeves.map((s) => s.buy));
+  const planFunds = new Set(DEFAULT_PLAN.funds.map((s) => s.buy));
+  // The same filings every page passes to the decision engine, so a stock's action here matches Plan and its research page.
+  const filings = await loadDecisionFilings(ws).catch(() => new Map());
   const spy = ws.benchmarks.find((b) => b.symbol === "SPY")?.dayPct ?? null;
   const brief = writeBrief(p, spy, ws.alerts);
   const vsSpy = p.dayPct !== null && spy !== null ? p.dayPct - spy : null;
@@ -62,6 +65,7 @@ export default async function StocksPage() {
 
       <Card labelledBy="day-h" className="!gap-2">
         <CardHead id="day-h" cap={ws.marketOpen ? "Today" : "Last session"} right={<DataLabel kind={verified ? "verified" : "estimated"} />} />
+        <span className="t-xs">Price change of what you hold today, all accounts. Not a total return: deposits and withdrawals are not counted.</span>
         <div className="flex items-baseline justify-between gap-3">
           <span className={`t-big ${p.dayPct === null ? "" : toneOf(p.dayPct)}`}>{p.dayPct === null ? usd(p.total) : pctStr(p.dayPct, 2, true)}</span>
           <span className="t-sm num text-right">{verified ? "" : "≈ "}{usd(p.total)} invested</span>
@@ -88,7 +92,7 @@ export default async function StocksPage() {
         <CardHead id="st-h" cap="Stocks you own" right={<span className="t-xs">what to do now</span>} />
         <ul className="flex flex-col">
           {stocks.map((h) => {
-            const n = reviewPosition(ws, h.symbol)?.now ?? null;
+            const n = holdingAction(ws, h.symbol, filings)?.now ?? null;
             return (
               <li key={h.symbol} className="border-t border-line first:border-t-0">
                 <LinkRow href={`/research/${h.symbol}`}>
@@ -109,7 +113,7 @@ export default async function StocksPage() {
             <li key={h.symbol} className="border-t border-line first:border-t-0">
               <LinkRow href={`/research/${h.symbol}`}>
                 <span className="flex justify-between gap-3 t-sm"><span className="text-ink font-semibold">{h.symbol} <span className="t-xs font-normal">· {usd(h.value)} · {pctStr(h.weight)}</span></span><Pill small tone={planFunds.has(h.symbol) ? "gain" : "neutral"}>{planFunds.has(h.symbol) ? "Plan fund" : "Keep"}</Pill></span>
-                <span className="t-xs block">{planFunds.has(h.symbol) ? "New money goes here each month when it is furthest below its target." : "Not in the plan's targets: keep it, add nothing."}</span>
+                <span className="t-xs block">{planFunds.has(h.symbol) ? "A plan fund: Decisions says when new money should go here." : "Not one of the plan's funds: keep it unless you decide otherwise."}</span>
               </LinkRow>
             </li>
           ))}

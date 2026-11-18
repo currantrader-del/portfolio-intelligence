@@ -1,4 +1,5 @@
-import { reviewPosition } from "@/lib/decision/review";
+import { holdingAction } from "@/lib/decision/actions";
+import { loadDecisionFilings } from "@/lib/alerts/events";
 import { AGE_REMINDER_DAYS } from "@/lib/policy/limits";
 import Link from "next/link";
 import { createClient } from "@/lib/supabase/server";
@@ -35,6 +36,7 @@ export default async function PortfolioPage({ searchParams }: { searchParams: Pr
   const [schwab, schwabLast, schwabTrades] = await Promise.all([connection(sdb).catch(() => null), lastSync(sdb).catch(() => null), recentSchwabTrades(sdb, 8).catch(() => [])]);
   const sort: SortKey = sp.sort && sp.sort in SORTS ? (sp.sort as SortKey) : "value";
   const ws = await getWorkspace();
+  const filings = await loadDecisionFilings(ws).catch(() => new Map());
   const p = ws.portfolio;
   if (!p.holdings.length) {
     return (
@@ -147,12 +149,12 @@ export default async function PortfolioPage({ searchParams }: { searchParams: Pr
 
           {/* Phones */}
           <div className="list lg:hidden">
-            {first.map((h) => <HoldingRow key={h.symbol} h={h} name={name(h.symbol)} verb={isEtf(h.symbol) ? null : reviewPosition(ws, h.symbol)?.now.verb ?? null} />)}
+            {first.map((h) => <HoldingRow key={h.symbol} h={h} name={name(h.symbol)} verb={isEtf(h.symbol) ? null : holdingAction(ws, h.symbol, filings)?.now.verb ?? null} />)}
           </div>
           {rest.length > 0 && (
             <div className="lg:hidden border-t border-line">
               <Disclose summary={`Show ${rest.length} more`}>
-                <div className="list -mt-2">{rest.map((h) => <HoldingRow key={h.symbol} h={h} name={name(h.symbol)} verb={isEtf(h.symbol) ? null : reviewPosition(ws, h.symbol)?.now.verb ?? null} />)}</div>
+                <div className="list -mt-2">{rest.map((h) => <HoldingRow key={h.symbol} h={h} name={name(h.symbol)} verb={isEtf(h.symbol) ? null : holdingAction(ws, h.symbol, filings)?.now.verb ?? null} />)}</div>
               </Disclose>
             </div>
           )}
@@ -191,7 +193,7 @@ export default async function PortfolioPage({ searchParams }: { searchParams: Pr
                       </td>
                       <td className={`n ${toneOf(h.unrealized)}`}>{h.unrealized === null ? <span className="t-xs">basis unknown</span> : usd(h.unrealized)}</td>
                       <td>{cov ? <Pill small tone={cov.tone} dot={cov.dot} title={cov.detail}>{cov.label}</Pill> : <span className="t-xs">ETF</span>}</td>
-                      <td>{(() => { const n = isEtf(h.symbol) ? null : reviewPosition(ws, h.symbol)?.now; return n ? <Link href={`/decisions/review/${h.symbol}`} title={`${n.headline}${n.levels ? ` Levels: ${n.levels}` : ""}`} className="no-underline"><Pill small tone={n.verb === "Hold" ? "neutral" : "warn"}>{n.verb}</Pill></Link> : <span className="t-xs">—</span>; })()}</td>
+                      <td>{(() => { const n = holdingAction(ws, h.symbol, filings)?.now; return n ? <Link href={`/decisions/review/${h.symbol}`} title={`${n.headline}${n.levels ? ` Levels: ${n.levels}` : ""}`} className="no-underline"><Pill small tone={n.verb === "Hold" ? "neutral" : "warn"}>{n.verb}</Pill></Link> : <span className="t-xs">—</span>; })()}</td>
                     </tr>
                   );
                 })}
