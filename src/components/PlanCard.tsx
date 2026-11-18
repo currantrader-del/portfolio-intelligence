@@ -8,6 +8,9 @@ import { getHistory } from "@/lib/market/history";
 import { metricsOf, type Candidate, type RadarIdea } from "@/lib/radar/radar";
 import { parseConclusion } from "@/lib/research/valuation";
 import { usableVersion, type VersionRow } from "@/lib/research/records";
+import { loadDecisionFilings } from "@/lib/alerts/events";
+import { holdingActions } from "@/lib/decision/actions";
+import { currentDecisionFor } from "@/lib/decision/currentPortfolio";
 import type { Workspace } from "@/lib/workspace-core";
 
 async function loadPlan(db: SupabaseClient): Promise<TargetPlan> {
@@ -16,69 +19,82 @@ async function loadPlan(db: SupabaseClient): Promise<TargetPlan> {
 }
 
 const pct = (n: number) => `${(n * 100).toFixed(0)}%`;
+const range = (r: { low: number; high: number } | null) => (r ? `${pct(r.low)}–${pct(r.high)}` : null);
+const VERB_TONE = { "Buy more": "gain", Hold: "neutral", Trim: "warn", "Reassess first": "warn" } as const;
 /** How far back "no longer good" looks. */
 const DROPPED_DAYS = 120;
 
 /**
  * The home screen (2026-11-17, Brendan: "What's the plan? What's the goal? How do I get there? What am I waiting for?
  * What's some new opportunities to look at? What opportunities are no longer good and why?"): one card per question.
+ * 2026-11-18 audit: "How you get there" no longer carries written trades or dated transfers. It lists what the one
+ * decision engine says for each stock you own (the same list Stocks & funds shows) and the Decisions answer for cash.
  */
 export async function PlanCard({ db, ws }: { db: SupabaseClient; ws: Workspace }) {
   const plan = await loadPlan(db).catch(() => DEFAULT_PLAN);
-  const today = new Intl.DateTimeFormat("en-CA", { timeZone: "America/New_York" }).format(ws.now);
   const needQuotes = ws.research.filter((r) => buyLevelOf((r.current?.parsed as { action?: string } | null)?.action) && !ws.portfolio.holdings.some((h) => h.symbol === r.symbol)).map((r) => r.symbol);
-  const quotes = await getQuotes(needQuotes).catch(() => new Map());
+  const [quotes, filings] = await Promise.all([getQuotes(needQuotes).catch(() => new Map()), loadDecisionFilings(ws).catch(() => new Map())]);
   const prices = new Map([...quotes].map(([k, q]) => [k, q.price as number]));
-  const st = planStatus(plan, ws.portfolio, ws.research, prices, today);
+  const st = planStatus(plan, ws.portfolio, ws.research, prices, ws.policy);
+  const actions = holdingActions(ws, filings);
+  const toDo = actions.filter((a) => a.now.verb !== "Hold");
+  const holds = actions.filter((a) => a.now.verb === "Hold").map((a) => a.symbol);
+  const cash = (() => { try { return currentDecisionFor(ws, filings); } catch { return null; } })();
   const [lows, radar, dropped] = await Promise.all([
     findLows(plan, ws).catch(() => [] as Low[]),
     latestRadar(db).catch(() => null),
     findDropped(db, ws).catch(() => [] as Dropped[]),
   ]);
-  const steps = [...st.earlier, ...(st.next ? [st.next] : []), ...st.later];
   return (
     <>
       <Card labelledBy="goal-h" className="!gap-2">
-        <CardHead id="goal-h" cap="The goal" right={plan.docUrl ? <a href={plan.docUrl} target="_blank" rel="noreferrer" className="t-xs no-underline hover:text-ink">The full plan</a> : undefined} />
+        <CardHead id="goal-h" cap="The goal" right={plan.docUrl ? <a href={plan.docUrl} target="_blank" rel="noreferrer" className="t-xs no-underline hover:text-ink">The written plan</a> : undefined} />
         <p className="t-sm text-ink leading-snug">{plan.goal}</p>
         {st.warnings.map((w) => <p key={w} className="t-sm warn">{w}</p>)}
       </Card>
 
       <Card labelledBy="where-h" className="!gap-2">
-        <CardHead id="where-h" cap="Where you are" right={<span className="t-xs">mix now vs target</span>} />
-        <span className="t-xs">{st.account ?? "Investing account"} plus {usd(st.outside)} outside money = {usd(st.base)}</span>
-        {st.sleeves.map((s) => (
-          <div key={s.key} className="flex flex-col gap-1">
-            <div className="flex justify-between gap-3 t-sm">
-              <span className="text-ink">{s.label} <span className="t-xs">· {s.buy}</span></span>
-              <span className="num"><span className="text-ink">{pct(s.weight)}</span> <span className="t-xs">of {pct(s.target)}</span></span>
+        <CardHead id="where-h" cap="Where you are" right={<span className="t-xs">vs your approved ranges</span>} />
+        <span className="t-xs">Invested portfolio {usd(st.base)}, every account: {st.accounts.map((a) => `${a.name} ${usd(a.value)}`).join(", ")}. Weights and limits use this figure.</span>
+        {st.buckets.map((b) => {
+          const r = range(b.normal);
+          return (
+            <div key={b.bucket} className="flex flex-col gap-1">
+              <div className="flex justify-between gap-3 t-sm">
+                <span className="text-ink">{b.label}{b.buy ? <span className="t-xs"> · {b.buy}</span> : null}</span>
+                <span className="num"><span className="text-ink">{pct(b.weight)}</span> <span className="t-xs">{r ? `range ${r}` : "no range"}{b.hardMax !== null ? `, max ${pct(b.hardMax)}` : ""}</span></span>
+              </div>
+              <Bar value={b.weight} scale={Math.max(b.hardMax ?? b.normal?.high ?? b.weight, b.weight) * 1.15} markers={b.normal ? [b.normal.low, b.normal.high] : []} tone={b.status === "over_max" ? "loss" : b.status === "above" ? "warn" : "copper"} thin label={`${b.label} ${pct(b.weight)}`} />
+              <span className="t-xs">{!b.approved ? "No approved range for this group yet." : b.status === "below" ? "Below its range: information only, never a reason on its own to buy." : b.status === "above" ? "Above its normal range, under the maximum: add nothing here; no sale needed." : b.status === "over_max" ? "Above your approved maximum: a review, not an automatic sale." : "Within its range."}</span>
             </div>
-            <Bar value={s.weight} scale={Math.max(s.target, s.weight) * 1.15} markers={[s.target]} tone={s.key === "stocks" && s.weight > s.target ? "warn" : "copper"} thin label={`${s.label} ${pct(s.weight)} of ${pct(s.target)} target`} />
-            <span className="t-xs">{s.gap > 50 ? (s.key === "stocks" ? `Room for ${usd(s.gap)} more, only at buy levels` : `${usd(s.gap)} to add`) : s.gap < -50 ? `${usd(-s.gap)} over target: add nothing here` : "On target"}</span>
-          </div>
-        ))}
-        <span className="t-xs">Cash in {st.account ?? "the account"} {usd(st.cash)}, outside money {usd(st.outside)}{st.other > 0 ? `, other funds ${usd(st.other)} (keep, don't add)` : ""}. Acorns is left out.</span>
+          );
+        })}
+        <span className="t-xs">Cash you can invest now: {usd(st.spendable)}{st.account ? ` in ${st.account}` : ""}. Outside money: {usd(st.outside)}, available but not committed, and not counted in any weight until you transfer it. Everything together: {usd(st.potential)}.</span>
+        <span className="t-xs">Gain or loss on what you hold: {st.unrealized.amount >= 0 ? "+" : "−"}{usd(Math.abs(st.unrealized.amount))} (price vs what you paid, {st.unrealized.known} holdings{st.unrealized.unknown ? `; ${st.unrealized.unknown} without a cost basis are left out` : ""}). This is not your total return: deposits, cash and dividends are not in it.</span>
       </Card>
 
       <Card labelledBy="how-h" className="!gap-2">
-        <CardHead id="how-h" cap="How you get there" />
-        {st.next ? (
-          <div className="flex flex-col gap-1">
-            <span className="t-xs">Next step · {st.next.date === today ? "today" : shortDate(st.next.date)}</span>
-            <p className="text-ink font-semibold leading-snug">{st.next.text}</p>
-          </div>
-        ) : (
-          <div className="flex flex-col gap-1">
-            <span className="t-xs">Every month</span>
-            <p className="text-ink font-semibold leading-snug">{plan.routine[0]}</p>
+        <CardHead id="how-h" cap="What to do now" right={<span className="t-xs">same answer as Stocks & funds and Decisions</span>} />
+        {toDo.length ? (
+          <ul className="t-sm flex flex-col">
+            {toDo.map((a) => (
+              <li key={a.symbol} className="flex flex-col gap-0.5 py-1.5 border-t border-line first:border-t-0">
+                <span className="flex justify-between gap-3"><Link href={`/research/${a.symbol}`} className="no-underline text-ink font-semibold">{a.symbol}</Link><Pill small tone={VERB_TONE[a.now.verb]}>{a.now.verb}</Pill></span>
+                <span className="t-xs">{a.now.headline}</span>
+              </li>
+            ))}
+          </ul>
+        ) : <p className="t-sm">No stock you own needs a trade now.</p>}
+        {holds.length > 0 && <span className="t-xs">Hold: {holds.join(", ")}.</span>}
+        {cash && (
+          <div className="flex flex-col gap-0.5 border-t border-line pt-2">
+            <span className="t-xs">Cash and new money · <Link href="/decisions">Decisions</Link></span>
+            <p className="t-sm text-ink leading-snug">{cash.headline}</p>
           </div>
         )}
-        <Disclose summary={<span className="t-sm">All steps and the monthly routine</span>}>
-          <ol className="t-sm flex flex-col gap-1.5 list-decimal pl-5">
-            {steps.map((s) => <li key={s.date} className={s.date < today ? "opacity-60" : undefined}><span className="text-ink">{shortDate(s.date)}:</span> {s.text}</li>)}
-          </ol>
-          <ul className="t-xs flex flex-col gap-1 mt-2">{plan.routine.map((r) => <li key={r}>{r}</li>)}</ul>
-          <p className="t-xs mt-2">Rules: stocks at most {pct(plan.stocksMax)} in all and {pct(plan.singleMax)} each. You place every order and transfer yourself.</p>
+        <Disclose summary={<span className="t-sm">The monthly routine and the rules</span>}>
+          <ul className="t-xs flex flex-col gap-1">{plan.routine.map((r) => <li key={r}>{r}</li>)}</ul>
+          <p className="t-xs mt-2">Rules: the ranges and maximums above are the ones you approved (see Policy). A research trim level is a recommendation, not a policy limit. You place every order and transfer yourself.</p>
         </Disclose>
       </Card>
 
@@ -93,8 +109,8 @@ export async function PlanCard({ db, ws }: { db: SupabaseClient; ws: Workspace }
               </li>
             ))}
           </ul>
-        ) : <p className="t-sm">No researched stock has a buy level yet. Until one does, new money goes to the funds.</p>}
-        <span className="t-xs pt-1">When one reaches its level, read its page and decide on a $500-1,000 starter. Otherwise, do nothing.</span>
+        ) : <p className="t-sm">No researched stock has a buy level yet.</p>}
+        <span className="t-xs pt-1">When one reaches its level, read its page and Decisions before buying. Otherwise, do nothing.</span>
       </Card>
 
       <Card labelledBy="opp-h" className="!gap-1">
@@ -135,7 +151,7 @@ export async function PlanCard({ db, ws }: { db: SupabaseClient; ws: Workspace }
 /** Plan funds, watched broad funds and researched stocks, with their 52-week high (daily prices, cached an hour). */
 async function findLows(plan: TargetPlan, ws: Workspace): Promise<Low[]> {
   const researched = ws.research.filter((r) => r.current).map((r) => r.symbol);
-  const symbols = [...new Set([...plan.sleeves.map((s) => s.buy).filter((s) => /^[A-Z]{2,5}$/.test(s)), ...WATCH_FUNDS, ...researched])];
+  const symbols = [...new Set([...plan.funds.map((s) => s.buy).filter((s) => /^[A-Z]{2,5}$/.test(s)), ...WATCH_FUNDS, ...researched])];
   const highs = new Map<string, { price: number; high: number }>();
   await Promise.all(symbols.map(async (s) => {
     const h = await getHistory(s, "1y").catch(() => null);

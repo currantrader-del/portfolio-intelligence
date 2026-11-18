@@ -148,7 +148,9 @@ const r4 = (n: number | null | undefined) => (n === null || n === undefined ? nu
 export async function runTool(name: string, input: Record<string, unknown>, ws: Workspace, db: SupabaseClient): Promise<unknown> {
   const p = ws.portfolio;
   switch (name) {
-    case "get_portfolio":
+    case "get_portfolio": {
+      // The same filings every page passes to the decision engine, so the assistant explains the action the app shows.
+      const decisionFilings = await loadDecisionFilings(ws).catch(() => new Map());
       return {
         layer: "model_output",
         computed_at: ws.now.toISOString(),
@@ -173,14 +175,16 @@ export async function runTool(name: string, input: Record<string, unknown>, ws: 
         // The same position review Decisions shows: combined exposure, the levels kept apart, and trim/exit sizes that
         // keep fund exposure (proceeds stay as brokerage cash). Room under a limit is never a reason to add.
         company_exposure: p.exposures.map((e) => {
-          const rv = reviewPosition(ws, e.symbol);
+          const rv = reviewPosition(ws, e.symbol, decisionFilings.get(e.symbol) ?? null);
           return { symbol: e.symbol, direct: r4(e.direct), via_etfs: r4(e.viaEtfs), total: r4(e.total), max: e.max, limit_status: ws.policy?.companies[e.symbol]?.status ?? "none", limit_source: ws.policy?.companies[e.symbol]?.source ?? null, headroom_dollars: e.headroomDollars,
             levels: rv ? { normal: rv.levels.normal, research_review: rv.levels.researchReview, hard_max: rv.levels.hardMax, state: rv.levelState.text } : null,
+            action_now: rv ? { verb: rv.now.verb, headline: rv.now.headline, note: "The app's one action for this holding (Plan, Stocks & funds and its research page show the same). Explain it; do not replace it." } : null,
             review: rv ? { suggestion: rv.suggestion.label, reason: rv.suggestion.reason, options: rv.options.map((o) => ({ option: o.label, basis: o.basis, dollars: o.dollars, combined_after: r4(o.weightAfter), note: o.note })) } : null };
         }),
         denominator: "Every weight is of the invested portfolio (holdings plus cash in the investment accounts); savings are excluded.",
         lookthrough_weights_as_of: LOOKTHROUGH_AS_OF,
       };
+    }
     case "get_exposure": {
       const str = (k: string) => String(input[k] ?? "").trim();
       const dimension = str("dimension") || "all";

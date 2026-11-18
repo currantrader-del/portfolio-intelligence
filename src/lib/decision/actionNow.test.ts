@@ -71,7 +71,7 @@ describe("one plain action at today's price, with its levels", () => {
   it("above the research weight level: trim with the size", () => {
     const a = actionNow({ symbol: "NVDA", price: 175, research, unreadFiling: null, trim: { dollars: 96, toPct: 15, why: "above 15%." }, held: true });
     expect(a.verb).toBe("Trim");
-    expect(a.headline).toMatch(/^Trim about \$96 at \$175\.00/);
+    expect(a.headline).toMatch(/^Trim about \$96 \(less than one share\) at \$175\.00/);
   });
 
   it("no researched levels: says so, never invents one", () => {

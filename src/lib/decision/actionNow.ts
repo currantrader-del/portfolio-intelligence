@@ -37,7 +37,7 @@ export function actionNow(a: {
   /** A material filing since the research that it has not read (e.g. "8-K filed 2026-11-12"). */
   unreadFiling: string | null;
   /** The position is above the level the research or your limit says to trim back to. */
-  trim: { dollars: number; toPct: number; why: string } | null;
+  trim: { dollars: number; toPct: number; why: string; /** Your approved maximum, when one exists: shown so a research-level trim is never read as a policy breach. */ policyMaxPct?: number | null; overPolicyMax?: boolean } | null;
   held: boolean;
   now?: Date;
   /** Only preliminary research is on file: its bands are context, never buy or sell levels. */
@@ -70,7 +70,14 @@ export function actionNow(a: {
     };
   }
   if (a.trim && a.trim.dollars >= 1) {
-    return { verb: "Trim", headline: `Trim about $${Math.round(a.trim.dollars).toLocaleString("en-US")}${at}: ${a.trim.why}`, levels, zones: zoneRows, watch, ...pm };
+    // 2026-11-18 audit: the trim is about size, not price. Say so, with the price band and your approved maximum, so
+    // "Trim" beside a "Hold" price band and an 18% maximum with room left never reads as a contradiction.
+    const sh = price ? a.trim.dollars / price : null;
+    const shares = sh === null ? "" : sh < 1 ? " (less than one share)" : ` (about ${Math.round(sh)} share${Math.round(sh) === 1 ? "" : "s"})`;
+    const size = `Trim about $${Math.round(a.trim.dollars).toLocaleString("en-US")}${shares}${at}`;
+    const band = z && zoneKind(z.action) !== "trim" ? ` This is about size, not price: ${z.label} is the research's ${zoneKind(z.action) === "buy" ? "buy" : "hold"} range.` : "";
+    const policy = a.trim.policyMaxPct ? (a.trim.overPolicyMax ? ` It is also above your approved ${a.trim.policyMaxPct.toFixed(0)}% maximum, which calls for a review.` : ` Your approved ${a.trim.policyMaxPct.toFixed(0)}% maximum does not require it: the research recommends it, and the decision is yours.`) : "";
+    return { verb: "Trim", headline: `${size}: ${a.trim.why}${band}${policy}`, levels, zones: zoneRows, watch, ...pm };
   }
   if (!z) return { verb: "Hold", headline: `Hold${at}: the price is outside the levels ${research} set, so its plan doesn't cover this price. Reassess before acting.`, levels, zones: zoneRows, watch, ...pm };
 
