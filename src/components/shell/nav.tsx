@@ -7,7 +7,7 @@ export const SECTIONS = [
 
 /**
  * Less-used pages, in two groups: things you use, and setup (2026-11-17, "many tabs and views": the tabs are Plan,
- * Stocks & funds and Alerts; everything else is here). Trade ideas, Markets, briefs and the old AI portfolio plan
+ * Stocks & funds and Alerts; everything else is here; 2026-11-18: trade ideas added, they were hard to find). Markets, briefs and the old AI portfolio plan
  * are still reachable from their related pages.
  */
 export const MORE = [
@@ -16,6 +16,7 @@ export const MORE = [
   { href: "/decisions", label: "Decisions (check a buy)" },
   { href: "/risk", label: "Risk" },
   { href: "/radar", label: "Opportunity Radar" },
+  { href: "/trades", label: "Trade ideas (short-term)" },
   { href: "/assistant", label: "Your questions" },
   { href: "/costs", label: "30-day test and AI cost" },
 ] as const;
